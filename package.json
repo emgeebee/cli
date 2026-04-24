@@ -1,12 +1,17 @@
 {
-  "name": "phone_cli",
-  "version": "1.0.0",
+  "name": "@emgeebee/phone_cli",
+  "version": "1.0.2",
   "description": "Print a month view calendar in the terminal",
-  "main": "index.js",
+  "main": "cal.js",
   "bin": {
-    "phone-cal": "cal.js"
+    "phone_cli": "./cal.js",
+    "phone-cal": "./cal.js"
   },
+  "files": [
+    "cal.js"
+  ],
   "scripts": {
+    "phone-cal": "node cal.js",
     "cal": "node cal.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
