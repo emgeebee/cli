@@ -1,16 +1,18 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "1.0.2",
-  "description": "Print a month view calendar in the terminal",
-  "main": "cal.js",
+  "version": "2.0.0",
+  "description": "mats useful cli scripts",
+  "main": "ball.js",
   "bin": {
-    "phone_cli": "./cal.js",
-    "phone-cal": "./cal.js"
+    "ball": "./ball.js",
+    "cal": "./cal.js"
   },
   "files": [
+    "ball.js",
     "cal.js"
   ],
   "scripts": {
+    "ball": "node ball.js",
     "phone-cal": "node cal.js",
     "cal": "node cal.js",
     "test": "echo \"Error: no test specified\" && exit 1"
