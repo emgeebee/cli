@@ -102,13 +102,20 @@ const urlForTeamGames = (today, end, start, teamUrn) =>
 
 function usage() {
   console.log("Usage:");
-  console.log("  ball --day YYYY-MM-DD");
-  console.log("  ball --team TEAM");
+  console.log("  ball");
+  console.log("  ball YYYY-MM-DD");
+  console.log("  ball DD/MM");
+  console.log("  ball today|tomorrow|mon|tues|wed|thurs|fri|sat|sun");
+  console.log("  ball TEAM");
   console.log("");
   console.log("Examples:");
-  console.log("  ball --day 2026-04-25");
-  console.log("  ball --team liv");
-  console.log("  ball --team TFBB14");
+  console.log("  ball");
+  console.log("  ball 2026-04-25");
+  console.log("  ball 25/04");
+  console.log("  ball tomorrow");
+  console.log("  ball thu");
+  console.log("  ball liv");
+  console.log("  ball aston-villa");
 }
 
 function toYmd(date) {
@@ -124,6 +131,92 @@ function parseYmd(value) {
     return null;
   }
   return toYmd(d) === value ? d : null;
+}
+
+function parseDayMonthInput(value) {
+  const m = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$/.exec(String(value || ""));
+  if (!m) {
+    return null;
+  }
+  const day = Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10);
+  const year = m[3] ? Number.parseInt(m[3], 10) : null;
+  if (day < 1 || day > 31 || month < 1 || month > 12) {
+    return null;
+  }
+
+  const now = new Date();
+  const nowY = now.getFullYear();
+  const y = year || nowY;
+  const candidate = new Date(Date.UTC(y, month - 1, day));
+  if (
+    candidate.getUTCFullYear() !== y ||
+    candidate.getUTCMonth() !== month - 1 ||
+    candidate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  if (!year) {
+    const startOfTodayUtc = new Date(Date.UTC(nowY, now.getMonth(), now.getDate()));
+    if (candidate < startOfTodayUtc) {
+      const nextYear = new Date(Date.UTC(nowY + 1, month - 1, day));
+      if (
+        nextYear.getUTCMonth() === month - 1 &&
+        nextYear.getUTCDate() === day
+      ) {
+        return nextYear;
+      }
+    }
+  }
+
+  return candidate;
+}
+
+function parseRelativeDayInput(value) {
+  const v = String(value || "").trim().toLowerCase();
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+
+  if (v === "today") {
+    return today;
+  }
+  if (v === "tomorrow") {
+    return new Date(today.getTime() + DAY_MS);
+  }
+
+  const weekdayMap = {
+    sun: 0,
+    sunday: 0,
+    mon: 1,
+    monday: 1,
+    tue: 2,
+    tues: 2,
+    tuesday: 2,
+    wed: 3,
+    weds: 3,
+    wednesday: 3,
+    thu: 4,
+    thur: 4,
+    thurs: 4,
+    thursday: 4,
+    fri: 5,
+    friday: 5,
+    sat: 6,
+    saturday: 6,
+  };
+
+  if (weekdayMap[v] == null) {
+    return null;
+  }
+
+  const targetDow = weekdayMap[v];
+  const currentDow = today.getUTCDay();
+  let delta = (targetDow - currentDow + 7) % 7;
+  if (delta === 0) {
+    delta = 7;
+  }
+  return new Date(today.getTime() + delta * DAY_MS);
 }
 
 function formatFixtureDate(isoDateTime) {
@@ -323,9 +416,9 @@ function printGroupedFixtures(events, heading, options = {}) {
     const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
     const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
     if (aRank !== bRank) {
-      return aRank - bRank;
+      return bRank - aRank;
     }
-    return a.localeCompare(b);
+    return b.localeCompare(a);
   });
 
   for (const [competition, list] of sortedGroups) {
@@ -504,48 +597,33 @@ async function fetchMatchData(url, dayYmd) {
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  let day;
-  let team;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--help" || arg === "-h") {
-      return { help: true };
-    }
-    if (arg === "--day") {
-      day = args[i + 1] || true;
-      i++;
-      continue;
-    }
-    if (arg === "--team") {
-      team = args[i + 1];
-      i++;
-      continue;
-    }
-    throw new Error(`Unknown argument: ${arg}`);
+  if (args[0] === "--help" || args[0] === "-h") {
+    return { help: true };
   }
 
-  if (!day && !team) {
-    throw new Error("Provide either --day or --team.");
-  }
-  if (day && team) {
-    throw new Error("Use either --day or --team, not both.");
+  if (args.length === 0) {
+    return { day: toYmd(new Date()) };
   }
 
-  if (day) {
-    const parsed = parseYmd(day);
-    if (!parsed) {
-      return { day: toYmd(new Date()) };
+  if (args.length > 1) {
+    throw new Error("Pass either a date (YYYY-MM-DD) or a single team value.");
+  }
+
+  const input = args[0];
+  const dayParsers = [parseRelativeDayInput, parseYmd, parseDayMonthInput];
+  for (const parser of dayParsers) {
+    const parsed = parser(input);
+    if (parsed) {
+      return { day: toYmd(parsed) };
     }
-    return { day: toYmd(parsed) };
   }
 
-  const normalizedTeam = String(team || "").toLowerCase();
+  const normalizedTeam = String(input || "").toLowerCase();
   const teamQueryBase = normalizedTeam.startsWith("tfbb")
     ? TEAM_KEY_TO_SHORT[normalizedTeam.toUpperCase()] || normalizedTeam
     : normalizedTeam;
   const teamQuery = TEAM_QUERY_ALIASES[teamQueryBase] || teamQueryBase;
-  return { teamQuery, teamInput: team, teamUrn: teamUrnFromQuery(teamQuery) };
+  return { teamQuery, teamInput: input, teamUrn: teamUrnFromQuery(teamQuery) };
 }
 
 async function fixturesForDay(dayYmd) {
