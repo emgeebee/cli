@@ -143,7 +143,9 @@ function formatFixtureDate(isoDateTime) {
     month: "2-digit",
     timeZone: "Europe/London",
   });
-  return `${weekday.toLowerCase()} ${day}/${month}`;
+  const dayName =
+    weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
+  return `${dayName} ${day}/${month}`;
 }
 
 function eventTime(event) {
