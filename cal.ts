@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Print a month calendar to the terminal (similar to the `cal` command).
- * Usage: node cal.js              → this month and the next 2 months
- *        node cal.js [month] [year]  → single month
+ * Usage: node cal.js                 -> this month and the next 2 months
+ *        node cal.js [month] [year] -> single month
  */
 
 const MONTH_NAMES = [
@@ -16,50 +16,52 @@ const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const REVERSE = "\x1b[7m";
 
-function shouldStyleHighlight() {
-  return process.stdout.isTTY && !process.env.NO_COLOR;
+type MonthDef = { year: number; month: number };
+
+function shouldStyleHighlight(): boolean {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
 
-function nextThreeMonthsFrom(now) {
+function nextThreeMonthsFrom(now: Date): MonthDef[] {
   return [0, 1, 2].map((offset) => {
     const t = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     return { year: t.getFullYear(), month: t.getMonth() };
   });
 }
 
-function parseArgs() {
+function parseArgs(): { months: MonthDef[] } {
   const rest = process.argv.slice(2).filter((a) => a !== "" && a !== "-");
   if (rest.length === 0) {
     return { months: nextThreeMonthsFrom(new Date()) };
   }
   if (rest.length < 2) {
     console.error("Usage: node cal.js [month] [year]");
-    console.error("  month: 1–12, year: e.g. 2026");
+    console.error("  month: 1-12, year: e.g. 2026");
     process.exit(1);
   }
   const month = Number.parseInt(rest[0], 10) - 1;
   const year = Number.parseInt(rest[1], 10);
   if (Number.isNaN(month) || month < 0 || month > 11) {
-    console.error("Month must be 1–12.");
+    console.error("Month must be 1-12.");
     process.exit(1);
   }
   if (Number.isNaN(year) || year < 1 || year > 9999) {
-    console.error("Year must be a valid number (1–9999).");
+    console.error("Year must be a valid number (1-9999).");
     process.exit(1);
   }
   return { months: [{ year, month }] };
 }
 
-function daysInMonth(year, month) {
+function daysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
 }
 
-/** Returns 0=Sunday … 6=Saturday for the first day of the month. */
-function firstDayOfMonth(year, month) {
+/** Returns 0=Sunday .. 6=Saturday for the first day of the month. */
+function firstDayOfMonth(year: number, month: number): number {
   return new Date(year, month, 1).getDay();
 }
 
-function cellText(day, highlightDay) {
+function cellText(day: number | null, highlightDay: number | null): string {
   if (day == null) {
     return "  ";
   }
@@ -70,11 +72,11 @@ function cellText(day, highlightDay) {
   return text;
 }
 
-function padLine(cells, highlightDay) {
+function padLine(cells: Array<number | null>, highlightDay: number | null): string {
   return cells.map((n) => cellText(n, highlightDay)).join(" ");
 }
 
-function buildCalendarLines(year, month, today) {
+function buildCalendarLines(year: number, month: number, today: Date): string[] {
   const highlightDay =
     today.getFullYear() === year && today.getMonth() === month
       ? today.getDate()
@@ -83,9 +85,9 @@ function buildCalendarLines(year, month, today) {
   const title = `    ${MONTH_NAMES[month]} ${year}    `;
   const lastDay = daysInMonth(year, month);
   const startPad = firstDayOfMonth(year, month);
-  const lines = [title, DAY_HEADERS];
+  const lines: string[] = [title, DAY_HEADERS];
 
-  let row = [];
+  let row: Array<number | null> = [];
   for (let i = 0; i < startPad; i++) {
     row.push(null);
   }
@@ -117,3 +119,5 @@ for (let i = 0; i < months.length; i++) {
     console.log(line);
   }
 }
+
+export {};

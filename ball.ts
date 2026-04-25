@@ -1,61 +1,129 @@
 #!/usr/bin/env node
 
-const TEAM_KEY_TO_SHORT = {
-  TFBB1: "manu",
-  TFBB2: "lee",
-  TFBB3: "ars",
-  TFBB4: "newc",
-  TFBB5: "bburn",
-  TFBB6: "tott",
-  TFBB7: "avfc",
-  TFBB8: "che",
-  TFBB11: "eve",
-  TFBB13: "lei",
-  TFBB14: "liv",
-  TFBB17: "nott",
-  TFBB19: "shew",
-  TFBB20: "sou",
-  TFBB21: "whu",
-  TFBB24: "der",
-  TFBB25: "mbor",
-  TFBB31: "cryp",
-  TFBB33: "char",
-  TFBB35: "wba",
-  TFBB36: "bri",
-  TFBB37: "barn",
-  TFBB39: "wol",
-  TFBB41: "bham",
-  TFBB43: "manc",
-  TFBB45: "norw",
-  TFBB49: "shu",
-  TFBB52: "qpr",
-  TFBB54: "ful",
-  TFBB57: "wat",
-  TFBB80: "swan",
-  TFBB88: "null",
-  TFBB90: "burn",
-  TFBB91: "bour",
-  TFBB94: "bren",
-  TFBB97: "card",
-  TFBB102: "lut",
-  TFBB103: "mill",
-  TFBB107: "pres",
-  TFBB108: "read",
-  TFBB110: "sto",
-  TFBB111: "wig",
-  TFBB113: "bric",
+import { fetchBbcJson, toYmd } from "./bbc";
+
+type JsonRecord = Record<string, unknown>;
+type FixtureOptions = {
+  includeDate?: boolean;
+  showCompetitionTag?: boolean;
+  emptyMessage?: string;
+};
+type ParseResult =
+  | { help: true }
+  | { day: string }
+  | { teamQuery: string; teamInput: string; teamUrn: string };
+
+type ScoreValue = string | number | null | undefined;
+
+type ApiScoreContainer = {
+  score?: ScoreValue;
+  aggregate?: ScoreValue;
 };
 
-const SHORT_TO_TEAM_KEY = Object.entries(TEAM_KEY_TO_SHORT).reduce(
-  (acc, [k, v]) => {
-    acc[v] = k;
-    return acc;
-  },
-  {},
-);
+type ApiTeamName = {
+  abbreviation?: string;
+  shortName?: string;
+  fullName?: string;
+};
+
+type ApiTeam = {
+  id?: string;
+  key?: string;
+  urn?: string;
+  shortName?: string;
+  fullName?: string;
+  name?: ApiTeamName;
+  scores?: ApiScoreContainer;
+  runningScores?: ApiScoreContainer;
+  score?: ScoreValue;
+};
+
+type ApiParticipant = {
+  alignment?: string;
+  score?: ScoreValue;
+  runningScore?: ScoreValue;
+  aggregateScore?: ScoreValue;
+  name?: ApiTeamName;
+};
+
+type ApiTournament = {
+  id?: string;
+  name?: string;
+  disambiguatedName?: string;
+  urn?: string;
+};
+
+type ApiStatusLabel = {
+  value?: string;
+  accessible?: string;
+};
+
+type ApiEvent = {
+  home?: ApiTeam;
+  away?: ApiTeam;
+  homeTeam?: ApiTeam;
+  awayTeam?: ApiTeam;
+  startTime?: string;
+  startDateTime?: string;
+  status?: string;
+  statusText?: string;
+  eventStatusNote?: string;
+  statusComment?: ApiStatusLabel;
+  periodLabel?: ApiStatusLabel;
+  participants?: ApiParticipant[];
+  tournament?: ApiTournament;
+  eventGroupingLabel?: string;
+};
+
+type ApiSecondaryGroup = {
+  displayLabel?: string | null;
+  events?: ApiEvent[];
+};
+
+type ApiEventGroup = {
+  displayLabel?: string | null;
+  secondaryGroups?: ApiSecondaryGroup[];
+};
+
+type ApiLegacyDateBucket = {
+  events?: ApiEvent[];
+};
+
+type ApiLegacyTournament = {
+  tournamentDatesWithEvents?: Record<string, ApiLegacyDateBucket[]>;
+};
+
+type ApiPayloadEntry = {
+  body?: {
+    matchData?: ApiLegacyTournament[];
+  };
+};
+
+type ApiResponse = {
+  payload?: ApiPayloadEntry[];
+  eventGroups?: ApiEventGroup[];
+};
+
+type NormalizedTeam = ApiTeam & {
+  key: string;
+  urn: string;
+  name: {
+    abbreviation: string;
+    shortName: string;
+    fullName: string;
+  };
+};
+
+type NormalizedEvent = ApiEvent & {
+  startTime: string;
+  eventStatusNote: string;
+  homeTeam: NormalizedTeam;
+  awayTeam: NormalizedTeam;
+  participants: ApiParticipant[];
+};
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const TEAM_QUERY_ALIASES = {
+const TEAM_QUERY_ALIASES: Record<string, string> = {
   avfc: "aston-villa",
 };
 const COMPETITION_ALLOWLIST = new Set([
@@ -67,7 +135,6 @@ const COMPETITION_ALLOWLIST = new Set([
   "championsleague",
   "europaleague",
   "scottishpremiership",
-  // Common BBC naming/slugs.
   "englishpremierleague",
   "englishchampionship",
   "englishleagueone",
@@ -94,35 +161,27 @@ const ANSI_DARK_RED = "\x1b[31m";
 const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 
-const urlForDaysGames = (today, end, start) =>
+const urlForDaysGames = (today: string, end: string, start: string): string =>
   `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent("urn:bbc:sportsdata:football:tournament-collection:collated")}`;
 
-const urlForTeamGames = (today, end, start, teamUrn) =>
+const urlForTeamGames = (
+  today: string,
+  end: string,
+  start: string,
+  teamUrn: string,
+): string =>
   `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent(teamUrn)}`;
 
-function usage() {
+function usage(): void {
   console.log("Usage:");
   console.log("  ball");
   console.log("  ball YYYY-MM-DD");
   console.log("  ball DD/MM");
   console.log("  ball today|tomorrow|mon|tues|wed|thurs|fri|sat|sun");
   console.log("  ball TEAM");
-  console.log("");
-  console.log("Examples:");
-  console.log("  ball");
-  console.log("  ball 2026-04-25");
-  console.log("  ball 25/04");
-  console.log("  ball tomorrow");
-  console.log("  ball thu");
-  console.log("  ball liv");
-  console.log("  ball aston-villa");
 }
 
-function toYmd(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function parseYmd(value) {
+function parseYmd(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return null;
   }
@@ -133,7 +192,7 @@ function parseYmd(value) {
   return toYmd(d) === value ? d : null;
 }
 
-function parseDayMonthInput(value) {
+function parseDayMonthInput(value: string): Date | null {
   const m = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$/.exec(String(value || ""));
   if (!m) {
     return null;
@@ -161,95 +220,57 @@ function parseDayMonthInput(value) {
     const startOfTodayUtc = new Date(Date.UTC(nowY, now.getMonth(), now.getDate()));
     if (candidate < startOfTodayUtc) {
       const nextYear = new Date(Date.UTC(nowY + 1, month - 1, day));
-      if (
-        nextYear.getUTCMonth() === month - 1 &&
-        nextYear.getUTCDate() === day
-      ) {
+      if (nextYear.getUTCMonth() === month - 1 && nextYear.getUTCDate() === day) {
         return nextYear;
       }
     }
   }
-
   return candidate;
 }
 
-function parseRelativeDayInput(value) {
+function parseRelativeDayInput(value: string): Date | null {
   const v = String(value || "").trim().toLowerCase();
   const now = new Date();
   const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 
-  if (v === "today") {
-    return today;
-  }
-  if (v === "tomorrow") {
-    return new Date(today.getTime() + DAY_MS);
-  }
+  if (v === "today") return today;
+  if (v === "tomorrow") return new Date(today.getTime() + DAY_MS);
 
-  const weekdayMap = {
-    sun: 0,
-    sunday: 0,
-    mon: 1,
-    monday: 1,
-    tue: 2,
-    tues: 2,
-    tuesday: 2,
-    wed: 3,
-    weds: 3,
-    wednesday: 3,
-    thu: 4,
-    thur: 4,
-    thurs: 4,
-    thursday: 4,
-    fri: 5,
-    friday: 5,
-    sat: 6,
-    saturday: 6,
+  const weekdayMap: Record<string, number> = {
+    sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2,
+    wed: 3, weds: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4,
+    fri: 5, friday: 5, sat: 6, saturday: 6,
   };
 
-  if (weekdayMap[v] == null) {
-    return null;
-  }
+  if (weekdayMap[v] == null) return null;
 
   const targetDow = weekdayMap[v];
   const currentDow = today.getUTCDay();
   let delta = (targetDow - currentDow + 7) % 7;
-  if (delta === 0) {
-    delta = 7;
-  }
+  if (delta === 0) delta = 7;
   return new Date(today.getTime() + delta * DAY_MS);
 }
 
-function formatFixtureDate(isoDateTime) {
+function formatFixtureDate(isoDateTime: string): string {
   const d = new Date(isoDateTime);
-  if (Number.isNaN(d.getTime())) {
-    return "unknown-date";
-  }
+  if (Number.isNaN(d.getTime())) return "unknown-date";
+
   const weekday = d.toLocaleDateString("en-GB", {
     weekday: "short",
     timeZone: "Europe/London",
   });
-  const day = d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    timeZone: "Europe/London",
-  });
-  const month = d.toLocaleDateString("en-GB", {
-    month: "2-digit",
-    timeZone: "Europe/London",
-  });
-  const dayName =
-    weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
+  const day = d.toLocaleDateString("en-GB", { day: "2-digit", timeZone: "Europe/London" });
+  const month = d.toLocaleDateString("en-GB", { month: "2-digit", timeZone: "Europe/London" });
+  const dayName = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
   return `${dayName} ${day}/${month}`;
 }
 
-function eventTime(event) {
+function eventTime(event: ApiEvent): string {
   const dateValue = event.startTime || event.startDateTime;
-  if (!dateValue) {
-    return "??:?? UK";
-  }
+  if (!dateValue) return "??:?? UK";
   const d = new Date(dateValue);
-  if (Number.isNaN(d.getTime())) {
-    return "??:?? UK";
-  }
+  if (Number.isNaN(d.getTime())) return "??:?? UK";
+
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/London",
     hour: "2-digit",
@@ -263,32 +284,32 @@ function eventTime(event) {
   return `${hh}:${mm} ${tz}`;
 }
 
-function teamLabel(team) {
+function teamLabel(team: ApiTeam | undefined): string {
   return (
-    TEAM_KEY_TO_SHORT[team.key] ||
-    team.name?.abbreviation ||
-    team.name?.shortName ||
-    team.shortName ||
-    team.name?.fullName ||
-    team.fullName ||
-    team.key
+    team?.name?.shortName ||
+    team?.shortName ||
+    team?.name?.abbreviation ||
+    team?.name?.fullName ||
+    team?.fullName ||
+    team?.key ||
+    "unknown-team"
   );
 }
 
-function competitionLabel(event) {
+function competitionLabel(event: ApiEvent): string {
   return (
-    event.tournament?.disambiguatedName ||
-    event.tournament?.name ||
-    event.eventGroupingLabel ||
+    event?.tournament?.disambiguatedName ||
+    event?.tournament?.name ||
+    event?.eventGroupingLabel ||
     "Other"
   );
 }
 
-function competitionAllowed(event) {
+function competitionAllowed(event: ApiEvent): boolean {
   const candidates = [
-    event.tournament?.disambiguatedName,
-    event.tournament?.name,
-    urnSlug(event.tournament?.urn),
+    event?.tournament?.disambiguatedName,
+    event?.tournament?.name,
+    urnSlug(event?.tournament?.urn),
   ]
     .filter(Boolean)
     .map(normalizeText);
@@ -296,33 +317,24 @@ function competitionAllowed(event) {
   return candidates.some((candidate) => COMPETITION_ALLOWLIST.has(candidate));
 }
 
-function teamScore(team, event) {
-  const direct =
-    team?.scores?.score ?? team?.runningScores?.score ?? team?.score ?? null;
-  if (direct != null) {
-    return String(direct);
-  }
+function teamScore(team: ApiTeam | undefined, event: NormalizedEvent): string | null {
+  const direct = team?.scores?.score ?? team?.runningScores?.score ?? team?.score ?? null;
+  if (direct != null) return String(direct);
   const participant = (event.participants || []).find((p) => {
     return p.alignment === (team === event.homeTeam ? "home" : "away");
   });
-  const participantScore =
-    participant?.score ?? participant?.runningScore ?? null;
+  const participantScore = participant?.score ?? participant?.runningScore ?? null;
   return participantScore != null ? String(participantScore) : null;
 }
 
-function isResultState(event) {
+function isResultState(event: ApiEvent): boolean {
   const status = String(event.status || "").toLowerCase();
-  if (!status) {
-    return false;
-  }
-  return status !== "preevent";
+  return Boolean(status) && status !== "preevent";
 }
 
-function isFinishedState(event) {
+function isFinishedState(event: ApiEvent): boolean {
   const status = String(event.status || "").toLowerCase();
-  if (status === "postevent") {
-    return true;
-  }
+  if (status === "postevent") return true;
   const note = String(event.eventStatusNote || "").toLowerCase();
   return (
     note === "ft" ||
@@ -333,32 +345,24 @@ function isFinishedState(event) {
   );
 }
 
-function shouldUseColor() {
-  return process.stdout.isTTY && !process.env.NO_COLOR;
+function shouldUseColor(): boolean {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
 
-function scoreNumber(score) {
-  if (score == null) {
-    return null;
-  }
+function scoreNumber(score: string | null): number | null {
+  if (score == null) return null;
   const parsed = Number.parseInt(String(score), 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function colorTeamName(name, role, isLive) {
-  if (!shouldUseColor()) {
-    return name;
-  }
-  if (role === "win") {
-    return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET}`;
-  }
-  if (role === "loss") {
-    return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET}`;
-  }
+function colorTeamName(name: string, role: "win" | "loss" | "draw", isLive: boolean): string {
+  if (!shouldUseColor()) return name;
+  if (role === "win") return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET}`;
+  if (role === "loss") return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET}`;
   return name;
 }
 
-function fixtureLine(event, options = {}) {
+function fixtureLine(event: NormalizedEvent, options: FixtureOptions = {}): string {
   const home = teamLabel(event.homeTeam);
   const away = teamLabel(event.awayTeam);
   const statusLabel = event.eventStatusNote || event.statusText || "scheduled";
@@ -371,9 +375,7 @@ function fixtureLine(event, options = {}) {
   const datePrefix = includeDate
     ? `${formatFixtureDate(event.startTime || event.startDateTime)} `
     : "";
-  const suffix = showCompetitionTag
-    ? `(${competitionTag})`
-    : `(${statusLabel})`;
+  const suffix = showCompetitionTag ? `(${competitionTag})` : `(${statusLabel})`;
 
   if (isResultState(event) && hasScore) {
     const homeN = scoreNumber(homeScore);
@@ -390,39 +392,35 @@ function fixtureLine(event, options = {}) {
   return `${datePrefix}${eventTime(event)} ${home} vs ${away} ${suffix}`;
 }
 
-function printGroupedFixtures(events, heading, options = {}) {
+function printGroupedFixtures(
+  events: NormalizedEvent[],
+  heading: string,
+  options: FixtureOptions = {},
+): void {
   console.log(heading);
   if (events.length === 0) {
     console.log(options.emptyMessage || "No fixtures.");
     return;
   }
 
-  const groups = new Map();
+  const groups = new Map<string, NormalizedEvent[]>();
   for (const event of events) {
     const key = competitionLabel(event);
-    if (!groups.has(key)) {
-      groups.set(key, []);
-    }
-    groups.get(key).push(event);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(event);
   }
 
   const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
-    const ai = COMPETITION_ORDER.findIndex(
-      (name) => normalizeText(name) === normalizeText(a),
-    );
-    const bi = COMPETITION_ORDER.findIndex(
-      (name) => normalizeText(name) === normalizeText(b),
-    );
+    const ai = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a));
+    const bi = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b));
     const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
     const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
-    if (aRank !== bRank) {
-      return bRank - aRank;
-    }
+    if (aRank !== bRank) return bRank - aRank;
     return b.localeCompare(a);
   });
 
   for (const [competition, list] of sortedGroups) {
-    list.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    list.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     console.log("");
     console.log(`${competition}`);
     for (const event of list) {
@@ -431,27 +429,31 @@ function printGroupedFixtures(events, heading, options = {}) {
   }
 }
 
-function printFlatFixtures(events, heading, options = {}) {
+function printFlatFixtures(
+  events: NormalizedEvent[],
+  heading: string,
+  options: FixtureOptions = {},
+): void {
   console.log(heading);
   if (events.length === 0) {
     console.log(options.emptyMessage || "No fixtures.");
     return;
   }
   const sorted = [...events].sort(
-    (a, b) => new Date(a.startTime) - new Date(b.startTime),
+    (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
   );
   for (const event of sorted) {
     console.log(`- ${fixtureLine(event, options)}`);
   }
 }
 
-function normalizeText(value) {
+function normalizeText(value: unknown): string {
   return String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
 }
 
-function slugifyTeam(value) {
+function slugifyTeam(value: unknown): string {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -459,7 +461,7 @@ function slugifyTeam(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-function teamUrnFromQuery(query) {
+function teamUrnFromQuery(query: string): string {
   if (String(query || "").startsWith("urn:bbc:sportsdata:football:team:")) {
     return query;
   }
@@ -467,35 +469,31 @@ function teamUrnFromQuery(query) {
   return `urn:bbc:sportsdata:football:team:${slug}`;
 }
 
-function urnSlug(urn) {
-  if (!urn) {
-    return "";
-  }
+function urnSlug(urn: unknown): string {
+  if (!urn) return "";
   const parts = String(urn).split(":");
   return parts[parts.length - 1] || "";
 }
 
-function normalizeEvent(raw) {
+function normalizeEvent(raw: ApiEvent): NormalizedEvent {
   const home = raw.homeTeam || raw.home;
   const away = raw.awayTeam || raw.away;
   return {
     ...raw,
-    startTime: raw.startTime || raw.startDateTime,
+    startTime: raw.startTime || raw.startDateTime || "",
     eventStatusNote:
       raw.eventStatusNote ||
       raw.statusComment?.value ||
       raw.periodLabel?.value ||
       raw.status ||
-      raw.statusText,
+      raw.statusText ||
+      "",
     homeTeam: {
       ...home,
       key: home?.key || home?.id || home?.urn || "",
       name: {
         abbreviation:
-          home?.name?.abbreviation ||
-          home?.name?.shortName ||
-          home?.shortName ||
-          home?.fullName,
+          home?.name?.abbreviation || home?.name?.shortName || home?.shortName || home?.fullName || "",
         shortName: home?.name?.shortName || home?.shortName || "",
         fullName: home?.name?.fullName || home?.fullName || "",
       },
@@ -505,21 +503,18 @@ function normalizeEvent(raw) {
       ...away,
       key: away?.key || away?.id || away?.urn || "",
       name: {
-        abbreviation:
-          away?.name?.abbreviation ||
-          away?.name?.shortName ||
-          away?.shortName ||
-          away?.fullName,
+        abbreviation: away?.name?.abbreviation || away?.name?.shortName || away?.shortName || away?.fullName,
         shortName: away?.name?.shortName || away?.shortName || "",
         fullName: away?.name?.fullName || away?.fullName || "",
       },
       urn: away?.urn || "",
     },
+    participants: raw.participants || [],
   };
 }
 
-function flattenEvents(matchData) {
-  const events = [];
+function flattenEvents(matchData: ApiLegacyTournament[]): NormalizedEvent[] {
+  const events: NormalizedEvent[] = [];
   for (const tournament of matchData || []) {
     const dateMap = tournament.tournamentDatesWithEvents || {};
     for (const slotList of Object.values(dateMap)) {
@@ -530,35 +525,27 @@ function flattenEvents(matchData) {
       }
     }
   }
-  events.sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   return events;
 }
 
-function flattenEventsFromContainer(root) {
-  const events = [];
-  const stack = [root];
+function flattenEventsFromContainer(root: unknown): NormalizedEvent[] {
+  const events: NormalizedEvent[] = [];
+  const stack: unknown[] = [root];
   while (stack.length > 0) {
     const node = stack.pop();
     if (Array.isArray(node)) {
-      for (const item of node) {
-        stack.push(item);
-      }
+      for (const item of node) stack.push(item);
       continue;
     }
-    if (!node || typeof node !== "object") {
-      continue;
+    if (!node || typeof node !== "object") continue;
+    const n = node as JsonRecord;
+
+    if ((n.home || n.homeTeam) && (n.away || n.awayTeam) && (n.startTime || n.startDateTime)) {
+      events.push(normalizeEvent(n as ApiEvent));
     }
 
-    // Handle event objects directly in the wc-data payload.
-    if (
-      (node.home || node.homeTeam) &&
-      (node.away || node.awayTeam) &&
-      (node.startTime || node.startDateTime)
-    ) {
-      events.push(normalizeEvent(node));
-    }
-
-    for (const value of Object.values(node)) {
+    for (const value of Object.values(n)) {
       if (value && typeof value === "object") {
         stack.push(value);
       }
@@ -566,36 +553,21 @@ function flattenEventsFromContainer(root) {
   }
   events.sort(
     (a, b) =>
-      new Date(a.startTime || a.startDateTime) -
-      new Date(b.startTime || b.startDateTime),
+      new Date(a.startTime || a.startDateTime).getTime() -
+      new Date(b.startTime || b.startDateTime).getTime(),
   );
   return events;
 }
 
-async function fetchMatchData(url, dayYmd) {
+async function fetchMatchData(url: string, dayYmd?: string): Promise<NormalizedEvent[]> {
   const refDate = dayYmd || toYmd(new Date());
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      Priority: "u=1, i",
-      Referer: `https://www.bbc.co.uk/sport/football/scores-fixtures/${refDate}`,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`API request failed (${response.status})`);
-  }
-  const data = await response.json();
+  const data = await fetchBbcJson<ApiResponse>(url, refDate, "football");
   const batchShape = data?.payload?.[0]?.body?.matchData;
-  if (batchShape) {
-    return flattenEvents(batchShape);
-  }
+  if (batchShape) return flattenEvents(batchShape);
   return flattenEventsFromContainer(data);
 }
 
-function parseArgs(argv) {
+function parseArgs(argv: string[]): ParseResult {
   const args = argv.slice(2);
   if (args[0] === "--help" || args[0] === "-h") {
     return { help: true };
@@ -610,68 +582,26 @@ function parseArgs(argv) {
   }
 
   const input = args[0];
-  const dayParsers = [parseRelativeDayInput, parseYmd, parseDayMonthInput];
+  const dayParsers: Array<(value: string) => Date | null> = [parseRelativeDayInput, parseYmd, parseDayMonthInput];
   for (const parser of dayParsers) {
     const parsed = parser(input);
-    if (parsed) {
-      return { day: toYmd(parsed) };
-    }
+    if (parsed) return { day: toYmd(parsed) };
   }
 
   const normalizedTeam = String(input || "").toLowerCase();
-  const teamQueryBase = normalizedTeam.startsWith("tfbb")
-    ? TEAM_KEY_TO_SHORT[normalizedTeam.toUpperCase()] || normalizedTeam
-    : normalizedTeam;
+  const teamQueryBase = normalizedTeam;
   const teamQuery = TEAM_QUERY_ALIASES[teamQueryBase] || teamQueryBase;
   return { teamQuery, teamInput: input, teamUrn: teamUrnFromQuery(teamQuery) };
 }
 
-async function fixturesForDay(dayYmd) {
+async function fixturesForDay(dayYmd: string): Promise<void> {
   const today = toYmd(new Date());
   const url = urlForDaysGames(today, dayYmd, dayYmd);
   const events = (await fetchMatchData(url, dayYmd)).filter(competitionAllowed);
-
   printGroupedFixtures(events, `Fixtures for ${dayYmd}`);
 }
 
-function teamMatchesQuery(team, query) {
-  const normalizedQuery = normalizeText(query);
-  if (!normalizedQuery) {
-    return false;
-  }
-  const rawCandidates = [
-    team?.key,
-    team?.urn,
-    urnSlug(team?.urn),
-    team?.name?.abbreviation,
-    team?.name?.shortName,
-    team?.name?.fullName,
-    team?.shortName,
-    team?.fullName,
-  ].filter(Boolean);
-  const candidates = rawCandidates.map(normalizeText).filter(Boolean);
-  const tokenSet = new Set();
-  for (const raw of rawCandidates) {
-    String(raw)
-      .toLowerCase()
-      .split(/[^a-z0-9]+/g)
-      .filter(Boolean)
-      .forEach((t) => tokenSet.add(t));
-  }
-
-  if (normalizedQuery.length <= 3) {
-    // Short inputs like "liv" should be precise, not substring fuzzy.
-    return tokenSet.has(normalizedQuery);
-  }
-
-  return candidates.some(
-    (candidate) =>
-      candidate.includes(normalizedQuery) ||
-      normalizedQuery.includes(candidate),
-  );
-}
-
-async function futureFixturesForTeam(teamQuery, teamInput, teamUrn) {
+async function futureFixturesForTeam(teamQuery: string, teamInput: string, teamUrn: string): Promise<void> {
   const now = new Date();
   const twoWeeksAgo = new Date(now.getTime() - 14 * DAY_MS);
   const start = toYmd(twoWeeksAgo);
@@ -689,28 +619,30 @@ async function futureFixturesForTeam(teamQuery, teamInput, teamUrn) {
   });
 }
 
-async function main() {
+async function main(): Promise<void> {
   try {
     const parsed = parseArgs(process.argv);
-    if (parsed.help) {
+    if ("help" in parsed && parsed.help) {
       usage();
       return;
     }
-    if (parsed.day) {
+    if ("day" in parsed) {
       await fixturesForDay(parsed.day);
       return;
     }
-    await futureFixturesForTeam(
-      parsed.teamQuery,
-      parsed.teamInput,
-      parsed.teamUrn,
-    );
-  } catch (error) {
-    console.error(error.message);
+    if ("teamQuery" in parsed) {
+      await futureFixturesForTeam(parsed.teamQuery, parsed.teamInput, parsed.teamUrn);
+      return;
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
     console.error("");
     usage();
     process.exit(1);
   }
 }
 
-main();
+void main();
+
+export {};
