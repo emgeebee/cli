@@ -7,6 +7,11 @@ type CricketInnings = {
   wickets?: number;
   overs?: string;
   isDeclared?: boolean;
+  inningsNumber?: number;
+  innings_number?: number;
+  number?: number;
+  startDateTime?: string;
+  start_date_time?: string;
 };
 
 type CricketTeam = {
@@ -83,6 +88,60 @@ function inningsLine(team: CricketTeam | undefined, innings: CricketInnings | un
   if (!innings) return `${label}${suffix}: -`;
   const score = inningsScore(innings);
   return `${label}${suffix}: ${score || "-"}`;
+}
+
+type TeamInningsLine = {
+  team: CricketTeam | undefined;
+  innings: CricketInnings;
+  localIndex: number;
+};
+
+function inningsOrder(innings: CricketInnings): number | null {
+  const maybe =
+    innings.inningsNumber ??
+    innings.innings_number ??
+    innings.number;
+  if (maybe == null) return null;
+  const parsed = Number(maybe);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function inningsStartTime(innings: CricketInnings): number | null {
+  const raw = innings.startDateTime || innings.start_date_time;
+  if (!raw) return null;
+  const ts = new Date(raw).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function orderedInningsLines(homeTeam: CricketTeam | undefined, awayTeam: CricketTeam | undefined): string[] {
+  const entries: TeamInningsLine[] = [
+    ...asInningsList(homeTeam).map((innings, idx) => ({ team: homeTeam, innings, localIndex: idx })),
+    ...asInningsList(awayTeam).map((innings, idx) => ({ team: awayTeam, innings, localIndex: idx })),
+  ];
+
+  if (entries.length === 0) {
+    return ["  -"];
+  }
+
+  entries.sort((a, b) => {
+    const orderA = inningsOrder(a.innings);
+    const orderB = inningsOrder(b.innings);
+    if (orderA != null && orderB != null && orderA !== orderB) return orderA - orderB;
+    if (orderA != null && orderB == null) return -1;
+    if (orderA == null && orderB != null) return 1;
+
+    const startA = inningsStartTime(a.innings);
+    const startB = inningsStartTime(b.innings);
+    if (startA != null && startB != null && startA !== startB) return startA - startB;
+    if (startA != null && startB == null) return -1;
+    if (startA == null && startB != null) return 1;
+
+    // Fallback keeps a stable readable order when no timing metadata is present.
+    if (a.localIndex !== b.localIndex) return a.localIndex - b.localIndex;
+    return teamLabel(a.team).localeCompare(teamLabel(b.team));
+  });
+
+  return entries.map((entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex)}`);
 }
 
 function normalizeText(value: string | undefined): string {
@@ -171,9 +230,6 @@ function printFixtures(data: CricketResponse, ymd: string): void {
         count += 1;
         const homeTeam = event.participants?.homeTeam;
         const awayTeam = event.participants?.awayTeam;
-        const homeInnings = asInningsList(homeTeam);
-        const awayInnings = asInningsList(awayTeam);
-        const maxInnings = Math.max(homeInnings.length, awayInnings.length, 1);
         const dayLabel = multiDayLabel(event, ymd);
 
         const header = [
@@ -185,9 +241,8 @@ function printFixtures(data: CricketResponse, ymd: string): void {
         ].join(" | ");
         console.log(header);
 
-        for (let i = 0; i < maxInnings; i += 1) {
-          console.log(`  ${inningsLine(homeTeam, homeInnings[i], i)}`);
-          console.log(`  ${inningsLine(awayTeam, awayInnings[i], i)}`);
+        for (const line of orderedInningsLines(homeTeam, awayTeam)) {
+          console.log(line);
         }
         console.log("");
       }

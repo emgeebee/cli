@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "description": "mats useful cli scripts",
   "main": "dist/ball.js",
   "bin": {
@@ -8,6 +8,7 @@
     "cal": "./dist/cal.js",
     "w": "./dist/w.js",
     "cric": "./dist/cric.js",
+    "bday": "./dist/bday.js",
     "octo": "./dist/octo.js"
   },
   "files": [
@@ -20,6 +21,7 @@
     "cal": "pnpm build && node dist/cal.js",
     "w": "pnpm build && node dist/w.js",
     "cric": "pnpm build && node dist/cric.js",
+    "bday": "pnpm build && node dist/bday.js",
     "octo": "pnpm build && node dist/octo.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

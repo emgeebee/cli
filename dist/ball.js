@@ -2,6 +2,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const bbc_1 = require("./bbc");
+const config_1 = require("./config");
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TEAM_QUERY_ALIASES = {
     avfc: "aston-villa",
@@ -33,16 +34,22 @@ const COMPETITION_ORDER = [
     "Scottish Premiership",
 ];
 const BBC_BASE_URL = "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
+const PL_STANDINGS_URL = "https://premier-league-standings1.p.rapidapi.com/";
+const PL_RAPID_HOST = "premier-league-standings1.p.rapidapi.com";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_DARK_GREEN = "\x1b[32m";
 const ANSI_DARK_RED = "\x1b[31m";
 const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
+const ANSI_CLARET = "\x1b[38;5;88m";
+const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
+const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 const urlForDaysGames = (today, end, start) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent("urn:bbc:sportsdata:football:tournament-collection:collated")}`;
 const urlForTeamGames = (today, end, start, teamUrn) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent(teamUrn)}`;
 function usage() {
     console.log("Usage:");
     console.log("  ball");
+    console.log("  ball pl");
     console.log("  ball YYYY-MM-DD");
     console.log("  ball DD/MM");
     console.log("  ball today|tomorrow|mon|tues|wed|thurs|fri|sat|sun");
@@ -124,6 +131,22 @@ function formatFixtureDate(isoDateTime) {
     const dayName = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
     return `${dayName} ${day}/${month}`;
 }
+function formatPrintedAtTimestamp(date = new Date()) {
+    const weekday = date.toLocaleDateString("en-GB", {
+        weekday: "short",
+        timeZone: "Europe/London",
+    });
+    const day = date.toLocaleDateString("en-GB", { day: "2-digit", timeZone: "Europe/London" });
+    const month = date.toLocaleDateString("en-GB", { month: "2-digit", timeZone: "Europe/London" });
+    const time = date.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Europe/London",
+    });
+    const dayName = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
+    return `${dayName} ${day}/${month} ${time}`;
+}
 function eventTime(event) {
     const dateValue = event.startTime || event.startDateTime;
     if (!dateValue)
@@ -144,13 +167,29 @@ function eventTime(event) {
     return `${hh}:${mm} ${tz}`;
 }
 function teamLabel(team) {
-    return (team?.name?.shortName ||
+    const base = (team?.name?.shortName ||
         team?.shortName ||
         team?.name?.abbreviation ||
         team?.name?.fullName ||
         team?.fullName ||
         team?.key ||
         "unknown-team");
+    return highlightAstonVilla(base);
+}
+function isAstonVillaName(name) {
+    const n = normalizeText(name);
+    return n === "astonvilla" || n === "avfc" || n === "avl";
+}
+function highlightAstonVilla(name) {
+    if (!shouldUseColor() || !isAstonVillaName(name))
+        return name;
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        const first = parts[0];
+        const rest = parts.slice(1).join(" ");
+        return `${ANSI_CLARET}${first}${ANSI_RESET} ${ANSI_VILLA_BLUE}${rest}${ANSI_RESET}`;
+    }
+    return `${ANSI_CLARET}${name}${ANSI_RESET}${ANSI_VILLA_BLUE}${ANSI_RESET}`;
 }
 function competitionLabel(event) {
     return (event?.tournament?.disambiguatedName ||
@@ -203,6 +242,8 @@ function scoreNumber(score) {
     return Number.isNaN(parsed) ? null : parsed;
 }
 function colorTeamName(name, role, isLive) {
+    if (isAstonVillaName(name))
+        return highlightAstonVilla(name);
     if (!shouldUseColor())
         return name;
     if (role === "win")
@@ -390,6 +431,189 @@ async function fetchMatchData(url, dayYmd) {
         return flattenEvents(batchShape);
     return flattenEventsFromContainer(data);
 }
+function padCell(value, width) {
+    const visible = value.replace(ANSI_REGEX, "").length;
+    return value + " ".repeat(Math.max(0, width - visible));
+}
+function makeAsciiTable(headers, rows) {
+    const widths = headers.map((header, idx) => Math.max(header.replace(ANSI_REGEX, "").length, ...rows.map((row) => (row[idx] || "").replace(ANSI_REGEX, "").length)));
+    const border = `+-${widths.map((w) => "-".repeat(w)).join("-+-")}-+`;
+    const headerLine = `| ${headers.map((h, i) => padCell(h, widths[i])).join(" | ")} |`;
+    const body = rows.map((row) => `| ${row.map((v, i) => padCell(v || "", widths[i])).join(" | ")} |`);
+    return [border, headerLine, border, ...body, border];
+}
+function toRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return null;
+    return value;
+}
+function valueByPath(record, path) {
+    const parts = path.split(".");
+    let cursor = record;
+    for (const part of parts) {
+        const rec = toRecord(cursor);
+        if (!rec)
+            return undefined;
+        cursor = rec[part];
+    }
+    return cursor;
+}
+function firstValue(record, keys) {
+    for (const key of keys) {
+        const v = key.includes(".") ? valueByPath(record, key) : record[key];
+        if (v != null && v !== "")
+            return v;
+    }
+    return undefined;
+}
+function asNumber(value) {
+    if (typeof value === "number" && Number.isFinite(value))
+        return value;
+    if (typeof value === "string") {
+        const n = Number(value);
+        if (Number.isFinite(n))
+            return n;
+    }
+    return null;
+}
+function asString(value) {
+    if (value == null)
+        return "";
+    return String(value);
+}
+function normalizePlRows(payload) {
+    const rowsSource = Array.isArray(payload)
+        ? payload
+        : (() => {
+            const rec = toRecord(payload);
+            if (!rec)
+                return [];
+            const candidates = [
+                rec.standings,
+                rec.table,
+                rec.data,
+                rec.results,
+                valueByPath(rec, "response.standings"),
+                valueByPath(rec, "response.table"),
+                valueByPath(rec, "response.data"),
+            ];
+            for (const c of candidates) {
+                if (Array.isArray(c))
+                    return c;
+            }
+            return [];
+        })();
+    const normalized = [];
+    for (const row of rowsSource) {
+        const rec = toRecord(row);
+        if (!rec)
+            continue;
+        const teamRaw = firstValue(rec, [
+            "team.name",
+            "team.shortName",
+            "team.abbreviation",
+        ]) ??
+            firstValue(rec, [
+                "team",
+                "teamName",
+                "name",
+                "club",
+                "team.name",
+                "team.shortName",
+            ]);
+        const team = highlightAstonVilla(asString(teamRaw));
+        if (!team)
+            continue;
+        const pos = asNumber(firstValue(rec, ["position", "rank", "pos", "place"])) ?? normalized.length + 1;
+        const played = asNumber(firstValue(rec, [
+            "played",
+            "playedGames",
+            "matches",
+            "p",
+            "mp",
+            "stats.gamesPlayed",
+        ])) ?? 0;
+        const won = asNumber(firstValue(rec, [
+            "won",
+            "wins",
+            "w",
+            "stats.wins",
+        ])) ?? 0;
+        const draw = asNumber(firstValue(rec, [
+            "drawn",
+            "draw",
+            "draws",
+            "d",
+            "ties",
+            "stats.ties",
+            "stats.draws",
+        ])) ?? 0;
+        const lost = asNumber(firstValue(rec, [
+            "lost",
+            "losses",
+            "l",
+            "stats.losses",
+            "stats.lost",
+        ])) ?? 0;
+        const gd = asNumber(firstValue(rec, [
+            "goalDifference",
+            "gd",
+            "goalsDiff",
+            "stats.goalDifference",
+        ])) ?? 0;
+        const points = asNumber(firstValue(rec, [
+            "points",
+            "pts",
+            "stats.points",
+        ])) ?? 0;
+        const rankFromStats = asNumber(firstValue(rec, ["stats.rank"]));
+        const finalPos = rankFromStats ?? pos;
+        normalized.push({ pos: finalPos, team, played, won, draw, lost, gd, points });
+    }
+    normalized.sort((a, b) => a.pos - b.pos);
+    return normalized.map((r) => [
+        String(r.pos),
+        r.team,
+        String(r.played),
+        String(r.won),
+        String(r.draw),
+        String(r.lost),
+        String(r.gd),
+        String(r.points),
+    ]);
+}
+async function printPremierLeagueTable() {
+    const config = (0, config_1.readPhoneCliConfig)();
+    const ballConfig = config.ball || {};
+    const rapidApiKey = String(ballConfig.rapidApiKey ||
+        ballConfig.rapidapiKey ||
+        ballConfig.plRapidApiKey ||
+        process.env.RAPIDAPI_KEY ||
+        "").trim();
+    if (!rapidApiKey) {
+        throw new Error(`Missing RapidAPI key. Set ball.rapidApiKey in ${(0, config_1.getConfigPath)()} or RAPIDAPI_KEY env var.`);
+    }
+    const response = await fetch(PL_STANDINGS_URL, {
+        headers: {
+            "Content-Type": "application/json",
+            "x-rapidapi-host": PL_RAPID_HOST,
+            "x-rapidapi-key": rapidApiKey,
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Premier League table request failed (${response.status})`);
+    }
+    const payload = (await response.json());
+    const rows = normalizePlRows(payload);
+    if (rows.length === 0) {
+        throw new Error("Premier League table response returned no rows.");
+    }
+    const heading = `Premier League Table (at ${formatPrintedAtTimestamp()})`;
+    console.log(heading);
+    for (const line of makeAsciiTable(["#", "Team", "P", "W", "D", "L", "GD", "Pts"], rows)) {
+        console.log(line);
+    }
+}
 function parseArgs(argv) {
     const args = argv.slice(2);
     if (args[0] === "--help" || args[0] === "-h") {
@@ -402,6 +626,9 @@ function parseArgs(argv) {
         throw new Error("Pass either a date (YYYY-MM-DD) or a single team value.");
     }
     const input = args[0];
+    if (String(input).trim().toLowerCase() === "pl") {
+        return { keyword: "pl" };
+    }
     const dayParsers = [parseRelativeDayInput, parseYmd, parseDayMonthInput];
     for (const parser of dayParsers) {
         const parsed = parser(input);
@@ -417,7 +644,7 @@ async function fixturesForDay(dayYmd) {
     const today = (0, bbc_1.toYmd)(new Date());
     const url = urlForDaysGames(today, dayYmd, dayYmd);
     const events = (await fetchMatchData(url, dayYmd)).filter(competitionAllowed);
-    printGroupedFixtures(events, `Fixtures for ${dayYmd}`);
+    printGroupedFixtures(events, `Fixtures for ${dayYmd} (at ${formatPrintedAtTimestamp()})`);
 }
 async function futureFixturesForTeam(teamQuery, teamInput, teamUrn) {
     const now = new Date();
@@ -429,7 +656,7 @@ async function futureFixturesForTeam(teamQuery, teamInput, teamUrn) {
         const dt = new Date(event.startTime || event.startDateTime);
         return dt.getTime() >= twoWeeksAgo.getTime();
     });
-    printFlatFixtures(events, `Future fixtures for ${teamInput || teamQuery}`, {
+    printFlatFixtures(events, `Future fixtures for ${teamInput || teamQuery} (at ${formatPrintedAtTimestamp()})`, {
         includeDate: true,
         showCompetitionTag: true,
         emptyMessage: "No fixtures in the last 14 days or next 30 days.",
@@ -444,6 +671,10 @@ async function main() {
         }
         if ("day" in parsed) {
             await fixturesForDay(parsed.day);
+            return;
+        }
+        if ("keyword" in parsed && parsed.keyword === "pl") {
+            await printPremierLeagueTable();
             return;
         }
         if ("teamQuery" in parsed) {

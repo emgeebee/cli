@@ -11,6 +11,7 @@ The project is written in TypeScript and compiled to `dist/`.
 - `cal`: terminal month calendar
 - `w`: weather forecast by postcode
 - `octo`: placeholder CLI
+- `bday`: birthday age table from config
 
 ## Install / Run
 
@@ -24,6 +25,7 @@ npx --yes --package @emgeebee/phone_cli cric
 npx --yes --package @emgeebee/phone_cli cal
 npx --yes --package @emgeebee/phone_cli w
 npx --yes --package @emgeebee/phone_cli octo
+npx --yes --package @emgeebee/phone_cli bday
 ```
 
 ### From this repo
@@ -35,6 +37,7 @@ node dist/cric.js
 node dist/cal.js
 node dist/w.js
 node dist/octo.js
+node dist/bday.js
 ```
 
 Or use package scripts (which build first):
@@ -46,6 +49,7 @@ pnpm cric
 pnpm cal
 pnpm w
 pnpm octo
+pnpm bday
 ```
 
 ### Global install / link
@@ -66,6 +70,7 @@ cric
 cal
 w
 octo
+bday
 ```
 
 ## ball
@@ -74,6 +79,7 @@ octo
 
 ```bash
 ball
+ball pl
 ball YYYY-MM-DD
 ball DD/MM
 ball today|tomorrow|mon|tues|wed|thurs|fri|sat|sun
@@ -86,6 +92,7 @@ ball TEAM
 ball avfc
 ball liv
 ball aston-villa
+ball pl
 ```
 
 ### Current behavior (ball)
@@ -105,6 +112,9 @@ ball aston-villa
   - finished: dark green winner / dark red loser
   - live: brighter green winner / brighter red loser
   - disabled when output is non-interactive or `NO_COLOR` is set
+- Keyword table mode:
+  - `ball pl` fetches and prints the Premier League table
+  - reads RapidAPI key from `~/.phone_cli.json` under `ball.rapidApiKey`
 
 ## cal
 
@@ -170,10 +180,63 @@ octo
 
 `OCTOPUS_BASIC_AUTH_TOKEN` can be either a raw Octopus API key (for example `sk_live_...`) or a pre-encoded Basic auth token.
 
+You can also store per-CLI settings in `~/.phone_cli.json`:
+
+```json
+{
+  "octo": {
+    "basicAuthToken": "sk_live_...",
+    "accountNumber": "A-00000000",
+    "gasKwhPerUnit": 11.2
+  },
+  "cric": {},
+  "ball": {
+    "rapidApiKey": "YOUR_RAPIDAPI_KEY"
+  }
+}
+```
+
+When both are present, env vars take precedence for `octo`.
+
 ### Current behavior (octo)
 
 - Requires `OCTOPUS_BASIC_AUTH_TOKEN` (basic auth token) and `OCTOPUS_ACCOUNT_NUMBER`
+- Optional gas conversion factor: `OCTOPUS_GAS_KWH_PER_UNIT` (or config `octo.gasKwhPerUnit`, default `11.2`)
 - Calls account endpoint: `https://api.octopus.energy/v1/accounts/<account>/`
 - Derives active electricity/gas tariff + product codes from account agreements
 - Fetches standard unit rates for electricity and gas for the next ~2 days
-- Prints tariff codes and rate windows (inc/ex VAT)
+- Prints tariff codes and rate windows (inc VAT)
+
+## bday
+
+### Usage (bday)
+
+```bash
+bday
+```
+
+### Config shape (`~/.phone_cli.json`)
+
+```json
+{
+  "bday": {
+    "cleo": { "bd": "2022-07-02" },
+    "arlo": { "bd": "2018-05-10" },
+    "nads": { "bd": "1983-11-21" },
+    "me": { "bd": "1984-07-28" },
+    "nana": { "type": 1, "bd": "1958-06-28" },
+    "grandad": { "type": 1, "bd": "1956-01-12" },
+    "granny": { "type": 1, "bd": "1939-04-22" },
+    "nanaB": { "type": 1, "bd": "1945-03-29" }
+  }
+}
+```
+
+### Current behavior (bday)
+
+- Reads birthdays from `bday` section in `~/.phone_cli.json`
+- Prints an ASCII table with columns:
+  - `Days`
+  - `Weeks`
+  - `Months`
+  - `Normal` (e.g. `3 years, 4 months`)
