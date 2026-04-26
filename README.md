@@ -19,6 +19,7 @@ The project is written in TypeScript and compiled to `dist/`.
 ### From npm with npx
 
 ```bash
+npx --yes @emgeebee/phone_cli
 npx --yes --package @emgeebee/phone_cli ball
 npx --yes --package @emgeebee/phone_cli ball 2026-04-26
 npx --yes --package @emgeebee/phone_cli ball aston-villa
@@ -67,6 +68,7 @@ pnpm link --global
 Then run:
 
 ```bash
+phone_cli
 ball
 ball 2026-04-26
 ball aston-villa
