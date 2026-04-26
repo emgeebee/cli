@@ -12,6 +12,7 @@ The project is written in TypeScript and compiled to `dist/`.
 - `w`: weather forecast by postcode
 - `octo`: placeholder CLI
 - `bday`: birthday age table from config
+- `money`: monthly countdown value
 
 ## Install / Run
 
@@ -26,6 +27,7 @@ npx --yes --package @emgeebee/phone_cli cal
 npx --yes --package @emgeebee/phone_cli w
 npx --yes --package @emgeebee/phone_cli octo
 npx --yes --package @emgeebee/phone_cli bday
+npx --yes --package @emgeebee/phone_cli money
 ```
 
 ### From this repo
@@ -38,6 +40,7 @@ node dist/cal.js
 node dist/w.js
 node dist/octo.js
 node dist/bday.js
+node dist/money.js
 ```
 
 Or use package scripts (which build first):
@@ -50,6 +53,7 @@ pnpm cal
 pnpm w
 pnpm octo
 pnpm bday
+pnpm money
 ```
 
 ### Global install / link
@@ -71,6 +75,7 @@ cal
 w
 octo
 bday
+money
 ```
 
 ## ball
@@ -240,3 +245,19 @@ bday
   - `Weeks`
   - `Months`
   - `Normal` (e.g. `3 years, 4 months`)
+
+## money
+
+### Usage (money)
+
+```bash
+money
+```
+
+### Current behavior (money)
+
+- Uses a straight daily countdown:
+  - day 1 = `720`
+  - subtract `24` each day
+  - day 26 = `120`
+  - day 31 = `0`
