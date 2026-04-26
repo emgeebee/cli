@@ -9,6 +9,7 @@ export type PhoneCliConfig = {
   cric?: CliConfig;
   ball?: CliConfig;
   bday?: CliConfig;
+  money?: CliConfig;
   w?: CliConfig;
   cal?: CliConfig;
   [section: string]: CliConfig | undefined;

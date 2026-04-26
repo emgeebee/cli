@@ -225,14 +225,7 @@ bday
 ```json
 {
   "bday": {
-    "cleo": { "bd": "2022-07-02" },
-    "arlo": { "bd": "2018-05-10" },
-    "nads": { "bd": "1983-11-21" },
     "me": { "bd": "1984-07-28" },
-    "nana": { "type": 1, "bd": "1958-06-28" },
-    "grandad": { "type": 1, "bd": "1956-01-12" },
-    "granny": { "type": 1, "bd": "1939-04-22" },
-    "nanaB": { "type": 1, "bd": "1945-03-29" }
   }
 }
 ```
@@ -256,6 +249,7 @@ money
 
 ### Current behavior (money)
 
+- Start amount comes from config `~/.phone_cli.json` at `money.budget` (defaults to `744` if unset)
 - Uses a straight daily countdown:
   - day 1 = `720`
   - subtract `24` each day
