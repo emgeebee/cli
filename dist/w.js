@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const config_1 = require("./config");
 const WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+const MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
+const MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
 const DEFAULT_POSTCODE = "cm2";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_BLUE = "\x1b[34m";
@@ -64,6 +67,53 @@ async function fetchWeather(postcode) {
     }
     return (await response.json());
 }
+function asRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : null;
+}
+function resolveMoonRapidApiKey() {
+    const config = (0, config_1.readPhoneCliConfig)();
+    const ballConfig = asRecord(config.ball);
+    return String(ballConfig?.rapidApiKey || "").trim();
+}
+function toMoonDate(localDate) {
+    if (!localDate)
+        return "";
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+    if (!m)
+        return "";
+    return `${m[3]}-${m[2]}-${m[1]}`;
+}
+async function fetchMoonPhase(localDate) {
+    const apiKey = resolveMoonRapidApiKey();
+    if (!apiKey) {
+        return "moon api key not set";
+    }
+    const moonDate = toMoonDate(localDate);
+    if (!moonDate) {
+        return "-";
+    }
+    const response = await fetch(`${MOON_API_URL}?date=${encodeURIComponent(moonDate)}`, {
+        method: "GET",
+        headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "x-rapidapi-host": MOON_API_HOST,
+            "x-rapidapi-key": apiKey,
+        },
+    });
+    if (!response.ok) {
+        return "no api calls for moon data left";
+    }
+    const payload = (await response.json());
+    const phase = payload.data?.phase ? String(payload.data.phase).trim() : "";
+    const emoji = payload.data?.phaseEmoji ? String(payload.data.phaseEmoji).trim() : "";
+    if (!phase && !emoji) {
+        return "-";
+    }
+    return `${emoji} ${phase}`.trim();
+}
 function formatDayCells(report) {
     const date = formatDisplayDate(report.localDate);
     const weather = report.weatherTypeText || report.enhancedWeatherDescription || "Unknown";
@@ -98,6 +148,42 @@ function formatHourlyCells(report) {
     const windSpeed = formatWindSpeed(report.windSpeedMph);
     const windDir = report.windDirectionAbbreviation || "?";
     return [time, weather, temp, rain, `${windSpeed} ${windDir}`];
+}
+function parseClockMinutes(value) {
+    if (!value)
+        return null;
+    const m = /^(\d{2}):(\d{2})$/.exec(value.trim());
+    if (!m)
+        return null;
+    const hh = Number.parseInt(m[1], 10);
+    const mm = Number.parseInt(m[2], 10);
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59)
+        return null;
+    return hh * 60 + mm;
+}
+function formatDayLength(sunrise, sunset) {
+    const start = parseClockMinutes(sunrise);
+    const end = parseClockMinutes(sunset);
+    if (start == null || end == null || end < start) {
+        return "-";
+    }
+    const total = end - start;
+    const hours = Math.floor(total / 60);
+    const mins = total % 60;
+    return `${hours}h ${String(mins).padStart(2, "0")}m`;
+}
+function formatPollen(report) {
+    if (!report)
+        return "-";
+    const index = report.pollenIndex;
+    const text = report.pollenIndexText ? String(report.pollenIndexText).trim() : "";
+    if (index == null && !text)
+        return "-";
+    if (index == null)
+        return text;
+    if (!text)
+        return String(index);
+    return `${index} (${text})`;
 }
 function shouldUseColor() {
     return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
@@ -177,7 +263,7 @@ function makeAsciiTable(headers, rows, forcedWidths) {
     lines.push(border);
     return lines;
 }
-function printForecast(data, requestedPostcode) {
+async function printForecast(data, requestedPostcode) {
     const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
     const lastUpdated = data.lastUpdated || "unknown";
     const reports = (data.forecasts || [])
@@ -236,6 +322,23 @@ function printForecast(data, requestedPostcode) {
     // Requested order: tomorrow hourly, today hourly, week ahead.
     printHourlySection(tomorrowDate, tomorrowHourlyRows);
     printHourlySection(todayDate, todayHourlyRows);
+    if (todayDate) {
+        const moon = await fetchMoonPhase(todayDate);
+        const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
+        const extrasRows = [[
+                formatPollen(todayReport),
+                todayReport?.sunrise || "-",
+                todayReport?.sunset || "-",
+                formatDayLength(todayReport?.sunrise, todayReport?.sunset),
+                moon,
+            ]];
+        console.log(`Today extras (${formatDisplayDate(todayDate)})`);
+        const extraLines = makeAsciiTable(["Pollen", "Sunrise", "Sunset", "Day length", "Moon"], extrasRows);
+        for (const line of extraLines) {
+            console.log(line);
+        }
+        console.log("");
+    }
     console.log("Week ahead");
     const dayWidths = [
         sharedWidths.dateOrTime,
@@ -259,7 +362,7 @@ async function main() {
         }
         const postcode = parsed.postcode || DEFAULT_POSTCODE;
         const data = await fetchWeather(postcode);
-        printForecast(data, postcode);
+        await printForecast(data, postcode);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);

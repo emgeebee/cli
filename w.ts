@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { getConfigPath, readPhoneCliConfig } from "./config";
+
 type DailyReport = {
   localDate?: string;
   weatherTypeText?: string;
@@ -9,6 +11,10 @@ type DailyReport = {
   windSpeedMph?: number | null;
   windDirectionAbbreviation?: string | null;
   enhancedWeatherDescription?: string;
+  pollenIndex?: number | null;
+  pollenIndexText?: string | null;
+  sunrise?: string | null;
+  sunset?: string | null;
 };
 
 type DailyForecast = {
@@ -33,7 +39,17 @@ type WeatherResponse = {
   lastUpdated?: string;
 };
 
+type MoonApiResponse = {
+  status?: string;
+  data?: {
+    phase?: string;
+    phaseEmoji?: string;
+  };
+};
+
 const WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+const MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
+const MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
 const DEFAULT_POSTCODE = "cm2";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_BLUE = "\x1b[34m";
@@ -102,6 +118,58 @@ async function fetchWeather(postcode: string): Promise<WeatherResponse> {
   return (await response.json()) as WeatherResponse;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function resolveMoonRapidApiKey(): string {
+  const config = readPhoneCliConfig();
+  const ballConfig = asRecord(config.ball);
+  return String(ballConfig?.rapidApiKey || "").trim();
+}
+
+function toMoonDate(localDate?: string): string {
+  if (!localDate) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  if (!m) return "";
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+async function fetchMoonPhase(localDate?: string): Promise<string> {
+  const apiKey = resolveMoonRapidApiKey();
+  if (!apiKey) {
+    return "moon api key not set";
+  }
+  const moonDate = toMoonDate(localDate);
+  if (!moonDate) {
+    return "-";
+  }
+
+  const response = await fetch(`${MOON_API_URL}?date=${encodeURIComponent(moonDate)}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "x-rapidapi-host": MOON_API_HOST,
+      "x-rapidapi-key": apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    return "no api calls for moon data left";
+  }
+
+  const payload = (await response.json()) as MoonApiResponse;
+  const phase = payload.data?.phase ? String(payload.data.phase).trim() : "";
+  const emoji = payload.data?.phaseEmoji ? String(payload.data.phaseEmoji).trim() : "";
+  if (!phase && !emoji) {
+    return "-";
+  }
+  return `${emoji} ${phase}`.trim();
+}
+
 function formatDayCells(report: DailyReport): string[] {
   const date = formatDisplayDate(report.localDate);
   const weather = report.weatherTypeText || report.enhancedWeatherDescription || "Unknown";
@@ -136,6 +204,38 @@ function formatHourlyCells(report: HourlyReport): string[] {
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
   return [time, weather, temp, rain, `${windSpeed} ${windDir}`];
+}
+
+function parseClockMinutes(value?: string | null): number | null {
+  if (!value) return null;
+  const m = /^(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const hh = Number.parseInt(m[1], 10);
+  const mm = Number.parseInt(m[2], 10);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function formatDayLength(sunrise?: string | null, sunset?: string | null): string {
+  const start = parseClockMinutes(sunrise);
+  const end = parseClockMinutes(sunset);
+  if (start == null || end == null || end < start) {
+    return "-";
+  }
+  const total = end - start;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${hours}h ${String(mins).padStart(2, "0")}m`;
+}
+
+function formatPollen(report?: DailyReport): string {
+  if (!report) return "-";
+  const index = report.pollenIndex;
+  const text = report.pollenIndexText ? String(report.pollenIndexText).trim() : "";
+  if (index == null && !text) return "-";
+  if (index == null) return text;
+  if (!text) return String(index);
+  return `${index} (${text})`;
 }
 
 function shouldUseColor(): boolean {
@@ -210,7 +310,7 @@ function makeAsciiTable(headers: string[], rows: string[][], forcedWidths?: numb
   return lines;
 }
 
-function printForecast(data: WeatherResponse, requestedPostcode: string): void {
+async function printForecast(data: WeatherResponse, requestedPostcode: string): Promise<void> {
   const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
   const lastUpdated = data.lastUpdated || "unknown";
   const reports = (data.forecasts || [])
@@ -299,6 +399,26 @@ function printForecast(data: WeatherResponse, requestedPostcode: string): void {
   // Requested order: tomorrow hourly, today hourly, week ahead.
   printHourlySection(tomorrowDate, tomorrowHourlyRows);
   printHourlySection(todayDate, todayHourlyRows);
+  if (todayDate) {
+    const moon = await fetchMoonPhase(todayDate);
+    const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
+    const extrasRows = [[
+      formatPollen(todayReport),
+      todayReport?.sunrise || "-",
+      todayReport?.sunset || "-",
+      formatDayLength(todayReport?.sunrise, todayReport?.sunset),
+      moon,
+    ]];
+    console.log(`Today extras (${formatDisplayDate(todayDate)})`);
+    const extraLines = makeAsciiTable(
+      ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
+      extrasRows,
+    );
+    for (const line of extraLines) {
+      console.log(line);
+    }
+    console.log("");
+  }
 
   console.log("Week ahead");
   const dayWidths = [
@@ -324,7 +444,7 @@ async function main(): Promise<void> {
     }
     const postcode = parsed.postcode || DEFAULT_POSTCODE;
     const data = await fetchWeather(postcode);
-    printForecast(data, postcode);
+    await printForecast(data, postcode);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
