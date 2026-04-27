@@ -531,26 +531,34 @@ function printPast14DaysHorizontal(
   now: Date,
 ): void {
   const dayKeys = lastNDaysKeysInclusive(now, 14);
-  const headers = ["Fuel", ...dayKeys.map(dayLabelShort)];
   const eColorByDay = rankedColorByDay(dayKeys, eDailyCost, "electricity");
   const gColorByDay = rankedColorByDay(dayKeys, gDailyCost, "gas");
-  const eCostRow = [
-    "Electric cost",
-    ...dayKeys.map((k) => colorize(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET)),
-  ];
-  const gCostRow = [
-    "Gas cost",
-    ...dayKeys.map((k) => colorize(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET)),
-  ];
-  const tCostRow = ["Total cost", ...dayKeys.map((k) => formatPence((eDailyCost[k] || 0) + (gDailyCost[k] || 0)))];
-  const eKwhRow = ["Electric kWh", ...dayKeys.map((k) => formatKwh(eDailyKwh[k] || 0))];
-  const gKwhRow = ["Gas kWh", ...dayKeys.map((k) => formatKwh(gDailyKwh[k] || 0))];
-  const tKwhRow = ["Total kWh", ...dayKeys.map((k) => formatKwh((eDailyKwh[k] || 0) + (gDailyKwh[k] || 0)))];
+  const windows = [dayKeys.slice(0, 7), dayKeys.slice(7, 14)];
 
   console.log("");
   console.log("Past 14 days (daily totals, inc VAT + consumed kWh)");
-  for (const line of makeAsciiTable(headers, [eCostRow, gCostRow, tCostRow, eKwhRow, gKwhRow, tKwhRow])) {
-    console.log(line);
+  for (let i = 0; i < windows.length; i += 1) {
+    const windowKeys = windows[i];
+    if (windowKeys.length === 0) continue;
+    if (i > 0) console.log("");
+
+    const headers = ["Fuel", ...windowKeys.map(dayLabelShort)];
+    const eCostRow = [
+      "⚡ cost",
+      ...windowKeys.map((k) => colorize(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET)),
+    ];
+    const gCostRow = [
+      "Gas cost",
+      ...windowKeys.map((k) => colorize(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET)),
+    ];
+    const tCostRow = ["Total cost", ...windowKeys.map((k) => formatPence((eDailyCost[k] || 0) + (gDailyCost[k] || 0)))];
+    const eKwhRow = ["⚡ kWh", ...windowKeys.map((k) => formatKwh(eDailyKwh[k] || 0))];
+    const gKwhRow = ["Gas kWh", ...windowKeys.map((k) => formatKwh(gDailyKwh[k] || 0))];
+    const tKwhRow = ["Total kWh", ...windowKeys.map((k) => formatKwh((eDailyKwh[k] || 0) + (gDailyKwh[k] || 0)))];
+
+    for (const line of makeAsciiTable(headers, [eCostRow, gCostRow, tCostRow, eKwhRow, gKwhRow, tKwhRow])) {
+      console.log(line);
+    }
   }
 }
 
@@ -594,14 +602,13 @@ function printAverageDailySummary(
       formatPence(eAvgCost + gAvgCost),
       formatKwh(eAvgKwh),
       formatKwh(gAvgKwh),
-      formatKwh(eAvgKwh + gAvgKwh),
     ];
   });
 
   console.log("");
   console.log("Average daily totals (inc VAT + consumed kWh)");
   for (const line of makeAsciiTable(
-    ["Period", "Electric cost", "Gas cost", "Total cost", "Electric kWh", "Gas kWh", "Total kWh"],
+    ["Period", "⚡ cost", "Gas cost", "Total cost", "⚡ kWh", "Gas kWh"],
     rows,
   )) {
     console.log(line);
