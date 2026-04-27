@@ -12,7 +12,8 @@
     "cric": "./dist/cric.js",
     "bday": "./dist/bday.js",
     "octo": "./dist/octo.js",
-    "money": "./dist/money.js"
+    "money": "./dist/money.js",
+    "cmd": "./dist/cmd.js"
   },
   "files": [
     "dist"
@@ -28,6 +29,7 @@
     "bday": "pnpm build && node dist/bday.js",
     "octo": "pnpm build && node dist/octo.js",
     "money": "pnpm build && node dist/money.js",
+    "cmd": "pnpm build && node dist/cmd.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {

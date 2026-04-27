@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const node_child_process_1 = require("node:child_process");
 const node_path_1 = require("node:path");
-const COMMANDS = new Set(["ball", "cal", "w", "cric", "octo", "bday", "money"]);
+const COMMANDS = new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd"]);
 function printUsage() {
     console.log("phone_cli commands:");
     console.log("  ball   Football fixtures / PL table");
@@ -13,6 +13,8 @@ function printUsage() {
     console.log("  octo   Octopus energy");
     console.log("  bday   Birthday age table");
     console.log("  money  Monthly countdown value");
+    console.log("  cmd    Home automation shortcuts");
+    console.log("         slon, slof, smon, smof, shon, shof, blon, blof");
     console.log("");
     console.log("Usage:");
     console.log("  npx @emgeebee/phone_cli <command> [args]");
@@ -21,6 +23,8 @@ function printUsage() {
     console.log("  npx @emgeebee/phone_cli ball");
     console.log("  npx @emgeebee/phone_cli ball pl");
     console.log("  npx @emgeebee/phone_cli money");
+    console.log("  npx @emgeebee/phone_cli cmd");
+    console.log("  npx @emgeebee/phone_cli cmd slon");
 }
 function runSubcommand(command, args) {
     const scriptPath = (0, node_path_1.join)(__dirname, `${command}.js`);
