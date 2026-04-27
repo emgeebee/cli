@@ -4,7 +4,7 @@
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {
-    "phone_cli": "./dist/phone_cli.js",
+    "l": "./dist/phone_cli.js",
     "phone-cli": "./dist/phone_cli.js",
     "ball": "./dist/ball.js",
     "cal": "./dist/cal.js",
