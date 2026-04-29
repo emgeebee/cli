@@ -12,6 +12,7 @@ type FixtureOptions = {
 type ParseResult =
   | { help: true }
   | { keyword: "pl" }
+  | { defaultThreeDays: true }
   | { day: string }
   | { teamQuery: string; teamInput: string; teamUrn: string };
 
@@ -166,6 +167,7 @@ const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_CLARET = "\x1b[38;5;88m";
 const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
+const ANSI_PURPLE = "\x1b[38;5;93m";
 const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 
 const urlForDaysGames = (today: string, end: string, start: string): string =>
@@ -181,7 +183,7 @@ const urlForTeamGames = (
 
 function usage(): void {
   console.log("Usage:");
-  console.log("  ball");
+  console.log("  ball   (yesterday, then tomorrow, then today)");
   console.log("  ball pl");
   console.log("  ball YYYY-MM-DD");
   console.log("  ball DD/MM");
@@ -257,6 +259,43 @@ function parseRelativeDayInput(value: string): Date | null {
   let delta = (targetDow - currentDow + 7) % 7;
   if (delta === 0) delta = 7;
   return new Date(today.getTime() + delta * DAY_MS);
+}
+
+/** Same calendar “today” as `parseRelativeDayInput`; order: yesterday, tomorrow, today. */
+function defaultThreeDayRows(): readonly { relative: "yesterday" | "tomorrow" | "today"; ymd: string }[] {
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  const yesterday = new Date(today.getTime() - DAY_MS);
+  const tomorrow = new Date(today.getTime() + DAY_MS);
+  return [
+    { relative: "yesterday", ymd: toYmd(yesterday) },
+    { relative: "tomorrow", ymd: toYmd(tomorrow) },
+    { relative: "today", ymd: toYmd(today) },
+  ];
+}
+
+/** en-GB “short” weekday plus DD/MM for a YYYY-MM-DD in Europe/London. */
+const WEEKDAY_HEADING_SPELLING: Partial<Record<string, string>> = {
+  Tue: "Tues",
+  Thu: "Thurs",
+};
+
+function formatYmdLondonShort(dayYmd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayYmd);
+  if (!m) return dayYmd;
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const date = new Date(Date.UTC(y, mo, d, 12, 0, 0));
+  const weekday = date.toLocaleDateString("en-GB", {
+    weekday: "short",
+    timeZone: "Europe/London",
+  });
+  const dayNum = date.toLocaleDateString("en-GB", { day: "2-digit", timeZone: "Europe/London" });
+  const monthNum = date.toLocaleDateString("en-GB", { month: "2-digit", timeZone: "Europe/London" });
+  const cap = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
+  const wday = WEEKDAY_HEADING_SPELLING[cap] ?? cap;
+  return `${wday} ${dayNum}/${monthNum}`;
 }
 
 function formatFixtureDate(isoDateTime: string): string {
@@ -827,7 +866,7 @@ function parseArgs(argv: string[]): ParseResult {
   }
 
   if (args.length === 0) {
-    return { day: toYmd(new Date()) };
+    return { defaultThreeDays: true };
   }
 
   if (args.length > 1) {
@@ -851,11 +890,22 @@ function parseArgs(argv: string[]): ParseResult {
   return { teamQuery, teamInput: input, teamUrn: teamUrnFromQuery(teamQuery) };
 }
 
-async function fixturesForDay(dayYmd: string): Promise<void> {
+async function fixturesForDay(
+  dayYmd: string,
+  relativeHeading?: "yesterday" | "tomorrow" | "today",
+): Promise<void> {
   const today = toYmd(new Date());
   const url = urlForDaysGames(today, dayYmd, dayYmd);
   const events = (await fetchMatchData(url, dayYmd)).filter(competitionAllowed);
-  printGroupedFixtures(events, `Fixtures for ${dayYmd} (at ${formatPrintedAtTimestamp()})`);
+  const heading =
+    relativeHeading !== undefined
+      ? `${ANSI_PURPLE}=== Fixtures for ${relativeHeading} (${formatYmdLondonShort(dayYmd)}) ===${ANSI_RESET}`
+      : `Fixtures for ${dayYmd} (at ${formatPrintedAtTimestamp()})`;
+  if (relativeHeading !== undefined) {
+    console.log("");
+    console.log("");
+  }
+  printGroupedFixtures(events, heading);
 }
 
 async function futureFixturesForTeam(teamQuery: string, teamInput: string, teamUrn: string): Promise<void> {
@@ -881,6 +931,12 @@ async function main(): Promise<void> {
     const parsed = parseArgs(process.argv);
     if ("help" in parsed && parsed.help) {
       usage();
+      return;
+    }
+    if ("defaultThreeDays" in parsed && parsed.defaultThreeDays) {
+      for (const row of defaultThreeDayRows()) {
+        await fixturesForDay(row.ymd, row.relative);
+      }
       return;
     }
     if ("day" in parsed) {
