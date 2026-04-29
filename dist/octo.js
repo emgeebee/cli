@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const node_fs_1 = require("node:fs");
 const config_1 = require("./config");
 const OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
-const TOKEN_ENV = "OCTOPUS_BASIC_AUTH_TOKEN";
-const ACCOUNT_ENV = "OCTOPUS_ACCOUNT_NUMBER";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -19,17 +18,13 @@ function usage() {
     console.log("Usage:");
     console.log("  octo");
     console.log("");
-    console.log("Credentials can come from either:");
-    console.log(`  1) Environment vars: ${TOKEN_ENV}, ${ACCOUNT_ENV}`);
-    console.log(`  2) Config file: ${(0, config_1.getConfigPath)()} (section: "octo")`);
+    console.log("Credentials can come from :");
+    console.log(`  Config file: ${(0, config_1.getConfigPath)()} (section: "octo")`);
     console.log("");
     console.log("Optional:");
     console.log("  OCTOPUS_GAS_KWH_PER_UNIT (default 11.2)");
 }
 function resolveOctoCredentials() {
-    const envToken = process.env[TOKEN_ENV];
-    const envAccount = process.env[ACCOUNT_ENV];
-    const envGasFactor = process.env.OCTOPUS_GAS_KWH_PER_UNIT;
     const parseGasFactor = (value) => {
         if (!value)
             return null;
@@ -39,23 +34,17 @@ function resolveOctoCredentials() {
         }
         return n;
     };
-    if (envToken && envAccount) {
-        return {
-            token: envToken,
-            accountNumber: envAccount,
-            gasKwhPerUnit: parseGasFactor(envGasFactor) ?? 11.2,
-        };
-    }
     const config = (0, config_1.readPhoneCliConfig)();
     const octo = config.octo || {};
     const token = String(octo.basicAuthToken || octo.token || "").trim();
     const accountNumber = String(octo.accountNumber || "").trim();
-    const configuredGasFactor = parseGasFactor(String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() || undefined);
+    const envGasFactor = String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim();
+    const configuredGasFactor = parseGasFactor(String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() ||
+        undefined);
     if (!token || !accountNumber) {
         throw new Error([
             "Missing Octopus credentials.",
-            `Set env vars ${TOKEN_ENV} + ${ACCOUNT_ENV},`,
-            `or configure ${(0, config_1.getConfigPath)()} with:`,
+            `Configure ${(0, config_1.getConfigPath)()} with:`,
             `{ "octo": { "basicAuthToken": "...", "accountNumber": "A-..." } }`,
         ].join(" "));
     }
@@ -119,8 +108,14 @@ function deriveTariffs(account) {
             return true;
         });
     };
-    const electricityMeters = meterRefs(ePoints, "mpan").map((m) => ({ mpan: m.mpxn, serial: m.serial }));
-    const gasMeters = meterRefs(gPoints, "mprn").map((m) => ({ mprn: m.mpxn, serial: m.serial }));
+    const electricityMeters = meterRefs(ePoints, "mpan").map((m) => ({
+        mpan: m.mpxn,
+        serial: m.serial,
+    }));
+    const gasMeters = meterRefs(gPoints, "mprn").map((m) => ({
+        mprn: m.mpxn,
+        serial: m.serial,
+    }));
     if (electricityMeters.length === 0 || gasMeters.length === 0) {
         throw new Error("Missing electricity or gas meter serials on account.");
     }
@@ -144,34 +139,19 @@ function deriveTariffs(account) {
 }
 async function fetchOctopusJson(url, token) {
     const raw = token.trim();
-    const candidates = new Set();
-    if (raw.toLowerCase().startsWith("basic ")) {
-        candidates.add(raw);
+    const response = await fetch(url, {
+        headers: {
+            Accept: "application/json",
+            Authorization: `Basic ${Buffer.from(`${raw}`).toString("base64")}`,
+        },
+    });
+    if (response.ok) {
+        return (await response.json());
     }
-    else {
-        // Accept either:
-        // 1) pre-encoded Basic token, or
-        // 2) raw Octopus API key (e.g. sk_live_...) requiring "key:" base64 encoding.
-        candidates.add(`Basic ${raw}`);
-        candidates.add(`Basic ${Buffer.from(`${raw}:`).toString("base64")}`);
+    if (response.status !== 401) {
+        throw new Error(`Octopus API request failed (${response.status}) for ${url}`);
     }
-    let lastStatus = 0;
-    for (const authHeader of candidates) {
-        const response = await fetch(url, {
-            headers: {
-                Accept: "application/json",
-                Authorization: authHeader,
-            },
-        });
-        if (response.ok) {
-            return (await response.json());
-        }
-        lastStatus = response.status;
-        if (response.status !== 401) {
-            throw new Error(`Octopus API request failed (${response.status}) for ${url}`);
-        }
-    }
-    throw new Error(`Octopus API request failed (${lastStatus || 401}) for ${url}`);
+    throw new Error(`Octopus API request failed (${response.status}) for ${url}`);
 }
 async function fetchAllOctopusResults(url, token) {
     const all = [];
@@ -208,15 +188,24 @@ function colorize(text, color) {
 function formatWindow(rate) {
     const from = rate.valid_from ? new Date(rate.valid_from) : null;
     const to = rate.valid_to ? new Date(rate.valid_to) : null;
-    if (!from || Number.isNaN(from.getTime()) || !to || Number.isNaN(to.getTime())) {
+    if (!from ||
+        Number.isNaN(from.getTime()) ||
+        !to ||
+        Number.isNaN(to.getTime())) {
         return "unknown";
     }
     const dayLabel = from.toLocaleDateString("en-GB", {
         weekday: "short",
         timeZone: "Europe/London",
     });
-    const day = from.toLocaleDateString("en-GB", { day: "numeric", timeZone: "Europe/London" });
-    const month = from.toLocaleDateString("en-GB", { month: "numeric", timeZone: "Europe/London" });
+    const day = from.toLocaleDateString("en-GB", {
+        day: "numeric",
+        timeZone: "Europe/London",
+    });
+    const month = from.toLocaleDateString("en-GB", {
+        month: "numeric",
+        timeZone: "Europe/London",
+    });
     const startTime = from.toLocaleTimeString("en-GB", {
         hour: "2-digit",
         minute: "2-digit",
@@ -291,9 +280,18 @@ function dayKeyUK(date) {
 }
 function dayLabelShort(dayKey) {
     const d = new Date(`${dayKey}T00:00:00Z`);
-    const weekday = d.toLocaleDateString("en-GB", { weekday: "short", timeZone: "Europe/London" });
-    const day = d.toLocaleDateString("en-GB", { day: "numeric", timeZone: "Europe/London" });
-    const month = d.toLocaleDateString("en-GB", { month: "numeric", timeZone: "Europe/London" });
+    const weekday = d.toLocaleDateString("en-GB", {
+        weekday: "short",
+        timeZone: "Europe/London",
+    });
+    const day = d.toLocaleDateString("en-GB", {
+        day: "numeric",
+        timeZone: "Europe/London",
+    });
+    const month = d.toLocaleDateString("en-GB", {
+        month: "numeric",
+        timeZone: "Europe/London",
+    });
     const capDay = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
     return `${capDay} ${day}/${month}`;
 }
@@ -315,8 +313,12 @@ function lookupUnitRatePence(rates, atIso) {
     for (const rate of rates) {
         if (rate.value_inc_vat == null)
             continue;
-        const from = rate.valid_from ? new Date(rate.valid_from).getTime() : Number.NaN;
-        const to = rate.valid_to ? new Date(rate.valid_to).getTime() : Number.POSITIVE_INFINITY;
+        const from = rate.valid_from
+            ? new Date(rate.valid_from).getTime()
+            : Number.NaN;
+        const to = rate.valid_to
+            ? new Date(rate.valid_to).getTime()
+            : Number.POSITIVE_INFINITY;
         if (Number.isNaN(from))
             continue;
         // Track latest known rate starting before this timestamp.
@@ -333,12 +335,19 @@ function standingChargePerDayPence(standingRates) {
         return 0;
     const now = Date.now();
     const active = standingRates.find((rate) => {
-        const from = rate.valid_from ? new Date(rate.valid_from).getTime() : Number.NaN;
+        const from = rate.valid_from
+            ? new Date(rate.valid_from).getTime()
+            : Number.NaN;
         const to = rate.valid_to ? new Date(rate.valid_to).getTime() : Number.NaN;
-        return !Number.isNaN(from) && !Number.isNaN(to) && now >= from && now < to && rate.value_inc_vat != null;
+        return (!Number.isNaN(from) &&
+            !Number.isNaN(to) &&
+            now >= from &&
+            now < to &&
+            rate.value_inc_vat != null);
     }) ||
         [...standingRates]
-            .sort((a, b) => new Date(b.valid_from || "").getTime() - new Date(a.valid_from || "").getTime())
+            .sort((a, b) => new Date(b.valid_from || "").getTime() -
+            new Date(a.valid_from || "").getTime())
             .find((rate) => rate.value_inc_vat != null);
     return active?.value_inc_vat || 0;
 }
@@ -378,6 +387,9 @@ function formatPence(value) {
 function formatKwh(value) {
     return `${value.toFixed(2)}kWh`;
 }
+function formatPoundsFromPence(valuePence) {
+    return `£${(valuePence / 100).toFixed(2)}`;
+}
 function rankedColorByDay(dayKeys, totals, fuel) {
     // Leave the most recent 2 days uncolored, rank the older 12 days.
     const rankableDays = dayKeys.slice(0, Math.max(0, dayKeys.length - 2));
@@ -402,35 +414,155 @@ function lastNDaysKeysInclusive(end, days) {
     }
     return keys;
 }
+function monthKeysBackInclusive(now, months) {
+    const keys = [];
+    for (let i = months - 1; i >= 0; i -= 1) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        keys.push(`${y}-${m}`);
+    }
+    return keys;
+}
+function sortMonthKeysAsc(keys) {
+    return [...keys].sort((a, b) => a.localeCompare(b));
+}
+function startOfMonthUtc(monthKey) {
+    return new Date(`${monthKey}-01T00:00:00Z`);
+}
+function nextMonthKey(monthKey) {
+    const [yRaw, mRaw] = monthKey.split("-");
+    const y = Number(yRaw);
+    const m = Number(mRaw);
+    const d = new Date(Date.UTC(y, m, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function monthLabel(monthKey) {
+    const d = startOfMonthUtc(monthKey);
+    return d.toLocaleDateString("en-GB", {
+        month: "short",
+        year: "numeric",
+        timeZone: "Europe/London",
+    });
+}
+function monthKeyFromDayKey(dayKey) {
+    return dayKey.slice(0, 7);
+}
+function currentMonthKey(now) {
+    return dayKeyUK(now).slice(0, 7);
+}
+function isFinishedMonth(monthKey, now) {
+    return monthKey < currentMonthKey(now);
+}
+function monthlyAverageCacheFromConfig() {
+    const config = (0, config_1.readPhoneCliConfig)();
+    const octo = (config.octo || {});
+    const raw = octo.monthlyAverageCache;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        return {};
+    const cache = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (!/^\d{4}-\d{2}$/.test(key))
+            continue;
+        if (!value || typeof value !== "object" || Array.isArray(value))
+            continue;
+        const rec = value;
+        const eCost = Number(rec.eCost);
+        const gCost = Number(rec.gCost);
+        const eKwh = Number(rec.eKwh);
+        const gKwh = Number(rec.gKwh);
+        const days = Number(rec.days);
+        if (!Number.isFinite(eCost) ||
+            !Number.isFinite(gCost) ||
+            !Number.isFinite(eKwh) ||
+            !Number.isFinite(gKwh) ||
+            !Number.isFinite(days) ||
+            days <= 0) {
+            continue;
+        }
+        cache[key] = {
+            eCost,
+            gCost,
+            eKwh,
+            gKwh,
+            days,
+            updatedAt: String(rec.updatedAt || ""),
+        };
+    }
+    return cache;
+}
+function saveMonthlyAverageCache(cache) {
+    const configPath = (0, config_1.getConfigPath)();
+    const config = (0, config_1.readPhoneCliConfig)();
+    const octo = (config.octo || {});
+    octo.monthlyAverageCache = cache;
+    config.octo = octo;
+    (0, node_fs_1.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+function monthlyAveragesFromDaily(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh) {
+    const keys = new Set([
+        ...Object.keys(eDailyCost),
+        ...Object.keys(gDailyCost),
+        ...Object.keys(eDailyKwh),
+        ...Object.keys(gDailyKwh),
+    ]);
+    const sums = {};
+    for (const dayKey of keys) {
+        const month = monthKeyFromDayKey(dayKey);
+        sums[month] ||= { eCost: 0, gCost: 0, eKwh: 0, gKwh: 0, days: 0 };
+        sums[month].eCost += eDailyCost[dayKey] || 0;
+        sums[month].gCost += gDailyCost[dayKey] || 0;
+        sums[month].eKwh += eDailyKwh[dayKey] || 0;
+        sums[month].gKwh += gDailyKwh[dayKey] || 0;
+        sums[month].days += 1;
+    }
+    const out = {};
+    const nowIso = new Date().toISOString();
+    for (const [month, sum] of Object.entries(sums)) {
+        if (sum.days <= 0)
+            continue;
+        out[month] = {
+            eCost: sum.eCost / sum.days,
+            gCost: sum.gCost / sum.days,
+            eKwh: sum.eKwh / sum.days,
+            gKwh: sum.gKwh / sum.days,
+            days: sum.days,
+            updatedAt: nowIso,
+        };
+    }
+    return out;
+}
+function mergeDailyTotals(base, extra) {
+    const merged = { ...base };
+    for (const [day, value] of Object.entries(extra)) {
+        merged[day] = (merged[day] || 0) + value;
+    }
+    return merged;
+}
 function printPast14DaysHorizontal(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh, now) {
     const dayKeys = lastNDaysKeysInclusive(now, 14);
     const eColorByDay = rankedColorByDay(dayKeys, eDailyCost, "electricity");
     const gColorByDay = rankedColorByDay(dayKeys, gDailyCost, "gas");
-    const windows = [dayKeys.slice(0, 7), dayKeys.slice(7, 14)];
     console.log("");
     console.log("Past 14 days (daily totals, inc VAT + consumed kWh)");
-    for (let i = 0; i < windows.length; i += 1) {
-        const windowKeys = windows[i];
-        if (windowKeys.length === 0)
-            continue;
-        if (i > 0)
-            console.log("");
-        const headers = ["Fuel", ...windowKeys.map(dayLabelShort)];
-        const eCostRow = [
-            "⚡ cost",
-            ...windowKeys.map((k) => colorize(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET)),
-        ];
-        const gCostRow = [
-            "Gas cost",
-            ...windowKeys.map((k) => colorize(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET)),
-        ];
-        const tCostRow = ["Total cost", ...windowKeys.map((k) => formatPence((eDailyCost[k] || 0) + (gDailyCost[k] || 0)))];
-        const eKwhRow = ["⚡ kWh", ...windowKeys.map((k) => formatKwh(eDailyKwh[k] || 0))];
-        const gKwhRow = ["Gas kWh", ...windowKeys.map((k) => formatKwh(gDailyKwh[k] || 0))];
-        const tKwhRow = ["Total kWh", ...windowKeys.map((k) => formatKwh((eDailyKwh[k] || 0) + (gDailyKwh[k] || 0)))];
-        for (const line of makeAsciiTable(headers, [eCostRow, gCostRow, tCostRow, eKwhRow, gKwhRow, tKwhRow])) {
-            console.log(line);
-        }
+    const headers = [
+        "Date",
+        "⚡ cost",
+        "Gas cost",
+        "Total cost",
+        "⚡ kWh",
+        "Gas kWh",
+    ];
+    const rows = dayKeys.map((k) => [
+        dayLabelShort(k),
+        colorize(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET),
+        colorize(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET),
+        formatPence((eDailyCost[k] || 0) + (gDailyCost[k] || 0)),
+        formatKwh(eDailyKwh[k] || 0),
+        formatKwh(gDailyKwh[k] || 0),
+    ]);
+    for (const line of makeAsciiTable(headers, rows)) {
+        console.log(line);
     }
 }
 function averageForPeriod(days, daily) {
@@ -443,33 +575,72 @@ function averageForPeriod(days, daily) {
     return total / days.length;
 }
 function monthToDateKeys(now) {
-    const day = Number(now.toLocaleDateString("en-GB", { day: "numeric", timeZone: "Europe/London" }));
+    const day = Number(now.toLocaleDateString("en-GB", {
+        day: "numeric",
+        timeZone: "Europe/London",
+    }));
     return lastNDaysKeysInclusive(now, day);
 }
-function printAverageDailySummary(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh, now) {
-    const periods = [
-        { label: "Current month", days: monthToDateKeys(now) },
-        { label: "Past 7 days", days: lastNDaysKeysInclusive(now, 7) },
-        { label: "Past 30 days", days: lastNDaysKeysInclusive(now, 30) },
-        { label: "Past 90 days", days: lastNDaysKeysInclusive(now, 90) },
-    ];
-    const rows = periods.map((period) => {
-        const eAvgCost = averageForPeriod(period.days, eDailyCost);
-        const gAvgCost = averageForPeriod(period.days, gDailyCost);
-        const eAvgKwh = averageForPeriod(period.days, eDailyKwh);
-        const gAvgKwh = averageForPeriod(period.days, gDailyKwh);
+function printAverageMonthlySummary(months, cache, now) {
+    void now;
+    const rows = months.map((month) => {
+        const item = cache[month];
+        if (!item)
+            return [monthLabel(month), "-", "-", "-", "-", "-"];
         return [
-            period.label,
-            formatPence(eAvgCost),
-            formatPence(gAvgCost),
-            formatPence(eAvgCost + gAvgCost),
-            formatKwh(eAvgKwh),
-            formatKwh(gAvgKwh),
+            monthLabel(month),
+            formatPence(item.eCost),
+            formatPence(item.gCost),
+            formatPence(item.eCost + item.gCost),
+            formatKwh(item.eKwh),
+            formatKwh(item.gKwh),
         ];
     });
     console.log("");
-    console.log("Average daily totals (inc VAT + consumed kWh)");
-    for (const line of makeAsciiTable(["Period", "⚡ cost", "Gas cost", "Total cost", "⚡ kWh", "Gas kWh"], rows)) {
+    console.log("Average daily totals by calendar month (inc VAT + consumed kWh)");
+    for (const line of makeAsciiTable(["Month", "⚡ cost", "Gas cost", "Total cost", "⚡ kWh", "Gas kWh"], rows)) {
+        console.log(line);
+    }
+}
+function daysSoFarInCurrentMonth(now) {
+    return Number(now.toLocaleDateString("en-GB", {
+        day: "numeric",
+        timeZone: "Europe/London",
+    }));
+}
+function previousMonthKey(now) {
+    const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function daysInMonthFromKey(monthKey) {
+    const [y, m] = monthKey.split("-").map((v) => Number(v));
+    return new Date(y, m, 0).getDate();
+}
+function printFinalMonthTotals(cache, now) {
+    const currentKey = currentMonthKey(now);
+    const prevKey = previousMonthKey(now);
+    const currentDays = daysSoFarInCurrentMonth(now);
+    const prevDays = daysInMonthFromKey(prevKey);
+    const rows = [
+        { key: currentKey, label: `${monthLabel(currentKey)} (to date)`, days: currentDays },
+        { key: prevKey, label: `${monthLabel(prevKey)} (full month)`, days: prevDays },
+    ].map((item) => {
+        const rec = cache[item.key];
+        if (!rec) {
+            return [item.label, "-", "-", "-"];
+        }
+        const eTotal = rec.eCost * item.days;
+        const gTotal = rec.gCost * item.days;
+        return [
+            item.label,
+            formatPoundsFromPence(eTotal),
+            formatPoundsFromPence(gTotal),
+            formatPoundsFromPence(eTotal + gTotal),
+        ];
+    });
+    console.log("");
+    console.log("Monthly total cost summary");
+    for (const line of makeAsciiTable(["Month", "⚡ total", "Gas total", "Total"], rows)) {
         console.log(line);
     }
 }
@@ -489,7 +660,7 @@ async function main() {
         const derived = deriveTariffs(account);
         const from = new Date();
         const to = new Date(from.getTime() + 2 * DAY_MS);
-        const historyFrom = new Date(from.getTime() - 90 * DAY_MS);
+        const historyFrom = new Date(from.getTime() - 35 * DAY_MS);
         const eRatesUrl = ratesUrlWithWindow(derived.etariffPrices, from, to);
         const gRatesUrl = ratesUrlWithWindow(derived.gtariffPrices, from, to);
         const eHistoryUrl = ratesUrlWithWindow(derived.etariffPrices, historyFrom, from);
@@ -506,7 +677,7 @@ async function main() {
             `?period_from=${encodeURIComponent(toIsoNoMs(historyFrom))}` +
             `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
             `&order_by=period`);
-        const [electricityResults, gasResults, eHistoryResults, gHistoryResults, eStandingResults, gStandingResults] = await Promise.all([
+        const [electricityResults, gasResults, eHistoryResults, gHistoryResults, eStandingResults, gStandingResults,] = await Promise.all([
             fetchAllOctopusResults(eRatesUrl, token),
             fetchAllOctopusResults(gRatesUrl, token),
             fetchAllOctopusResults(eHistoryUrl, token),
@@ -532,7 +703,68 @@ async function main() {
         const eDailyKwh = aggregateDailyConsumedKwh(eConsumptionResults, 1);
         const gDailyKwh = aggregateDailyConsumedKwh(gConsumptionResults, gasKwhPerUnit);
         printPast14DaysHorizontal(eDaily, gDaily, eDailyKwh, gDailyKwh, from);
-        printAverageDailySummary(eDaily, gDaily, eDailyKwh, gDailyKwh, from);
+        const fetchWindowMonths = monthKeysBackInclusive(from, 3);
+        const monthlyCache = monthlyAverageCacheFromConfig();
+        const monthlyForDisplay = { ...monthlyCache };
+        const cachedMonths = sortMonthKeysAsc(Object.keys(monthlyCache));
+        const monthKeys = sortMonthKeysAsc(Array.from(new Set([...cachedMonths, ...fetchWindowMonths])));
+        const missingMonths = fetchWindowMonths.filter((m) => !monthlyCache[m]);
+        if (missingMonths.length > 0) {
+            const oldestMissing = missingMonths[0];
+            const newestMissing = missingMonths[missingMonths.length - 1];
+            const monthlyFrom = startOfMonthUtc(oldestMissing);
+            const monthlyTo = startOfMonthUtc(nextMonthKey(newestMissing));
+            let eMonthlyDaily = { ...eDaily };
+            let gMonthlyDaily = { ...gDaily };
+            let eMonthlyKwh = { ...eDailyKwh };
+            let gMonthlyKwh = { ...gDailyKwh };
+            // Reuse already fetched 35-day dataset; only fetch the older missing gap.
+            const gapEnd = monthlyTo < historyFrom ? monthlyTo : historyFrom;
+            if (monthlyFrom < gapEnd) {
+                const eMonthlyHistoryUrl = ratesUrlWithWindow(derived.etariffPrices, monthlyFrom, gapEnd);
+                const gMonthlyHistoryUrl = ratesUrlWithWindow(derived.gtariffPrices, monthlyFrom, gapEnd);
+                const eMonthlyStandingUrl = ratesUrlWithWindow(derived.etariffStanding, monthlyFrom, gapEnd);
+                const gMonthlyStandingUrl = ratesUrlWithWindow(derived.gtariffStanding, monthlyFrom, gapEnd);
+                const eMonthlyConsumptionUrls = derived.electricityMeters.map((meter) => `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}` +
+                    `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+                    `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
+                    `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
+                    `&order_by=period`);
+                const gMonthlyConsumptionUrls = derived.gasMeters.map((meter) => `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}` +
+                    `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+                    `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
+                    `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
+                    `&order_by=period`);
+                const [eGapRates, gGapRates, eGapStanding, gGapStanding, eGapConsumptionPages, gGapConsumptionPages,] = await Promise.all([
+                    fetchAllOctopusResults(eMonthlyHistoryUrl, token),
+                    fetchAllOctopusResults(gMonthlyHistoryUrl, token),
+                    fetchAllOctopusResults(eMonthlyStandingUrl, token),
+                    fetchAllOctopusResults(gMonthlyStandingUrl, token),
+                    Promise.all(eMonthlyConsumptionUrls.map((url) => fetchAllOctopusResults(url, token))),
+                    Promise.all(gMonthlyConsumptionUrls.map((url) => fetchAllOctopusResults(url, token))),
+                ]);
+                const eGapConsumption = eGapConsumptionPages.flat();
+                const gGapConsumption = gGapConsumptionPages.flat();
+                eMonthlyDaily = mergeDailyTotals(eMonthlyDaily, aggregateDailyBilledPence(eGapConsumption, eGapRates, standingChargePerDayPence(eGapStanding), 1));
+                gMonthlyDaily = mergeDailyTotals(gMonthlyDaily, aggregateDailyBilledPence(gGapConsumption, gGapRates, standingChargePerDayPence(gGapStanding), gasKwhPerUnit));
+                eMonthlyKwh = mergeDailyTotals(eMonthlyKwh, aggregateDailyConsumedKwh(eGapConsumption, 1));
+                gMonthlyKwh = mergeDailyTotals(gMonthlyKwh, aggregateDailyConsumedKwh(gGapConsumption, gasKwhPerUnit));
+            }
+            const computedMonthly = monthlyAveragesFromDaily(eMonthlyDaily, gMonthlyDaily, eMonthlyKwh, gMonthlyKwh);
+            for (const month of missingMonths) {
+                if (!computedMonthly[month])
+                    continue;
+                // Always show newly computed values this run, even for current month.
+                monthlyForDisplay[month] = computedMonthly[month];
+                // Only persist finished months to cache.
+                if (isFinishedMonth(month, from)) {
+                    monthlyCache[month] = computedMonthly[month];
+                }
+            }
+            saveMonthlyAverageCache(monthlyCache);
+        }
+        printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
+        printFinalMonthTotals(monthlyForDisplay, from);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
