@@ -43,7 +43,8 @@ const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_CLARET = "\x1b[38;5;88m";
 const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
-const ANSI_PURPLE = "\x1b[38;5;93m";
+const ANSI_ORANGE = "\x1b[38;5;208m";
+const ANSI_BLUE = "\x1b[94m";
 const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 const urlForDaysGames = (today, end, start) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent("urn:bbc:sportsdata:football:tournament-collection:collated")}`;
 const urlForTeamGames = (today, end, start, teamUrn) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent(teamUrn)}`;
@@ -301,20 +302,25 @@ function fixtureLine(event, options = {}) {
     const datePrefix = includeDate
         ? `${formatFixtureDate(event.startTime || event.startDateTime)} `
         : "";
-    const suffix = showCompetitionTag ? `(${competitionTag})` : `(${statusLabel})`;
+    const isLive = isResultState(event) && !isFinishedState(event);
+    const time = eventTime(event);
+    const timeDisplay = time;
+    const isScheduled = normalizeText(statusLabel) === "scheduled";
+    const liveStatusLabel = shouldUseColor() && isLive ? `${ANSI_BLUE}${statusLabel}${ANSI_RESET}` : statusLabel;
+    const suffix = showCompetitionTag ? `(${competitionTag})` : isScheduled ? "" : `(${liveStatusLabel})`;
+    const suffixWithSpace = suffix ? ` ${suffix}` : "";
     if (isResultState(event) && hasScore) {
         const homeN = scoreNumber(homeScore);
         const awayN = scoreNumber(awayScore);
-        const isLive = !isFinishedState(event);
         let homeDisplay = home;
         let awayDisplay = away;
         if (homeN != null && awayN != null && homeN !== awayN) {
             homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
             awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
         }
-        return `${datePrefix}${eventTime(event)} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay} ${suffix}`;
+        return `${datePrefix}${timeDisplay} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay}${suffixWithSpace}`;
     }
-    return `${datePrefix}${eventTime(event)} ${home} vs ${away} ${suffix}`;
+    return `${datePrefix}${timeDisplay} ${home} vs ${away}${suffixWithSpace}`;
 }
 function printGroupedFixtures(events, heading, options = {}) {
     console.log(heading);
@@ -681,7 +687,7 @@ async function fixturesForDay(dayYmd, relativeHeading) {
     const url = urlForDaysGames(today, dayYmd, dayYmd);
     const events = (await fetchMatchData(url, dayYmd)).filter(competitionAllowed);
     const heading = relativeHeading !== undefined
-        ? `${ANSI_PURPLE}=== Fixtures for ${relativeHeading} (${formatYmdLondonShort(dayYmd)}) ===${ANSI_RESET}`
+        ? `${ANSI_ORANGE}=== Fixtures for ${relativeHeading} (${formatYmdLondonShort(dayYmd)}) ===${ANSI_RESET}`
         : `Fixtures for ${dayYmd} (at ${formatPrintedAtTimestamp()})`;
     if (relativeHeading !== undefined) {
         console.log("");

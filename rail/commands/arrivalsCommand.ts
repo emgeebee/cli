@@ -1,0 +1,72 @@
+import type { Command } from 'commander';
+
+import { DEFAULT_LIMIT } from '../lib/constants';
+import { ensurePositiveInteger, parseIntegerOption } from '../lib/commandUtils';
+import { ensureStationInput, formatRailBoardText, normalizeRailBoardData } from '../lib/railBoards';
+import { runCommand, withGlobalOutputOptions } from '../lib/output';
+import { resolveStation } from '../lib/stations';
+
+import type { RailBoardData } from '../lib/types';
+import type { TextFormatterContext } from '../lib/output';
+import type { HuxleyClient } from '../providers/huxley';
+
+type ArrivalsCommandOptions = {
+  expand?: boolean;
+  from?: string;
+  json?: boolean;
+  limit?: number;
+  text?: boolean;
+};
+
+const ARRIVALS_HELP_EXAMPLES = `
+Examples:
+  rail arrivals leeds --from london --limit 5
+`;
+
+export const registerArrivalsCommand = (program: Command, huxleyClient: HuxleyClient): void => {
+  program
+    .command('arrivals')
+    .description('Get live arrivals at a National Rail station.')
+    .argument('<station>', 'Station name or CRS code')
+    .option('--from <origin>', 'Optional origin station to filter arrivals')
+    .option('--expand', 'Include calling points for each service')
+    .option('--limit <count>', 'Maximum number of arrivals to return', parseIntegerOption, DEFAULT_LIMIT)
+    .option('--json', 'Force JSON output')
+    .option('--text', 'Force text output')
+    .addHelpText('after', ARRIVALS_HELP_EXAMPLES)
+    .action(async (station: string, options: ArrivalsCommandOptions, command: Command) => {
+      await runCommand(
+        'arrivals',
+        withGlobalOutputOptions(command, options),
+        async () => {
+          const limit = ensurePositiveInteger(options.limit ?? DEFAULT_LIMIT, 'limit');
+          const requestedStation = ensureStationInput(station, 'station');
+          const requestedFilter = options.from ? ensureStationInput(options.from, 'origin') : undefined;
+          const resolvedStation = await resolveStation(huxleyClient, requestedStation);
+          const resolvedFilter = requestedFilter
+            ? await resolveStation(huxleyClient, requestedFilter)
+            : undefined;
+          const board = await huxleyClient.getArrivals({
+            crs: resolvedStation.crs,
+            expand: options.expand,
+            filterCrs: resolvedFilter?.crs,
+            limit,
+          });
+
+          return normalizeRailBoardData({
+            board,
+            boardKind: 'arrivals',
+            expand: options.expand === true,
+            requestedFilter,
+            requestedStation,
+            resolvedFilter,
+            resolvedStation,
+          }) satisfies RailBoardData;
+        },
+        formatArrivalsText,
+      );
+    });
+};
+
+const formatArrivalsText = (data: RailBoardData, context: TextFormatterContext): string =>
+  formatRailBoardText(data, 'arrivals', context);

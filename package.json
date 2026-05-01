@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {
@@ -13,7 +13,9 @@
     "bday": "./dist/bday.js",
     "octo": "./dist/octo.js",
     "money": "./dist/money.js",
-    "cmd": "./dist/cmd.js"
+    "cmd": "./dist/cmd.js",
+    "fuel": "./dist/fuel.js",
+    "r": "./dist/r.js"
   },
   "files": [
     "dist"
@@ -30,7 +32,14 @@
     "octo": "pnpm build && node dist/octo.js",
     "money": "pnpm build && node dist/money.js",
     "cmd": "pnpm build && node dist/cmd.js",
+    "fuel": "pnpm build && node dist/fuel.js",
+    "r": "pnpm build && node dist/r.js",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "dotenv": "^17.2.3",
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/node": "^24.9.1",

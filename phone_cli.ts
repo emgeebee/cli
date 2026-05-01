@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const COMMANDS = new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd"]);
+const COMMANDS = new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r"]);
 
 function printUsage(): void {
   console.log("phone_cli commands:");
@@ -16,6 +16,8 @@ function printUsage(): void {
   console.log("  money  Monthly countdown value");
   console.log("  cmd    Home automation shortcuts");
   console.log("         slon, slof, smon, smof, shon, shof, blon, blof");
+  console.log("  fuel   UK fuel prices (near, station, list)");
+  console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("");
   console.log("Usage:");
   console.log("  npx @emgeebee/phone_cli <command> [args]");
@@ -26,6 +28,8 @@ function printUsage(): void {
   console.log("  npx @emgeebee/phone_cli money");
   console.log("  npx @emgeebee/phone_cli cmd");
   console.log("  npx @emgeebee/phone_cli cmd slon");
+  console.log('  npx @emgeebee/phone_cli fuel near "SE1 9SG" --fuel E10');
+  console.log('  npx @emgeebee/phone_cli r departures KGX');
 }
 
 function runSubcommand(command: string, args: string[]): never {
