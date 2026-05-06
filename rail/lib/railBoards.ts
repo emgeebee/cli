@@ -3,6 +3,7 @@ import { createAppError } from './errors';
 import type { RailBoardData, RailBoardService, RailServiceStatus, ResolvedStation } from './types';
 import type { TextFormatterContext } from './output';
 import type { HuxleyBoardService, HuxleyStationBoardResponse } from './schemas';
+import { getTerminalWidth } from '../../lib/terminal';
 
 type BoardKind = 'arrivals' | 'departures';
 
@@ -64,7 +65,6 @@ export const formatRailBoardText = (
   }
 
   const scheduledWidth = Math.max(...data.services.map((service) => service.scheduledTime.length));
-  const operatorWidth = Math.max(...data.services.map((service) => service.operatorName.length));
 
   const serviceLines = data.services.flatMap((service) => {
     const scheduledLabel = context.text.style.primary(
@@ -79,11 +79,11 @@ export const formatRailBoardText = (
       .filter((value) => value.length > 0)
       .join('  ');
     const serviceRow =
-      context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= context.terminalWidth
-        ? context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth)
+      context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= getTerminalWidth() 
+        ? context.text.joinAligned(leftColumn, statusLabel, getTerminalWidth())
         : context.text
             .wrapText(`${leftColumn}  ${statusLabel}`, {
-              width: context.terminalWidth,
+              width: getTerminalWidth(),
             })
             .join('\n');
     const callingPointLines = service.callingPoints
@@ -91,7 +91,7 @@ export const formatRailBoardText = (
           .wrapText(service.callingPoints.join(', '), {
             continuationIndent: '    ',
             firstIndent: '    ',
-            width: context.terminalWidth,
+            width: getTerminalWidth(),
           })
           .map((line) => context.text.style.dim(line))
       : [];
