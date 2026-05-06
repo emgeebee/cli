@@ -166,6 +166,7 @@ const ANSI_DARK_RED = "\x1b[31m";
 const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_CLARET = "\x1b[38;5;88m";
+const ANSI_BG_CLARET = "\x1b[48;5;88m";
 const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_BLUE = "\x1b[94m";
@@ -369,13 +370,7 @@ function isAstonVillaName(name: string): boolean {
 
 function highlightAstonVilla(name: string): string {
   if (!shouldUseColor() || !isAstonVillaName(name)) return name;
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const first = parts[0];
-    const rest = parts.slice(1).join(" ");
-    return `${ANSI_CLARET}${first}${ANSI_RESET} ${ANSI_VILLA_BLUE}${rest}${ANSI_RESET}`;
-  }
-  return `${ANSI_CLARET}${name}${ANSI_RESET}${ANSI_VILLA_BLUE}${ANSI_RESET}`;
+  return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET}`;
 }
 
 function competitionLabel(event: ApiEvent): string {

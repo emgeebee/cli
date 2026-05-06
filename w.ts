@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+import stripAnsi from "strip-ansi";
+import stringWidth from "string-width";
+
 import { getConfigPath, readPhoneCliConfig } from "./config";
 
 type DailyReport = {
@@ -57,10 +60,44 @@ const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_RED = "\x1b[31m";
-const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
+
+const HEAVY_RAIN_WORDING =
+  /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
+const LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
+
+/** Many terminals render emoji one cell wider than `string-width` reports (e.g. VS Code). */
+const EXTENDED_PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 
 function visibleLength(value: string): number {
-  return value.replace(ANSI_REGEX, "").length;
+  return stringWidth(stripAnsi(value));
+}
+
+/**
+ * Width for emoji / mixed text (`Ic`, `Moon`). Empty → 0 (column pads with spaces only).
+ * Must match measuring + padding: no +1 fudge; `string-width` can be 1 for ☾ yet terminals use 2 cols;
+ * some VS16 pairs report 3 (e.g. ⛅️) — clamp those to 2.
+ */
+function emojiTerminalDisplayWidth(value: string): number {
+  const plain = stripAnsi(value);
+  if (!plain) return 0;
+  try {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    let total = 0;
+    for (const { segment } of segmenter.segment(plain)) {
+      const sw = stringWidth(segment);
+      if (EXTENDED_PICTOGRAPHIC.test(segment)) {
+        let w = Math.max(sw, 2);
+        total += w -1;
+      } else if (/\p{Regional_Indicator}/u.test(segment)) {
+        total += Math.max(sw, 2);
+      } else {
+        total += sw;
+      }
+    }
+    return total;
+  } catch {
+    return visibleLength(value);
+  }
 }
 
 function usage(): void {
@@ -72,6 +109,7 @@ function usage(): void {
   console.log("  w");
   console.log("  w ws9");
   console.log("  w sw1a");
+  console.log("");
 }
 
 function sanitizePostcode(input: string): string {
@@ -170,15 +208,60 @@ async function fetchMoonPhase(localDate?: string): Promise<string> {
   return `${emoji} ${phase}`.trim();
 }
 
+type WeatherDisplay = { icon: string; description: string };
+
+/**
+ * Icons in a narrow column so the Weather column is text-only (stable table width).
+ * Order matters: more specific patterns before generic ones.
+ */
+function formatWeatherDisplay(weatherTypeText?: string, enhancedWeatherDescription?: string): WeatherDisplay {
+  const description = (weatherTypeText || enhancedWeatherDescription || "Unknown").trim() || "Unknown";
+  const lower = description.toLowerCase();
+
+  if (/\b(snow|sleet|hail|blizzard|ice pellets|freezing rain|wintry|wintry showers)\b/.test(lower)) {
+    return { icon: "❄️", description };
+  }
+
+  if (HEAVY_RAIN_WORDING.test(lower)) {
+    return { icon: "⛈️⛈️", description };
+  }
+
+  if (LIGHT_RAIN_WORDING.test(lower)) {
+    return { icon: "⛈️", description };
+  }
+
+  if (
+    /\b(light cloud|thin cloud|partly cloudy|partly sunny|sunny intervals|medium cloud|bright intervals)\b/.test(
+      lower,
+    )
+  ) {
+    return { icon: "⛅️", description };
+  }
+
+  if (/\bsunny\b/.test(lower) && !/\bnot\s+sunny\b/.test(lower)) {
+    return { icon: "☀️", description };
+  }
+
+  if (/\b(overcast|heavy cloud|thick cloud|grey cloud|gray cloud|cloudy)\b/.test(lower)) {
+    return { icon: "☁️", description };
+  }
+
+  if (/\bclear\s+sky\b/.test(lower)) {
+    return { icon: "☾", description };
+  }
+
+  return { icon: "", description };
+}
+
 function formatDayCells(report: DailyReport): string[] {
   const date = formatDisplayDate(report.localDate);
-  const weather = report.weatherTypeText || report.enhancedWeatherDescription || "Unknown";
+  const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
   const hi = formatMaxTemp(report.maxTempC);
   const lo = formatMinTemp(report.minTempC);
   const rain = formatRain(report.precipitationProbabilityInPercent);
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
-  return [date, weather, lo, hi, rain, `${windSpeed} ${windDir}`];
+  return [date, wx.icon, wx.description, lo, hi, rain, `${windSpeed} ${windDir}`];
 }
 
 function formatDisplayDate(localDate?: string): string {
@@ -198,12 +281,12 @@ function formatHourlyTemp(value?: number | null): string {
 
 function formatHourlyCells(report: HourlyReport): string[] {
   const time = report.timeslot || "??:??";
-  const weather = report.weatherTypeText || report.enhancedWeatherDescription || "Unknown";
+  const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
   const temp = formatHourlyTemp(report.temperatureC);
   const rain = formatRain(report.precipitationProbabilityInPercent);
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
-  return [time, weather, temp, rain, `${windSpeed} ${windDir}`];
+  return [time, wx.icon, wx.description, temp, rain, `${windSpeed} ${windDir}`];
 }
 
 function parseClockMinutes(value?: string | null): number | null {
@@ -268,10 +351,15 @@ function formatMinTemp(value?: number | null): string {
 function formatRain(value?: number | null): string {
   if (value == null) return "?%";
   const text = `${value}%`;
-  if (value > 80) return colorize(text, ANSI_RED);
-  if (value >= 50) return colorize(text, ANSI_ORANGE);
-  if (value >= 25) return colorize(text, ANSI_YELLOW);
-  return colorize(text, ANSI_GREEN);
+  const colored =
+    value > 80
+      ? colorize(text, ANSI_RED)
+      : value >= 50
+        ? colorize(text, ANSI_ORANGE)
+        : value >= 25
+          ? colorize(text, ANSI_YELLOW)
+          : colorize(text, ANSI_GREEN);
+  return colored;
 }
 
 function formatWindSpeed(value?: number | null): string {
@@ -279,20 +367,35 @@ function formatWindSpeed(value?: number | null): string {
   const text = `${value}mph`;
   if (value > 40) return colorize(text, ANSI_RED);
   if (value >= 20) return colorize(text, ANSI_ORANGE);
+  if (value >= 10) return colorize(text, ANSI_YELLOW);
   return colorize(text, ANSI_GREEN);
 }
 
-function makeAsciiTable(headers: string[], rows: string[][], forcedWidths?: number[]): string[] {
-  const padCell = (value: string, width: number): string => {
-    const padCount = width - visibleLength(value);
+type ColWidthFns = Partial<Record<number, (value: string) => number>>;
+
+function cellWidthForTable(colIdx: number, value: string, colWidthFns?: ColWidthFns): number {
+  const fn = colWidthFns?.[colIdx];
+  if (fn) return fn(value);
+  return visibleLength(value);
+}
+
+function makeAsciiTable(
+  headers: string[],
+  rows: string[][],
+  forcedWidths?: number[],
+  colWidthFns?: ColWidthFns,
+): string[] {
+  const padCell = (value: string, colIdx: number, width: number): string => {
+    const vw = cellWidthForTable(colIdx, value, colWidthFns);
+    const padCount = width - vw;
     return padCount > 0 ? `${value}${" ".repeat(padCount)}` : value;
   };
 
   const widths = headers.map((header, colIdx) => {
-    let max = Math.max(visibleLength(header), forcedWidths?.[colIdx] || 0);
+    let max = Math.max(cellWidthForTable(colIdx, header, colWidthFns), forcedWidths?.[colIdx] || 0);
     for (const row of rows) {
       const cell = row[colIdx] || "";
-      const len = visibleLength(cell);
+      const len = cellWidthForTable(colIdx, cell, colWidthFns);
       if (len > max) max = len;
     }
     return max;
@@ -300,7 +403,7 @@ function makeAsciiTable(headers: string[], rows: string[][], forcedWidths?: numb
 
   const border = `+${widths.map((w) => "-".repeat(w + 2)).join("+")}+`;
   const renderRow = (cells: string[]): string =>
-    `| ${cells.map((cell, i) => padCell(cell || "", widths[i])).join(" | ")} |`;
+    `| ${cells.map((cell, i) => padCell(cell || "", i, widths[i])).join(" | ")} |`;
 
   const lines = [border, renderRow(headers), border];
   for (const row of rows) {
@@ -326,7 +429,10 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
     return;
   }
 
-  const dayHeaders = ["Date", "Weather", "Min", "Max", "Rain", "Wind"];
+  const forecastColWidthFns: ColWidthFns = { 1: emojiTerminalDisplayWidth };
+  const todayExtrasColWidthFns: ColWidthFns = { 4: emojiTerminalDisplayWidth };
+
+  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
   const dayRows = reports.slice(0, 7).map((report) => formatDayCells(report));
 
   const hourlyReports = (data.forecasts || [])
@@ -346,11 +452,18 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
   const tomorrowHourlyRows = rowsForDate(tomorrowDate);
   const allHourlyRows = [...tomorrowHourlyRows, ...todayHourlyRows];
 
+  const minTempColWidth = Math.max(
+    visibleLength("Min"),
+    ...dayRows.map((r) => visibleLength(r[3] || "")),
+  );
+  const maxTempColWidth = Math.max(
+    visibleLength("Max"),
+    ...dayRows.map((r) => visibleLength(r[4] || "")),
+  );
   const tempWidth = Math.max(
     visibleLength("Temp"),
-    visibleLength("Min"),
-    visibleLength("Max"),
-    ...dayRows.map((r) => Math.max(visibleLength(r[3] || ""), visibleLength(r[4] || ""))),
+    minTempColWidth,
+    maxTempColWidth,
     ...allHourlyRows.map((r) => visibleLength(r[3] || "")),
   );
   const sharedWidths = {
@@ -360,26 +473,32 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
       ...dayRows.map((r) => visibleLength(r[0] || "")),
       ...allHourlyRows.map((r) => visibleLength(r[0] || "")),
     ),
+    icon: Math.max(
+      emojiTerminalDisplayWidth("Ic"),
+      ...dayRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+      ...allHourlyRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+    ),
     weather: Math.max(
       visibleLength("Weather"),
-      ...dayRows.map((r) => visibleLength(r[1] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[1] || "")),
+      ...dayRows.map((r) => visibleLength(r[2] || "")),
+      ...allHourlyRows.map((r) => visibleLength(r[2] || "")),
     ),
     rain: Math.max(
       visibleLength("Rain"),
-      ...dayRows.map((r) => visibleLength(r[4] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[3] || "")),
-    ),
-    wind: Math.max(
-      visibleLength("Wind"),
       ...dayRows.map((r) => visibleLength(r[5] || "")),
       ...allHourlyRows.map((r) => visibleLength(r[4] || "")),
     ),
+    wind: Math.max(
+      visibleLength("Wind"),
+      ...dayRows.map((r) => visibleLength(r[6] || "")),
+      ...allHourlyRows.map((r) => visibleLength(r[5] || "")),
+    ),
   };
 
-  const hourlyHeaders = ["Time", "Weather", "Temp", "Rain", "Wind"];
+  const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
   const hourlyWidths = [
     sharedWidths.dateOrTime,
+    sharedWidths.icon,
     sharedWidths.weather,
     tempWidth,
     sharedWidths.rain,
@@ -389,7 +508,7 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
   const printHourlySection = (date: string, rows: string[][]): void => {
     if (!date || rows.length === 0) return;
     console.log(`Hourly forecast for ${formatDisplayDate(date)}`);
-    const lines = makeAsciiTable(hourlyHeaders, rows, hourlyWidths);
+    const lines = makeAsciiTable(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns);
     for (const line of lines) {
       console.log(line);
     }
@@ -413,6 +532,8 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
     const extraLines = makeAsciiTable(
       ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
       extrasRows,
+      undefined,
+      todayExtrasColWidthFns,
     );
     for (const line of extraLines) {
       console.log(line);
@@ -423,13 +544,14 @@ async function printForecast(data: WeatherResponse, requestedPostcode: string): 
   console.log("Week ahead");
   const dayWidths = [
     sharedWidths.dateOrTime,
+    sharedWidths.icon,
     sharedWidths.weather,
     tempWidth,
     tempWidth,
     sharedWidths.rain,
     sharedWidths.wind,
   ];
-  const dayTableLines = makeAsciiTable(dayHeaders, dayRows, dayWidths);
+  const dayTableLines = makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
   for (const line of dayTableLines) {
     console.log(line);
   }

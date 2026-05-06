@@ -103,7 +103,7 @@ var ANSI_DARK_GREEN = "\x1B[32m";
 var ANSI_DARK_RED = "\x1B[31m";
 var ANSI_BRIGHT_GREEN = "\x1B[92m";
 var ANSI_BRIGHT_RED = "\x1B[91m";
-var ANSI_CLARET = "\x1B[38;5;88m";
+var ANSI_BG_CLARET = "\x1B[48;5;88m";
 var ANSI_VILLA_BLUE = "\x1B[38;5;39m";
 var ANSI_ORANGE = "\x1B[38;5;208m";
 var ANSI_BLUE = "\x1B[94m";
@@ -278,13 +278,7 @@ function isAstonVillaName(name) {
 }
 function highlightAstonVilla(name) {
   if (!shouldUseColor() || !isAstonVillaName(name)) return name;
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const first = parts[0];
-    const rest = parts.slice(1).join(" ");
-    return `${ANSI_CLARET}${first}${ANSI_RESET} ${ANSI_VILLA_BLUE}${rest}${ANSI_RESET}`;
-  }
-  return `${ANSI_CLARET}${name}${ANSI_RESET}${ANSI_VILLA_BLUE}${ANSI_RESET}`;
+  return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET}`;
 }
 function competitionLabel(event) {
   return event?.tournament?.disambiguatedName || event?.tournament?.name || event?.eventGroupingLabel || "Other";
