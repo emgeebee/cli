@@ -67,18 +67,15 @@ export const formatRailBoardText = (
   const operatorWidth = Math.max(...data.services.map((service) => service.operatorName.length));
 
   const serviceLines = data.services.flatMap((service) => {
-    const scheduledLabel = context.text.style.dim(
+    const scheduledLabel = context.text.style.primary(
       context.text.padVisibleStart(service.scheduledTime, scheduledWidth),
     );
     const counterpartLabel = context.text.style.primary(service.counterpartName);
-    const operatorLabel = context.text.style.dim(
-      context.text.padVisibleEnd(service.operatorName, operatorWidth),
-    );
     const platformLabel = service.platform
       ? context.text.style.bold(context.text.style.cyan(`Plat ${service.platform}`))
       : '';
     const statusLabel = context.text.style.status(getServiceEmoji(service.status, service.statusLabel), service.statusLabel);
-    const leftColumn = [scheduledLabel, counterpartLabel, operatorLabel, platformLabel]
+    const leftColumn = [scheduledLabel, counterpartLabel,  platformLabel]
       .filter((value) => value.length > 0)
       .join('  ');
     const serviceRow =

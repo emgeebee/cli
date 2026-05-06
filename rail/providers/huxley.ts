@@ -128,7 +128,7 @@ const buildBoardUrl = ({
   }
 
   if (accessToken) {
-    url.searchParams.set('accessToken', accessToken);
+    // url.searchParams.set('accessToken', accessToken);
   }
 
   return url;

@@ -79,7 +79,7 @@ const buildBoardUrl = ({ accessToken, baseUrl, board, crs, expand, filterCrs, fi
         url.searchParams.set('expand', 'true');
     }
     if (accessToken) {
-        url.searchParams.set('accessToken', accessToken);
+        // url.searchParams.set('accessToken', accessToken);
     }
     return url;
 };
