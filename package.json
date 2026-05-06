@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.2.11",
+  "version": "3.2.12",
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {
@@ -23,7 +23,7 @@
   "scripts": {
     "build": "pnpm run typecheck && pnpm run bundle",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts ball.ts cal.ts w.ts cric.ts bday.ts octo.ts money.ts cmd.ts fuel.ts r.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist --banner:js='#!/usr/bin/env node'",
+    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts ball.ts cal.ts w.ts cric.ts bday.ts octo.ts money.ts cmd.ts fuel.ts r.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist",
     "phone_cli": "pnpm build && node dist/phone_cli.js",
     "ball": "pnpm build && node dist/ball.js",
     "phone-cal": "pnpm build && node dist/cal.js",

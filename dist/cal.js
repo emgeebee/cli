@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-#!/usr/bin/env node
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
