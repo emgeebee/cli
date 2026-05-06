@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureStationInput = exports.formatRailBoardText = exports.normalizeRailBoardData = void 0;
 const errors_1 = require("./errors");
+const terminal_1 = require("../../lib/terminal");
 const normalizeRailBoardData = ({ board, boardKind, expand, requestedFilter, requestedStation, resolvedFilter, resolvedStation, }) => ({
     filter: resolvedFilter
         ? {
@@ -24,7 +25,6 @@ const formatRailBoardText = (data, boardKind, context) => {
         return `No live ${boardKind} currently available for ${data.station.name}.`;
     }
     const scheduledWidth = Math.max(...data.services.map((service) => service.scheduledTime.length));
-    const operatorWidth = Math.max(...data.services.map((service) => service.operatorName.length));
     const serviceLines = data.services.flatMap((service) => {
         const scheduledLabel = context.text.style.primary(context.text.padVisibleStart(service.scheduledTime, scheduledWidth));
         const counterpartLabel = context.text.style.primary(service.counterpartName);
@@ -35,11 +35,11 @@ const formatRailBoardText = (data, boardKind, context) => {
         const leftColumn = [scheduledLabel, counterpartLabel, platformLabel]
             .filter((value) => value.length > 0)
             .join('  ');
-        const serviceRow = context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= context.terminalWidth
-            ? context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth)
+        const serviceRow = context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= (0, terminal_1.getTerminalWidth)()
+            ? context.text.joinAligned(leftColumn, statusLabel, (0, terminal_1.getTerminalWidth)())
             : context.text
                 .wrapText(`${leftColumn}  ${statusLabel}`, {
-                width: context.terminalWidth,
+                width: (0, terminal_1.getTerminalWidth)(),
             })
                 .join('\n');
         const callingPointLines = service.callingPoints
@@ -47,7 +47,7 @@ const formatRailBoardText = (data, boardKind, context) => {
                 .wrapText(service.callingPoints.join(', '), {
                 continuationIndent: '    ',
                 firstIndent: '    ',
-                width: context.terminalWidth,
+                width: (0, terminal_1.getTerminalWidth)(),
             })
                 .map((line) => context.text.style.dim(line))
             : [];
