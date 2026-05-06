@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
 
+import { getTerminalWidth } from '../../lib/terminal';
 import {
   createTextStyler,
-  getTerminalWidth,
   joinAligned,
   padVisibleEnd,
   padVisibleStart,

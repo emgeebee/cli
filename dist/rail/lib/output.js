@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.withGlobalOutputOptions = exports.runCommand = exports.getOutputMode = void 0;
+const terminal_1 = require("../../lib/terminal");
 const colours_1 = require("./colours");
 const constants_1 = require("./constants");
 const errors_1 = require("./errors");
@@ -26,7 +27,7 @@ const runCommand = async (commandName, options, handler, formatText) => {
         !process.env['NO_COLOR'];
     const textContext = {
         colorEnabled,
-        terminalWidth: (0, colours_1.getTerminalWidth)(),
+        terminalWidth: (0, terminal_1.getTerminalWidth)(),
         text: {
             joinAligned: colours_1.joinAligned,
             padVisibleEnd: colours_1.padVisibleEnd,

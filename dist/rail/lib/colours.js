@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTerminalWidth = exports.joinAligned = exports.wrapText = exports.padVisibleStart = exports.padVisibleEnd = exports.visibleWidth = exports.stripAnsi = exports.createTextStyler = void 0;
+exports.joinAligned = exports.wrapText = exports.padVisibleStart = exports.padVisibleEnd = exports.visibleWidth = exports.stripAnsi = exports.createTextStyler = void 0;
 const ESCAPE_CHARACTER = String.fromCharCode(27);
 const ANSI_PATTERN = new RegExp(`${ESCAPE_CHARACTER}\\[[0-9;]*m`, 'g');
 const ANSI_RESET = '\u001B[0m';
@@ -123,5 +123,3 @@ const joinAligned = (left, right, width, gap = 2) => {
     return `${left}${' '.repeat(gap)}${right}`;
 };
 exports.joinAligned = joinAligned;
-const getTerminalWidth = () => process.stdout.columns ?? 80;
-exports.getTerminalWidth = getTerminalWidth;

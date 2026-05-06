@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 
+import { getTerminalWidth } from "../../lib/terminal";
 import {
   createTextStyler,
-  getTerminalWidth,
   joinAligned,
   padVisibleEnd,
   padVisibleStart,
@@ -69,7 +69,7 @@ export const runCommand = async <TData>(
       !process.env["NO_COLOR"];
     const textContext: TextFormatterContext = {
       colorEnabled,
-      terminalWidth: 80,
+      terminalWidth: getTerminalWidth(),
       text: {
         joinAligned,
         padVisibleEnd,

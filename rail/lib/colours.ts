@@ -170,4 +170,3 @@ export const joinAligned = (left: string, right: string, width: number, gap = 2)
   return `${left}${' '.repeat(gap)}${right}`;
 };
 
-export const getTerminalWidth = (): number => process.stdout.columns ?? 80;
