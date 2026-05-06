@@ -81,7 +81,11 @@ export const formatRailBoardText = (
     const serviceRow =
       context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= context.terminalWidth
         ? context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth)
-        : `${leftColumn}  ${statusLabel}`;
+        : context.text
+            .wrapText(`${leftColumn}  ${statusLabel}`, {
+              width: context.terminalWidth,
+            })
+            .join('\n');
     const callingPointLines = service.callingPoints
       ? context.text
           .wrapText(service.callingPoints.join(', '), {
