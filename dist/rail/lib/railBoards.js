@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureStationInput = exports.formatRailBoardText = exports.normalizeRailBoardData = void 0;
 const errors_1 = require("./errors");
-const terminal_1 = require("../../lib/terminal");
 const normalizeRailBoardData = ({ board, boardKind, expand, requestedFilter, requestedStation, resolvedFilter, resolvedStation, }) => ({
     filter: resolvedFilter
         ? {
@@ -35,19 +34,30 @@ const formatRailBoardText = (data, boardKind, context) => {
         const leftColumn = [scheduledLabel, counterpartLabel, platformLabel]
             .filter((value) => value.length > 0)
             .join('  ');
-        const serviceRow = context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= (0, terminal_1.getTerminalWidth)()
-            ? context.text.joinAligned(leftColumn, statusLabel, (0, terminal_1.getTerminalWidth)())
-            : context.text
-                .wrapText(`${leftColumn}  ${statusLabel}`, {
-                width: (0, terminal_1.getTerminalWidth)(),
-            })
-                .join('\n');
+        const serviceRow = (() => {
+            const statusWidth = context.text.visibleWidth(statusLabel);
+            const leftWidth = context.text.visibleWidth(leftColumn);
+            if (leftWidth + statusWidth + 2 <= context.terminalWidth) {
+                return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth);
+            }
+            // Keep status intact on the first line; only wrap the left column.
+            const leftWrapWidth = Math.max(1, context.terminalWidth - statusWidth - 2);
+            const wrappedLeft = context.text.wrapText(leftColumn, {
+                continuationIndent: '  ',
+                width: leftWrapWidth,
+            });
+            if (wrappedLeft.length === 0) {
+                return statusLabel;
+            }
+            const [firstLeft, ...restLeft] = wrappedLeft;
+            return [`${firstLeft}  ${statusLabel}`, ...restLeft].join('\n');
+        })();
         const callingPointLines = service.callingPoints
             ? context.text
                 .wrapText(service.callingPoints.join(', '), {
                 continuationIndent: '    ',
                 firstIndent: '    ',
-                width: (0, terminal_1.getTerminalWidth)(),
+                width: context.terminalWidth,
             })
                 .map((line) => context.text.style.dim(line))
             : [];

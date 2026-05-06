@@ -3,7 +3,6 @@ import { createAppError } from './errors';
 import type { RailBoardData, RailBoardService, RailServiceStatus, ResolvedStation } from './types';
 import type { TextFormatterContext } from './output';
 import type { HuxleyBoardService, HuxleyStationBoardResponse } from './schemas';
-import { getTerminalWidth } from '../../lib/terminal';
 
 type BoardKind = 'arrivals' | 'departures';
 
@@ -78,20 +77,31 @@ export const formatRailBoardText = (
     const leftColumn = [scheduledLabel, counterpartLabel,  platformLabel]
       .filter((value) => value.length > 0)
       .join('  ');
-    const serviceRow =
-      context.text.visibleWidth(leftColumn) + context.text.visibleWidth(statusLabel) + 2 <= getTerminalWidth() 
-        ? context.text.joinAligned(leftColumn, statusLabel, getTerminalWidth())
-        : context.text
-            .wrapText(`${leftColumn}  ${statusLabel}`, {
-              width: getTerminalWidth(),
-            })
-            .join('\n');
+    const serviceRow = (() => {
+      const statusWidth = context.text.visibleWidth(statusLabel);
+      const leftWidth = context.text.visibleWidth(leftColumn);
+      if (leftWidth + statusWidth + 2 <= context.terminalWidth) {
+        return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth);
+      }
+
+      // Keep status intact on the first line; only wrap the left column.
+      const leftWrapWidth = Math.max(1, context.terminalWidth - statusWidth - 2);
+      const wrappedLeft = context.text.wrapText(leftColumn, {
+        continuationIndent: '  ',
+        width: leftWrapWidth,
+      });
+      if (wrappedLeft.length === 0) {
+        return statusLabel;
+      }
+      const [firstLeft, ...restLeft] = wrappedLeft;
+      return [`${firstLeft}  ${statusLabel}`, ...restLeft].join('\n');
+    })();
     const callingPointLines = service.callingPoints
       ? context.text
           .wrapText(service.callingPoints.join(', '), {
             continuationIndent: '    ',
             firstIndent: '    ',
-            width: getTerminalWidth(),
+            width: context.terminalWidth,
           })
           .map((line) => context.text.style.dim(line))
       : [];
