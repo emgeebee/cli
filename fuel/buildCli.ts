@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { registerListCommand } from "./commands/listCommand";
@@ -16,10 +17,23 @@ export type CliDependencies = {
   fuelService: FuelService;
 };
 
-// `phone_cli` compiles as CommonJS; avoid `import.meta` / `createRequire`.
-// Use `__dirname` so the path still works after compilation into `dist/`.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const packageJson = require(join(__dirname, "..", "..", "package.json")) as { version: string };
+const readPackageVersion = (): string => {
+  const candidatePaths = [
+    join(__dirname, "..", "..", "package.json"),
+    join(__dirname, "..", "package.json")
+  ];
+  for (const path of candidatePaths) {
+    if (!existsSync(path)) {
+      continue;
+    }
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown };
+    if (typeof parsed.version === "string" && parsed.version.trim().length > 0) {
+      return parsed.version;
+    }
+  }
+  return "0.0.0";
+};
+const packageVersion = readPackageVersion();
 const TOP_LEVEL_HELP_EXAMPLES = [
   "fuel --list commute",
   "fuel list commute",
@@ -45,7 +59,7 @@ export const buildCli = (dependencies?: Partial<CliDependencies>): Command => {
     .option("--no-color", "Disable ANSI colours in text output")
     .showHelpAfterError()
     .showSuggestionAfterError()
-    .version(packageJson.version);
+    .version(packageVersion);
 
   registerNearCommand(program, fuelService, config.defaultFuelType);
   registerStationCommand(program, fuelService);

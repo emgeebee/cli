@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { Command } from 'commander';
@@ -15,9 +16,20 @@ export type CliDependencies = {
   huxleyClient: HuxleyClient;
 };
 
-// `phone_cli` compiles as CommonJS; resolve from compiled `dist/rail`.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const packageJson = require(join(__dirname, '..', '..', 'package.json')) as { version: string };
+const readPackageVersion = (): string => {
+  const candidatePaths = [join(__dirname, '..', '..', 'package.json'), join(__dirname, '..', 'package.json')];
+  for (const path of candidatePaths) {
+    if (!existsSync(path)) {
+      continue;
+    }
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { version?: unknown };
+    if (typeof parsed.version === 'string' && parsed.version.trim().length > 0) {
+      return parsed.version;
+    }
+  }
+  return '0.0.0';
+};
+const packageVersion = readPackageVersion();
 const TOP_LEVEL_HELP_EXAMPLES = `
 Examples:
   rail departures KGX
@@ -38,7 +50,7 @@ export const buildCli = (dependencies?: CliDependencies): Command => {
     .option('--no-color', 'Disable ANSI colours in text output')
     .showHelpAfterError()
     .showSuggestionAfterError()
-    .version(packageJson.version);
+    .version(packageVersion);
 
   registerDeparturesCommand(program, huxleyClient);
   registerArrivalsCommand(program, huxleyClient);
