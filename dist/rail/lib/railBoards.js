@@ -35,10 +35,10 @@ const formatRailBoardText = (data, boardKind, context) => {
             .filter((value) => value.length > 0)
             .join('  ');
         const serviceRow = (() => {
-            const statusWidth = context.text.visibleWidth(statusLabel);
+            const statusWidth = context.text.visibleWidth(statusLabel) + getEmojiWidthCompensation(statusLabel);
             const leftWidth = context.text.visibleWidth(leftColumn);
             if (leftWidth + statusWidth + 2 <= context.terminalWidth) {
-                return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth);
+                return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth - getEmojiWidthCompensation(statusLabel));
             }
             // Keep status intact on the first line; only wrap the left column.
             const leftWrapWidth = Math.max(1, context.terminalWidth - statusWidth - 2);
@@ -189,6 +189,10 @@ const getServiceEmoji = (status, statusLabel) => {
         return `🔴 ${statusLabel}`;
     }
     return statusLabel;
+};
+const getEmojiWidthCompensation = (value) => {
+    const matches = value.match(/✅|⚠️|🔴/g);
+    return matches ? matches.length : 0;
 };
 const normalizeOptionalValue = (value) => {
     const normalizedValue = value?.trim();

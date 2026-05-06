@@ -78,10 +78,10 @@ export const formatRailBoardText = (
       .filter((value) => value.length > 0)
       .join('  ');
     const serviceRow = (() => {
-      const statusWidth = context.text.visibleWidth(statusLabel);
+      const statusWidth = context.text.visibleWidth(statusLabel) + getEmojiWidthCompensation(statusLabel);
       const leftWidth = context.text.visibleWidth(leftColumn);
       if (leftWidth + statusWidth + 2 <= context.terminalWidth) {
-        return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth);
+        return context.text.joinAligned(leftColumn, statusLabel, context.terminalWidth - getEmojiWidthCompensation(statusLabel));
       }
 
       // Keep status intact on the first line; only wrap the left column.
@@ -302,6 +302,11 @@ const getServiceEmoji = (status: RailServiceStatus, statusLabel: string): string
   }
 
   return statusLabel;
+};
+
+const getEmojiWidthCompensation = (value: string): number => {
+  const matches = value.match(/✅|⚠️|🔴/g);
+  return matches ? matches.length : 0;
 };
 
 const normalizeOptionalValue = (value?: string | null): string | undefined => {
