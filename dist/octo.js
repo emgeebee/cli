@@ -460,8 +460,68 @@ function monthKeyFromDayKey(dayKey) {
 function currentMonthKey(now) {
   return dayKeyUK(now).slice(0, 7);
 }
+function priorCalendarMonthKey(monthKeyYm) {
+  const [ys, ms] = monthKeyYm.split("-");
+  let y = Number(ys);
+  let m = Number(ms);
+  m -= 1;
+  if (m < 1) {
+    m = 12;
+    y -= 1;
+  }
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+function londonCalendarDayOfMonth(now) {
+  const dk = dayKeyUK(now);
+  return Number(dk.slice(8));
+}
+function isDeferredMonthlyStatsWindowUk(now) {
+  return londonCalendarDayOfMonth(now) <= 2;
+}
+var MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS = 2;
+function ukDayKeyMinusCalendarDays(dayKey, subtractDays) {
+  const [yRaw, mRaw, dRaw] = dayKey.split("-").map(Number);
+  const d = new Date(Date.UTC(yRaw, mRaw - 1, dRaw));
+  d.setUTCDate(d.getUTCDate() - subtractDays);
+  const y = d.getUTCFullYear();
+  const mo = d.getUTCMonth() + 1;
+  const day = d.getUTCDate();
+  return `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function latestUkDayKeyIncludedInMonthlyAverages(now) {
+  return ukDayKeyMinusCalendarDays(
+    dayKeyUK(now),
+    MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS
+  );
+}
+function filterDailyTotalsThroughDayInclusive(totals, lastDayInclusive) {
+  const out = {};
+  for (const [k, v] of Object.entries(totals)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(k) && k <= lastDayInclusive) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+function suppressCachingPendingPriorFinishedMonthUk(now) {
+  return isDeferredMonthlyStatsWindowUk(now);
+}
+function evictUnsettledPriorMonthFromCache(cache, now) {
+  if (!suppressCachingPendingPriorFinishedMonthUk(now)) return false;
+  const prior = priorCalendarMonthKey(currentMonthKey(now));
+  if (!cache[prior]) return false;
+  delete cache[prior];
+  return true;
+}
 function isFinishedMonth(monthKey, now) {
   return monthKey < currentMonthKey(now);
+}
+function shouldPersistFinishedMonthTotals(monthKey, now) {
+  if (!isFinishedMonth(monthKey, now)) return false;
+  if (suppressCachingPendingPriorFinishedMonthUk(now) && monthKey === priorCalendarMonthKey(currentMonthKey(now))) {
+    return false;
+  }
+  return true;
 }
 function monthlyAverageCacheFromConfig() {
   const config = readPhoneCliConfig();
@@ -581,7 +641,9 @@ function printAverageMonthlySummary(months, cache, now) {
     ];
   });
   console.log("");
-  console.log("Average daily totals by calendar month (inc VAT + consumed kWh)");
+  console.log(
+    `Average daily totals by calendar month (inc VAT + consumed kWh)`
+  );
   for (const line of makeAsciiTable(
     ["Month", "\u26A1 cost", "Gas cost", "Total cost", "\u26A1 kWh", "Gas kWh"],
     rows
@@ -589,37 +651,29 @@ function printAverageMonthlySummary(months, cache, now) {
     console.log(line);
   }
 }
-function daysSoFarInCurrentMonth(now) {
-  return Number(
-    now.toLocaleDateString("en-GB", {
-      day: "numeric",
-      timeZone: "Europe/London"
-    })
-  );
-}
 function previousMonthKey(now) {
-  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-function daysInMonthFromKey(monthKey) {
-  const [y, m] = monthKey.split("-").map((v) => Number(v));
-  return new Date(y, m, 0).getDate();
+  return priorCalendarMonthKey(currentMonthKey(now));
 }
 function printFinalMonthTotals(cache, now) {
   const currentKey = currentMonthKey(now);
   const prevKey = previousMonthKey(now);
-  const currentDays = daysSoFarInCurrentMonth(now);
-  const prevDays = daysInMonthFromKey(prevKey);
+  const skipped = MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS;
   const rows = [
-    { key: currentKey, label: `${monthLabel(currentKey)} (to date)`, days: currentDays },
-    { key: prevKey, label: `${monthLabel(prevKey)} (full month)`, days: prevDays }
+    {
+      key: currentKey,
+      label: `${monthLabel(currentKey)}`
+    },
+    {
+      key: prevKey,
+      label: `${monthLabel(prevKey)}`
+    }
   ].map((item) => {
     const rec = cache[item.key];
     if (!rec) {
       return [item.label, "-", "-", "-"];
     }
-    const eTotal = rec.eCost * item.days;
-    const gTotal = rec.gCost * item.days;
+    const eTotal = rec.eCost * rec.days;
+    const gTotal = rec.gCost * rec.days;
     return [
       item.label,
       formatPoundsFromPence(eTotal),
@@ -742,120 +796,148 @@ async function main() {
       gasKwhPerUnit
     );
     printPast14DaysHorizontal(eDaily, gDaily, eDailyKwh, gDailyKwh, from);
-    const fetchWindowMonths = monthKeysBackInclusive(from, 3);
-    const monthlyCache = monthlyAverageCacheFromConfig();
-    const monthlyForDisplay = { ...monthlyCache };
-    const cachedMonths = sortMonthKeysAsc(Object.keys(monthlyCache));
-    const monthKeys = sortMonthKeysAsc(
-      Array.from(/* @__PURE__ */ new Set([...cachedMonths, ...fetchWindowMonths]))
-    );
-    const missingMonths = fetchWindowMonths.filter((m) => !monthlyCache[m]);
-    if (missingMonths.length > 0) {
-      const oldestMissing = missingMonths[0];
-      const newestMissing = missingMonths[missingMonths.length - 1];
-      const monthlyFrom = startOfMonthUtc(oldestMissing);
-      const monthlyTo = startOfMonthUtc(nextMonthKey(newestMissing));
+    if (isDeferredMonthlyStatsWindowUk(from)) {
+      console.log("");
+      console.log("Average daily totals by calendar month: not ready yet");
+      console.log("");
+      console.log("Monthly total cost summary: not ready yet");
+    } else {
+      const lastUkDayInAvg = latestUkDayKeyIncludedInMonthlyAverages(from);
+      const fetchWindowMonths = monthKeysBackInclusive(from, 3);
+      const monthlyCache = monthlyAverageCacheFromConfig();
+      const unsettledPriorEvicted = evictUnsettledPriorMonthFromCache(
+        monthlyCache,
+        from
+      );
+      const monthlyForDisplay = { ...monthlyCache };
+      const cachedMonths = sortMonthKeysAsc(Object.keys(monthlyCache));
+      const monthKeys = sortMonthKeysAsc(
+        Array.from(/* @__PURE__ */ new Set([...cachedMonths, ...fetchWindowMonths]))
+      );
+      const missingMonths = fetchWindowMonths.filter((m) => !monthlyCache[m]);
       let eMonthlyDaily = { ...eDaily };
       let gMonthlyDaily = { ...gDaily };
       let eMonthlyKwh = { ...eDailyKwh };
       let gMonthlyKwh = { ...gDailyKwh };
-      const gapEnd = monthlyTo < historyFrom ? monthlyTo : historyFrom;
-      if (monthlyFrom < gapEnd) {
-        const eMonthlyHistoryUrl = ratesUrlWithWindow(
-          derived.etariffPrices,
-          monthlyFrom,
-          gapEnd
-        );
-        const gMonthlyHistoryUrl = ratesUrlWithWindow(
-          derived.gtariffPrices,
-          monthlyFrom,
-          gapEnd
-        );
-        const eMonthlyStandingUrl = ratesUrlWithWindow(
-          derived.etariffStanding,
-          monthlyFrom,
-          gapEnd
-        );
-        const gMonthlyStandingUrl = ratesUrlWithWindow(
-          derived.gtariffStanding,
-          monthlyFrom,
-          gapEnd
-        );
-        const eMonthlyConsumptionUrls = derived.electricityMeters.map(
-          (meter) => `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}/meters/${encodeURIComponent(meter.serial)}/consumption/?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}&order_by=period`
-        );
-        const gMonthlyConsumptionUrls = derived.gasMeters.map(
-          (meter) => `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}/meters/${encodeURIComponent(meter.serial)}/consumption/?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}&order_by=period`
-        );
-        const [
-          eGapRates,
-          gGapRates,
-          eGapStanding,
-          gGapStanding,
-          eGapConsumptionPages,
-          gGapConsumptionPages
-        ] = await Promise.all([
-          fetchAllOctopusResults(eMonthlyHistoryUrl, token),
-          fetchAllOctopusResults(gMonthlyHistoryUrl, token),
-          fetchAllOctopusResults(eMonthlyStandingUrl, token),
-          fetchAllOctopusResults(gMonthlyStandingUrl, token),
-          Promise.all(
-            eMonthlyConsumptionUrls.map(
-              (url) => fetchAllOctopusResults(url, token)
-            )
-          ),
-          Promise.all(
-            gMonthlyConsumptionUrls.map(
-              (url) => fetchAllOctopusResults(url, token)
-            )
-          )
-        ]);
-        const eGapConsumption = eGapConsumptionPages.flat();
-        const gGapConsumption = gGapConsumptionPages.flat();
-        eMonthlyDaily = mergeDailyTotals(
-          eMonthlyDaily,
-          aggregateDailyBilledPence(
-            eGapConsumption,
+      if (missingMonths.length > 0) {
+        const oldestMissing = missingMonths[0];
+        const newestMissing = missingMonths[missingMonths.length - 1];
+        const monthlyFrom = startOfMonthUtc(oldestMissing);
+        const monthlyTo = startOfMonthUtc(nextMonthKey(newestMissing));
+        const gapEnd = monthlyTo < historyFrom ? monthlyTo : historyFrom;
+        if (monthlyFrom < gapEnd) {
+          const eMonthlyHistoryUrl = ratesUrlWithWindow(
+            derived.etariffPrices,
+            monthlyFrom,
+            gapEnd
+          );
+          const gMonthlyHistoryUrl = ratesUrlWithWindow(
+            derived.gtariffPrices,
+            monthlyFrom,
+            gapEnd
+          );
+          const eMonthlyStandingUrl = ratesUrlWithWindow(
+            derived.etariffStanding,
+            monthlyFrom,
+            gapEnd
+          );
+          const gMonthlyStandingUrl = ratesUrlWithWindow(
+            derived.gtariffStanding,
+            monthlyFrom,
+            gapEnd
+          );
+          const eMonthlyConsumptionUrls = derived.electricityMeters.map(
+            (meter) => `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}/meters/${encodeURIComponent(meter.serial)}/consumption/?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}&order_by=period`
+          );
+          const gMonthlyConsumptionUrls = derived.gasMeters.map(
+            (meter) => `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}/meters/${encodeURIComponent(meter.serial)}/consumption/?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}&order_by=period`
+          );
+          const [
             eGapRates,
-            standingChargePerDayPence(eGapStanding),
-            1
-          )
-        );
-        gMonthlyDaily = mergeDailyTotals(
-          gMonthlyDaily,
-          aggregateDailyBilledPence(
-            gGapConsumption,
             gGapRates,
-            standingChargePerDayPence(gGapStanding),
-            gasKwhPerUnit
-          )
-        );
-        eMonthlyKwh = mergeDailyTotals(
-          eMonthlyKwh,
-          aggregateDailyConsumedKwh(eGapConsumption, 1)
-        );
-        gMonthlyKwh = mergeDailyTotals(
-          gMonthlyKwh,
-          aggregateDailyConsumedKwh(gGapConsumption, gasKwhPerUnit)
-        );
+            eGapStanding,
+            gGapStanding,
+            eGapConsumptionPages,
+            gGapConsumptionPages
+          ] = await Promise.all([
+            fetchAllOctopusResults(eMonthlyHistoryUrl, token),
+            fetchAllOctopusResults(gMonthlyHistoryUrl, token),
+            fetchAllOctopusResults(eMonthlyStandingUrl, token),
+            fetchAllOctopusResults(gMonthlyStandingUrl, token),
+            Promise.all(
+              eMonthlyConsumptionUrls.map(
+                (url) => fetchAllOctopusResults(url, token)
+              )
+            ),
+            Promise.all(
+              gMonthlyConsumptionUrls.map(
+                (url) => fetchAllOctopusResults(url, token)
+              )
+            )
+          ]);
+          const eGapConsumption = eGapConsumptionPages.flat();
+          const gGapConsumption = gGapConsumptionPages.flat();
+          eMonthlyDaily = mergeDailyTotals(
+            eMonthlyDaily,
+            aggregateDailyBilledPence(
+              eGapConsumption,
+              eGapRates,
+              standingChargePerDayPence(eGapStanding),
+              1
+            )
+          );
+          gMonthlyDaily = mergeDailyTotals(
+            gMonthlyDaily,
+            aggregateDailyBilledPence(
+              gGapConsumption,
+              gGapRates,
+              standingChargePerDayPence(gGapStanding),
+              gasKwhPerUnit
+            )
+          );
+          eMonthlyKwh = mergeDailyTotals(
+            eMonthlyKwh,
+            aggregateDailyConsumedKwh(eGapConsumption, 1)
+          );
+          gMonthlyKwh = mergeDailyTotals(
+            gMonthlyKwh,
+            aggregateDailyConsumedKwh(gGapConsumption, gasKwhPerUnit)
+          );
+        }
       }
+      eMonthlyDaily = filterDailyTotalsThroughDayInclusive(
+        eMonthlyDaily,
+        lastUkDayInAvg
+      );
+      gMonthlyDaily = filterDailyTotalsThroughDayInclusive(
+        gMonthlyDaily,
+        lastUkDayInAvg
+      );
+      eMonthlyKwh = filterDailyTotalsThroughDayInclusive(eMonthlyKwh, lastUkDayInAvg);
+      gMonthlyKwh = filterDailyTotalsThroughDayInclusive(gMonthlyKwh, lastUkDayInAvg);
       const computedMonthly = monthlyAveragesFromDaily(
         eMonthlyDaily,
         gMonthlyDaily,
         eMonthlyKwh,
         gMonthlyKwh
       );
-      for (const month of missingMonths) {
-        if (!computedMonthly[month]) continue;
-        monthlyForDisplay[month] = computedMonthly[month];
-        if (isFinishedMonth(month, from)) {
-          monthlyCache[month] = computedMonthly[month];
-        }
+      for (const mk of Object.keys(computedMonthly)) {
+        monthlyForDisplay[mk] = computedMonthly[mk];
       }
-      saveMonthlyAverageCache(monthlyCache);
+      if (missingMonths.length > 0) {
+        for (const month of missingMonths) {
+          if (!computedMonthly[month]) continue;
+          if (shouldPersistFinishedMonthTotals(month, from)) {
+            monthlyCache[month] = computedMonthly[month];
+          }
+        }
+        saveMonthlyAverageCache(monthlyCache);
+      } else if (unsettledPriorEvicted) {
+        saveMonthlyAverageCache(monthlyCache);
+      }
+      printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
+      printFinalMonthTotals(monthlyForDisplay, from);
     }
-    printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
-    printFinalMonthTotals(monthlyForDisplay, from);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);

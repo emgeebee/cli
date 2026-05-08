@@ -461,7 +461,7 @@ async function printForecast(data, requestedPostcode) {
   const forecastColWidthFns = { 1: emojiTerminalDisplayWidth };
   const todayExtrasColWidthFns = { 4: emojiTerminalDisplayWidth };
   const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
-  const dayRows = reports.slice(0, 7).map((report) => formatDayCells(report));
+  const dayRows = reports.map((report) => formatDayCells(report));
   const hourlyReports = (data.forecasts || []).flatMap((f) => f.detailed?.reports || []).filter((r) => Boolean(r && r.localDate && r.timeslot));
   const todayDate = reports[0]?.localDate || "";
   const tomorrowDate = reports[1]?.localDate || "";
@@ -556,7 +556,7 @@ async function printForecast(data, requestedPostcode) {
     }
     console.log("");
   }
-  console.log("Week ahead");
+  console.log("Daily forecast");
   const dayWidths = [
     sharedWidths.dateOrTime,
     sharedWidths.icon,
