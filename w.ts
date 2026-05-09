@@ -4,6 +4,7 @@ import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
 import { getConfigPath, readPhoneCliConfig } from "./config";
+import { formatTemperatureText } from "./lib/temperatureColours";
 
 type DailyReport = {
   localDate?: string;
@@ -331,21 +332,11 @@ function colorize(value: string, color: string): string {
 }
 
 function formatMaxTemp(value?: number | null): string {
-  if (value == null) return "?";
-  const text = `${value}C`;
-  if (value < 5) return colorize(text, ANSI_BLUE);
-  if (value <= 15) return colorize(text, ANSI_YELLOW);
-  if (value <= 25) return colorize(text, ANSI_ORANGE);
-  return colorize(text, ANSI_RED);
+  return formatTemperatureText(value, { scale: "max" });
 }
 
 function formatMinTemp(value?: number | null): string {
-  if (value == null) return "?";
-  const text = `${value}C`;
-  if (value < 0) return colorize(text, ANSI_BLUE);
-  if (value <= 8) return colorize(text, ANSI_YELLOW);
-  if (value <= 16) return colorize(text, ANSI_ORANGE);
-  return colorize(text, ANSI_RED);
+  return formatTemperatureText(value, { scale: "min" });
 }
 
 function formatRain(value?: number | null): string {

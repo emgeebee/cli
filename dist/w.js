@@ -161,17 +161,44 @@ function readPhoneCliConfig() {
   }
 }
 
-// w.ts
-var WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
-var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
-var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
-var DEFAULT_POSTCODE = "cm2";
+// lib/temperatureColours.ts
 var ANSI_RESET = "\x1B[0m";
 var ANSI_BLUE = "\x1B[34m";
 var ANSI_GREEN = "\x1B[32m";
 var ANSI_YELLOW = "\x1B[33m";
 var ANSI_ORANGE = "\x1B[38;5;208m";
 var ANSI_RED = "\x1B[31m";
+function shouldUseColor() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize(value, color) {
+  if (!shouldUseColor()) return value;
+  return `${color}${value}${ANSI_RESET}`;
+}
+function colourTemperatureText(text, value, _scale = "max") {
+  if (value < 5) return colorize(text, ANSI_BLUE);
+  if (value <= 10) return colorize(text, ANSI_GREEN);
+  if (value <= 16) return colorize(text, ANSI_YELLOW);
+  if (value <= 23) return colorize(text, ANSI_ORANGE);
+  return colorize(text, ANSI_RED);
+}
+function formatTemperatureText(value, options) {
+  if (value == null) return options?.unknownText ?? "?";
+  const fractionDigits = options?.fractionDigits ?? 0;
+  const text = `${value.toFixed(fractionDigits)}C`;
+  return colourTemperatureText(text, value, options?.scale ?? "max");
+}
+
+// w.ts
+var WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
+var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
+var DEFAULT_POSTCODE = "cm2";
+var ANSI_RESET2 = "\x1B[0m";
+var ANSI_GREEN2 = "\x1B[32m";
+var ANSI_YELLOW2 = "\x1B[33m";
+var ANSI_ORANGE2 = "\x1B[38;5;208m";
+var ANSI_RED2 = "\x1B[31m";
 var HEAVY_RAIN_WORDING = /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 var LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
 var EXTENDED_PICTOGRAPHIC = new RegExp("\\p{Extended_Pictographic}", "u");
@@ -381,42 +408,32 @@ function formatPollen(report) {
   if (!text) return String(index);
   return `${index} (${text})`;
 }
-function shouldUseColor() {
+function shouldUseColor2() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize(value, color) {
-  if (!shouldUseColor()) return value;
-  return `${color}${value}${ANSI_RESET}`;
+function colorize2(value, color) {
+  if (!shouldUseColor2()) return value;
+  return `${color}${value}${ANSI_RESET2}`;
 }
 function formatMaxTemp(value) {
-  if (value == null) return "?";
-  const text = `${value}C`;
-  if (value < 5) return colorize(text, ANSI_BLUE);
-  if (value <= 15) return colorize(text, ANSI_YELLOW);
-  if (value <= 25) return colorize(text, ANSI_ORANGE);
-  return colorize(text, ANSI_RED);
+  return formatTemperatureText(value, { scale: "max" });
 }
 function formatMinTemp(value) {
-  if (value == null) return "?";
-  const text = `${value}C`;
-  if (value < 0) return colorize(text, ANSI_BLUE);
-  if (value <= 8) return colorize(text, ANSI_YELLOW);
-  if (value <= 16) return colorize(text, ANSI_ORANGE);
-  return colorize(text, ANSI_RED);
+  return formatTemperatureText(value, { scale: "min" });
 }
 function formatRain(value) {
   if (value == null) return "?%";
   const text = `${value}%`;
-  const colored = value > 80 ? colorize(text, ANSI_RED) : value >= 50 ? colorize(text, ANSI_ORANGE) : value >= 25 ? colorize(text, ANSI_YELLOW) : colorize(text, ANSI_GREEN);
+  const colored = value > 80 ? colorize2(text, ANSI_RED2) : value >= 50 ? colorize2(text, ANSI_ORANGE2) : value >= 25 ? colorize2(text, ANSI_YELLOW2) : colorize2(text, ANSI_GREEN2);
   return colored;
 }
 function formatWindSpeed(value) {
   if (value == null) return "?mph";
   const text = `${value}mph`;
-  if (value > 40) return colorize(text, ANSI_RED);
-  if (value >= 20) return colorize(text, ANSI_ORANGE);
-  if (value >= 10) return colorize(text, ANSI_YELLOW);
-  return colorize(text, ANSI_GREEN);
+  if (value > 40) return colorize2(text, ANSI_RED2);
+  if (value >= 20) return colorize2(text, ANSI_ORANGE2);
+  if (value >= 10) return colorize2(text, ANSI_YELLOW2);
+  return colorize2(text, ANSI_GREEN2);
 }
 function cellWidthForTable(colIdx, value, colWidthFns) {
   const fn = colWidthFns?.[colIdx];
