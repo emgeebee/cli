@@ -3779,27 +3779,6 @@ var require_main = __commonJS({
 var fuel_exports = {};
 module.exports = __toCommonJS(fuel_exports);
 
-// node_modules/.pnpm/commander@14.0.3/node_modules/commander/esm.mjs
-var import_index = __toESM(require_commander(), 1);
-var {
-  program,
-  createCommand,
-  createArgument,
-  createOption,
-  CommanderError,
-  InvalidArgumentError,
-  InvalidOptionArgumentError,
-  // deprecated old name
-  Command,
-  Argument,
-  Option,
-  Help
-} = import_index.default;
-
-// fuel/buildCli.ts
-var import_node_fs2 = require("node:fs");
-var import_node_path4 = require("node:path");
-
 // config.ts
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
@@ -3825,6 +3804,27 @@ function readPhoneCliConfig() {
     throw new Error(`Failed to read config at ${path}: ${message}`);
   }
 }
+
+// node_modules/.pnpm/commander@14.0.3/node_modules/commander/esm.mjs
+var import_index = __toESM(require_commander(), 1);
+var {
+  program,
+  createCommand,
+  createArgument,
+  createOption,
+  CommanderError,
+  InvalidArgumentError,
+  InvalidOptionArgumentError,
+  // deprecated old name
+  Command,
+  Argument,
+  Option,
+  Help
+} = import_index.default;
+
+// fuel/buildCli.ts
+var import_node_fs2 = require("node:fs");
+var import_node_path4 = require("node:path");
 
 // fuel/lib/constants.ts
 var JSON_SCHEMA_VERSION = "1";
@@ -20488,7 +20488,22 @@ var normalizeLegacyListOption = (argv) => {
   }
   return ["list", listName];
 };
-var cliArguments = normalizeLegacyListOption(process.argv.slice(2));
-void buildCli().parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "fuel", ...cliArguments]).catch((error51) => {
-  handleCliRuntimeError(error51, cliArguments);
-});
+void (async () => {
+  let cliArguments = normalizeLegacyListOption(process.argv.slice(2));
+  try {
+    if (cliArguments.length === 0) {
+      const lists = await loadStationListsConfig();
+      const listNames = Object.keys(lists);
+      if (listNames.length === 0) {
+        throw createAppError(
+          "INVALID_INPUT",
+          `No station lists defined in fuel.lists in ${getConfigPath()}. Add at least one named list.`
+        );
+      }
+      cliArguments = ["list", listNames[0]];
+    }
+    await buildCli().parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "fuel", ...cliArguments]);
+  } catch (error51) {
+    handleCliRuntimeError(error51, cliArguments);
+  }
+})();

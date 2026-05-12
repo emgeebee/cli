@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
+import { getConfigPath } from "./config";
 import { buildCli } from "./fuel/buildCli";
 import { handleCliRuntimeError } from "./fuel/lib/cliRuntime";
+import { createAppError } from "./fuel/lib/errors";
+import { loadStationListsConfig } from "./fuel/lib/listConfig";
 
 const normalizeLegacyListOption = (argv: string[]): string[] => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
@@ -28,12 +31,26 @@ const normalizeLegacyListOption = (argv: string[]): string[] => {
   return ["list", listName];
 };
 
-const cliArguments = normalizeLegacyListOption(process.argv.slice(2));
+void (async () => {
+  let cliArguments = normalizeLegacyListOption(process.argv.slice(2));
 
-void buildCli()
-  .parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "fuel", ...cliArguments])
-  .catch((error: unknown) => {
+  try {
+    if (cliArguments.length === 0) {
+      const lists = await loadStationListsConfig();
+      const listNames = Object.keys(lists);
+      if (listNames.length === 0) {
+        throw createAppError(
+          "INVALID_INPUT",
+          `No station lists defined in fuel.lists in ${getConfigPath()}. Add at least one named list.`
+        );
+      }
+      cliArguments = ["list", listNames[0]!];
+    }
+
+    await buildCli().parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "fuel", ...cliArguments]);
+  } catch (error: unknown) {
     handleCliRuntimeError(error, cliArguments);
-  });
+  }
+})();
 
 export {};
