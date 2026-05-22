@@ -19349,6 +19349,7 @@ var buildBoardUrl = ({
     url2.searchParams.set("expand", "true");
   }
   if (accessToken) {
+    url2.searchParams.set("accessToken", accessToken);
   }
   return url2;
 };

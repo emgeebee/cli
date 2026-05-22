@@ -61,10 +61,16 @@ async function main() {
     usage();
     process.exit(1);
   }
+  const postCount = code === "slof" ? 2 : 1;
   const url = `${BASE_URL}/api/trigger-${target.room}-${target.device}/${target.state}`;
-  const response = await fetch(url, { method: "POST" });
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}) for ${url}`);
+  for (let attempt = 0; attempt < postCount; attempt++) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 5e3));
+    }
+    const response = await fetch(url, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status}) for ${url}`);
+    }
   }
   console.log(`Triggered ${target.room} ${target.device} ${target.state}`);
 }

@@ -15,7 +15,8 @@ const HISTORY_HOURS = 24;
 const FUTURE_FORECAST_HOURS = 12;
 const TOTAL_CHART_HOURS = HISTORY_HOURS + FUTURE_FORECAST_HOURS;
 const CHART_MIN_TEMP = -5;
-const CHART_MAX_TEMP = 25;
+const CHART_MAX_TEMP = 40;
+/** One row per °C; height grows with the temp range, scale stays fixed. */
 const CHART_HEIGHT = CHART_MAX_TEMP - CHART_MIN_TEMP + 1;
 const CHART_POINT = "●";
 const CHART_COLLISION = "◎";
@@ -40,9 +41,21 @@ const ROOM_COLORS = [
 ];
 const DISPLAY_ROOM_ORDER = ["Outdoor", "Shed", "Downstairs"] as const;
 
+/** API may send null temps as JSON null or the string "null". */
+const nullableNumericField = z.preprocess((value) => {
+  if (value == null || value === "" || value === "null" || value === "undefined") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return value;
+}, z.number().nullable().optional());
+
 const ReadingSchema = z.object({
-  time: z.number().nullable().optional(),
-  temp: z.number().nullable().optional(),
+  time: nullableNumericField,
+  temp: nullableNumericField,
 });
 
 const TemperatureResponseSchema = z.record(z.string(), z.array(ReadingSchema));
@@ -51,13 +64,13 @@ const BbcOverlayEntrySchema = z.object({
     utc: z.string(),
   }),
   temperature: z.object({
-    c: z.number().nullable().optional(),
+    c: nullableNumericField,
   }),
   windDirection: z.object({
     description: z.string().nullable().optional(),
   }).optional(),
   averageWindSpeed: z.object({
-    mph: z.number().nullable().optional(),
+    mph: nullableNumericField,
   }).optional(),
 });
 const BbcOverlayFeatureSchema = z.object({

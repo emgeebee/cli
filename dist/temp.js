@@ -14690,7 +14690,7 @@ var HISTORY_HOURS = 24;
 var FUTURE_FORECAST_HOURS = 12;
 var TOTAL_CHART_HOURS = HISTORY_HOURS + FUTURE_FORECAST_HOURS;
 var CHART_MIN_TEMP = -5;
-var CHART_MAX_TEMP = 25;
+var CHART_MAX_TEMP = 40;
 var CHART_HEIGHT = CHART_MAX_TEMP - CHART_MIN_TEMP + 1;
 var CHART_POINT = "\u25CF";
 var CHART_COLLISION = "\u25CE";
@@ -14714,9 +14714,19 @@ var ROOM_COLORS = [
   ANSI_WHITE
 ];
 var DISPLAY_ROOM_ORDER = ["Outdoor", "Shed", "Downstairs"];
+var nullableNumericField = external_exports.preprocess((value) => {
+  if (value == null || value === "" || value === "null" || value === "undefined") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return value;
+}, external_exports.number().nullable().optional());
 var ReadingSchema = external_exports.object({
-  time: external_exports.number().nullable().optional(),
-  temp: external_exports.number().nullable().optional()
+  time: nullableNumericField,
+  temp: nullableNumericField
 });
 var TemperatureResponseSchema = external_exports.record(external_exports.string(), external_exports.array(ReadingSchema));
 var BbcOverlayEntrySchema = external_exports.object({
@@ -14724,13 +14734,13 @@ var BbcOverlayEntrySchema = external_exports.object({
     utc: external_exports.string()
   }),
   temperature: external_exports.object({
-    c: external_exports.number().nullable().optional()
+    c: nullableNumericField
   }),
   windDirection: external_exports.object({
     description: external_exports.string().nullable().optional()
   }).optional(),
   averageWindSpeed: external_exports.object({
-    mph: external_exports.number().nullable().optional()
+    mph: nullableNumericField
   }).optional()
 });
 var BbcOverlayFeatureSchema = external_exports.object({
