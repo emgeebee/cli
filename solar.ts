@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import stripAnsi from "strip-ansi";
+import stringWidth from "string-width";
 import { z } from "zod";
 
 const SOLAR_API_URL = "http://api.emgeebee.buzz:1880/api/solar";
@@ -7,9 +9,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_YIELD_DAYS = 28;
 const AVERAGE_WINDOWS = [7, 14, 31] as const;
-const POWER_HISTORY_HOURS = 48;
-const POWER_CHART_HEIGHT = 12;
+const POWER_HISTORY_HOURS = 36;
+const POWER_CHART_MIN_W = 0;
+const POWER_CHART_MAX_W = 800;
+const POWER_CHART_STEP_W = 50;
+/** One row per 50W on the axis (0, 50, 100, … 800). */
+const POWER_CHART_HEIGHT =
+  (POWER_CHART_MAX_W - POWER_CHART_MIN_W) / POWER_CHART_STEP_W + 1;
 const CHART_POINT = "●";
+const UK_TZ = "Europe/London";
+const ANSI_RESET = "\x1b[0m";
+const ANSI_GREEN = "\x1b[32m";
+const ANSI_YELLOW = "\x1b[33m";
+const ANSI_ORANGE = "\x1b[38;5;208m";
+const ANSI_RED = "\x1b[31m";
 
 const numericField = z.preprocess((value) => {
   if (typeof value === "string") {
@@ -38,7 +51,7 @@ function usage(): void {
   console.log("Usage:");
   console.log("  solar");
   console.log("");
-  console.log("Shows solar daily yield, rolling averages, and a 48 hour power graph.");
+  console.log("Shows solar daily yield, rolling averages, and a power graph.");
 }
 
 function parseDateKey(key: string): Date | null {
@@ -52,29 +65,86 @@ function parseDateKey(key: string): Date | null {
 }
 
 function parseDateTimeKey(key: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(key);
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/.exec(String(key).trim());
   if (!match) return null;
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
   const hour = Number(match[4]);
   const minute = Number(match[5]);
-  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  return Number.isNaN(date.getTime()) ? null : date;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return ukWallTimeToDate(year, month, day, hour, minute);
+}
+
+/** API timestamps are UK wall-clock times without a zone suffix. */
+function ukWallTimeToDate(year: number, month: number, day: number, hour: number, minute: number): Date {
+  let ts = Date.UTC(year, month - 1, day, hour, minute);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: UK_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(ts));
+    const got = {
+      year: Number(parts.find((part) => part.type === "year")?.value),
+      month: Number(parts.find((part) => part.type === "month")?.value),
+      day: Number(parts.find((part) => part.type === "day")?.value),
+      hour: Number(parts.find((part) => part.type === "hour")?.value),
+      minute: Number(parts.find((part) => part.type === "minute")?.value),
+    };
+    if (
+      got.year === year &&
+      got.month === month &&
+      got.day === day &&
+      got.hour === hour &&
+      got.minute === minute
+    ) {
+      return new Date(ts);
+    }
+    const gotMs = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute);
+    const wantMs = Date.UTC(year, month - 1, day, hour, minute);
+    ts += wantMs - gotMs;
+  }
+  return new Date(ts);
 }
 
 function toYmd(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function dayKeyUK(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: UK_TZ });
+}
+
+function subtractDayKey(dayKey: string, days: number): string {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - days);
+  return toYmd(date);
+}
+
 function startOfUtcDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-function startOfUtcHour(ms: number): number {
-  const date = new Date(ms);
-  date.setUTCMinutes(0, 0, 0);
-  return date.getTime();
+function startOfUkHour(ms: number): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: UK_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  return ukWallTimeToDate(year, month, day, hour, 0).getTime();
 }
 
 function formatDateLabel(ymd: string): string {
@@ -93,7 +163,7 @@ function formatHourLabel(ms: number): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: "UTC",
+    timeZone: UK_TZ,
   });
 }
 
@@ -106,15 +176,55 @@ function formatWatts(value: number): string {
   return `${Math.round(value)}W`;
 }
 
+function formatWattsPrecise(value: number): string {
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}kW`;
+  return `${value.toFixed(1)}W`;
+}
+
+function shouldUseColor(): boolean {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+
+function colorize(text: string, color: string): string {
+  if (!shouldUseColor()) return text;
+  return `${color}${text}${ANSI_RESET}`;
+}
+
+function colorForYield(kwh: number): string {
+  if (kwh > 4) return ANSI_GREEN;
+  if (kwh > 2.5) return ANSI_YELLOW;
+  if (kwh > 1.5) return ANSI_ORANGE;
+  return ANSI_RED;
+}
+
+function colorForPower(watts: number): string {
+  if (watts > 400) return ANSI_GREEN;
+  if (watts > 200) return ANSI_YELLOW;
+  if (watts > 100) return ANSI_ORANGE;
+  return ANSI_RED;
+}
+
+function formatColoredKwh(value: number): string {
+  return colorize(formatKwh(value), colorForYield(value));
+}
+
+function formatColoredPowerPoint(value: number): string {
+  return `${colorize(CHART_POINT, colorForPower(value))} `;
+}
+
+function visibleLength(value: string): number {
+  return stringWidth(stripAnsi(value));
+}
+
 function padCell(value: string, width: number): string {
-  return value + " ".repeat(Math.max(0, width - value.length));
+  return value + " ".repeat(Math.max(0, width - visibleLength(value)));
 }
 
 function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   const widths = headers.map((header, idx) =>
     Math.max(
-      header.length,
-      ...rows.map((row) => (row[idx] || "").length),
+      visibleLength(header),
+      ...rows.map((row) => visibleLength(row[idx] || "")),
     ),
   );
   const border = `+-${widths.map((width) => "-".repeat(width)).join("-+-")}-+`;
@@ -167,7 +277,7 @@ function buildDailyYieldRows(yields: DailyYield[]): string[][] {
     const date = new Date(start.getTime() + offset * DAY_MS);
     const ymd = toYmd(date);
     const value = byDate.get(ymd);
-    rows.push([formatDateLabel(ymd), value == null ? "-" : formatKwh(value)]);
+    rows.push([formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)]);
   }
 
   return rows;
@@ -175,19 +285,22 @@ function buildDailyYieldRows(yields: DailyYield[]): string[][] {
 
 function buildAverageRows(yields: DailyYield[]): string[][] {
   const byDate = new Map(yields.map((entry) => [entry.date, entry.value] as const));
-  const end = latestYieldDay(yields);
+  const todayKey = dayKeyUK();
 
   return AVERAGE_WINDOWS.map((days) => {
     const values: number[] = [];
-    for (let offset = 0; offset < days; offset += 1) {
-      const date = new Date(end.getTime() - offset * DAY_MS);
-      const value = byDate.get(toYmd(date));
+    for (let back = 1; back <= days; back += 1) {
+      const value = byDate.get(subtractDayKey(todayKey, back));
       if (value != null) values.push(value);
     }
     const average = values.length > 0
       ? values.reduce((sum, value) => sum + value, 0) / values.length
       : null;
-    return [`${days} days`, average == null ? "-" : formatKwh(average), `${values.length}/${days}`];
+    return [
+      `${days} days`,
+      average == null ? "-" : formatColoredKwh(average),
+      `${values.length}/${days}`,
+    ];
   });
 }
 
@@ -195,15 +308,13 @@ function buildHourlyPowerSeries(readings: PowerReading[]): {
   firstHour: number;
   series: Array<number | null>;
 } {
-  const latestHour = readings.length > 0
-    ? startOfUtcHour(readings.at(-1)!.time)
-    : startOfUtcHour(Date.now());
+  const latestHour = startOfUkHour(Date.now());
   const firstHour = latestHour - (POWER_HISTORY_HOURS - 1) * HOUR_MS;
   const buckets = Array.from({ length: POWER_HISTORY_HOURS }, () => [] as number[]);
 
   for (const reading of readings) {
-    const hour = startOfUtcHour(reading.time);
-    const index = Math.round((hour - firstHour) / HOUR_MS);
+    const hour = startOfUkHour(reading.time);
+    const index = Math.floor((hour - firstHour) / HOUR_MS);
     if (index < 0 || index >= buckets.length) continue;
     buckets[index].push(reading.value);
   }
@@ -218,20 +329,24 @@ function buildHourlyPowerSeries(readings: PowerReading[]): {
   };
 }
 
-function roundUpPowerScale(value: number): number {
-  if (value <= 0) return 100;
-  if (value <= 1000) return Math.ceil(value / 100) * 100;
-  return Math.ceil(value / 500) * 500;
+function powerRowForValue(value: number): number {
+  const clamped = Math.max(POWER_CHART_MIN_W, Math.min(POWER_CHART_MAX_W, value));
+  return Math.max(
+    0,
+    Math.min(
+      POWER_CHART_HEIGHT - 1,
+      Math.round((POWER_CHART_MAX_W - clamped) / POWER_CHART_STEP_W),
+    ),
+  );
 }
 
 function renderPowerGraph(readings: PowerReading[]): string[] {
   const { firstHour, series } = buildHourlyPowerSeries(readings);
   const values = series.filter((value): value is number => value != null);
   if (values.length === 0) {
-    return ["No power readings in the last 48 available hours."];
+    return [`No power readings in the last ${POWER_HISTORY_HOURS} available hours.`];
   }
 
-  const maxPower = roundUpPowerScale(Math.max(...values));
   const grid = Array.from(
     { length: POWER_CHART_HEIGHT },
     () => Array.from({ length: series.length }, () => "  "),
@@ -240,16 +355,12 @@ function renderPowerGraph(readings: PowerReading[]): string[] {
   for (let col = 0; col < series.length; col += 1) {
     const value = series[col];
     if (value == null) continue;
-    const row = Math.max(
-      0,
-      Math.min(POWER_CHART_HEIGHT - 1, Math.round((1 - value / maxPower) * (POWER_CHART_HEIGHT - 1))),
-    );
-    grid[row][col] = `${CHART_POINT} `;
+    grid[powerRowForValue(value)][col] = formatColoredPowerPoint(value);
   }
 
   const lines: string[] = [];
   for (let row = 0; row < POWER_CHART_HEIGHT; row += 1) {
-    const labelValue = maxPower * (1 - row / (POWER_CHART_HEIGHT - 1));
+    const labelValue = POWER_CHART_MAX_W - row * POWER_CHART_STEP_W;
     lines.push(`${formatWatts(labelValue).padStart(6)} |${grid[row].join("")}`);
   }
 
@@ -296,7 +407,16 @@ async function main(): Promise<void> {
     }
 
     console.log("");
-    console.log("Power graph (last 48 available hours)");
+    const latestPower = powerReadings.at(-1);
+    console.log(
+      `Current power: ${
+        latestPower
+          ? colorize(formatWattsPrecise(latestPower.value), colorForPower(latestPower.value))
+          : "-"
+      }`,
+    );
+    console.log("");
+    console.log(`Power graph (last ${POWER_HISTORY_HOURS} available hours)`);
     for (const line of renderPowerGraph(powerReadings)) {
       console.log(line);
     }
