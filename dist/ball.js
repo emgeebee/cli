@@ -129,6 +129,17 @@ function parseYmd(value) {
   }
   return toYmd(d) === value ? d : null;
 }
+function startOfMostRecentAugust(reference = /* @__PURE__ */ new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "numeric"
+  }).formatToParts(reference);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const augustYear = month >= 8 ? year : year - 1;
+  return parseYmd(`${augustYear}-08-01`) ?? /* @__PURE__ */ new Date(`${augustYear}-08-01T00:00:00Z`);
+}
 function parseDayMonthInput(value) {
   const m = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$/.exec(String(value || ""));
   if (!m) {
@@ -356,6 +367,72 @@ function fixtureLine(event, options = {}) {
   }
   return `${datePrefix}${timeDisplay} ${home} vs ${away}${suffixWithSpace}`;
 }
+function eventTeamSide(event, teamUrn) {
+  const homeUrn = String(event.homeTeam?.urn || "");
+  const awayUrn = String(event.awayTeam?.urn || "");
+  if (homeUrn === teamUrn) return "home";
+  if (awayUrn === teamUrn) return "away";
+  const targetSlug = urnSlug(teamUrn);
+  if (!targetSlug) return null;
+  if (urnSlug(homeUrn) === targetSlug) return "home";
+  if (urnSlug(awayUrn) === targetSlug) return "away";
+  return null;
+}
+function teamResultOutcome(event, side) {
+  if (!isResultState(event) || !isFinishedState(event)) return null;
+  const homeN = scoreNumber(teamScore(event.homeTeam, event));
+  const awayN = scoreNumber(teamScore(event.awayTeam, event));
+  if (homeN == null || awayN == null) return null;
+  const ours = side === "home" ? homeN : awayN;
+  const theirs = side === "home" ? awayN : homeN;
+  if (ours > theirs) return "win";
+  if (ours < theirs) return "loss";
+  return "draw";
+}
+function buildTeamCompetitionRecords(events, teamUrn) {
+  const stats = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    const side = eventTeamSide(event, teamUrn);
+    if (!side) continue;
+    const outcome = teamResultOutcome(event, side);
+    if (!outcome) continue;
+    const comp = competitionLabel(event);
+    const venue = side === "home" ? "H" : "A";
+    const key = `${comp}\0${venue}`;
+    let row = stats.get(key);
+    if (!row) {
+      row = { comp, venue, wins: 0, draws: 0, losses: 0 };
+      stats.set(key, row);
+    }
+    if (outcome === "win") row.wins += 1;
+    else if (outcome === "draw") row.draws += 1;
+    else row.losses += 1;
+  }
+  return [...stats.values()].sort((a, b) => {
+    const aRank = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a.comp));
+    const bRank = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b.comp));
+    const aOrder = aRank === -1 ? Number.MAX_SAFE_INTEGER : aRank;
+    const bOrder = bRank === -1 ? Number.MAX_SAFE_INTEGER : bRank;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    if (a.venue !== b.venue) return a.venue === "H" ? -1 : 1;
+    return a.comp.localeCompare(b.comp);
+  });
+}
+function printTeamCompetitionSummary(events, teamUrn) {
+  const records = buildTeamCompetitionRecords(events, teamUrn);
+  if (records.length === 0) return;
+  const rows = records.map((row) => [
+    `${row.comp} (${row.venue})`,
+    String(row.wins),
+    String(row.draws),
+    String(row.losses)
+  ]);
+  console.log("");
+  console.log("Record by competition (finished matches)");
+  for (const line of makeAsciiTable(["Comp", "W", "D", "L"], rows)) {
+    console.log(line);
+  }
+}
 function printGroupedFixtures(events, heading, options = {}) {
   console.log(heading);
   if (events.length === 0) {
@@ -387,6 +464,9 @@ function printGroupedFixtures(events, heading, options = {}) {
 }
 function printFlatFixtures(events, heading, options = {}) {
   console.log(heading);
+  if (options.teamUrn) {
+    printTeamCompetitionSummary(events, options.teamUrn);
+  }
   if (events.length === 0) {
     console.log(options.emptyMessage || "No fixtures.");
     return;
@@ -706,18 +786,19 @@ async function fixturesForDay(dayYmd, relativeHeading) {
 }
 async function futureFixturesForTeam(teamQuery, teamInput, teamUrn) {
   const now = /* @__PURE__ */ new Date();
-  const twoWeeksAgo = new Date(now.getTime() - 14 * DAY_MS);
-  const start = toYmd(twoWeeksAgo);
+  const seasonStart = startOfMostRecentAugust(now);
+  const start = toYmd(seasonStart);
   const end = toYmd(new Date(now.getTime() + 30 * DAY_MS));
   const url = urlForTeamGames(start, end, start, teamUrn);
   const events = (await fetchMatchData(url, start)).filter((event) => {
     const dt = new Date(event.startTime || event.startDateTime);
-    return dt.getTime() >= twoWeeksAgo.getTime();
+    return dt.getTime() >= seasonStart.getTime();
   });
   printFlatFixtures(events, `Future fixtures for ${teamInput || teamQuery} (at ${formatPrintedAtTimestamp()})`, {
     includeDate: true,
     showCompetitionTag: true,
-    emptyMessage: "No fixtures in the last 14 days or next 30 days."
+    teamUrn,
+    emptyMessage: `No fixtures since ${formatYmdLondonShort(start)} or in the next 30 days.`
   });
 }
 async function main() {

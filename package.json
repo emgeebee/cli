@@ -16,7 +16,8 @@
     "cmd": "./dist/cmd.js",
     "fuel": "./dist/fuel.js",
     "r": "./dist/r.js",
-    "temp": "./dist/temp.js"
+    "temp": "./dist/temp.js",
+    "solar": "./dist/solar.js"
   },
   "files": [
     "dist"
@@ -24,7 +25,7 @@
   "scripts": {
     "build": "pnpm run typecheck && pnpm run bundle",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts ball.ts cal.ts w.ts cric.ts bday.ts octo.ts money.ts cmd.ts fuel.ts r.ts temp.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist",
+    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts ball.ts cal.ts w.ts cric.ts bday.ts octo.ts money.ts cmd.ts fuel.ts r.ts temp.ts solar.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist",
     "phone_cli": "pnpm build && node dist/phone_cli.js",
     "ball": "pnpm build && node dist/ball.js",
     "phone-cal": "pnpm build && node dist/cal.js",
@@ -38,6 +39,7 @@
     "fuel": "pnpm build && node dist/fuel.js",
     "r": "pnpm build && node dist/r.js",
     "temp": "pnpm build && node dist/temp.js",
+    "solar": "pnpm build && node dist/solar.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {

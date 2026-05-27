@@ -446,6 +446,11 @@ function nextMonthKey(monthKey) {
   const d = new Date(Date.UTC(y, m, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
+function daysInMonthKey(monthKey) {
+  const start = startOfMonthUtc(monthKey);
+  const end = startOfMonthUtc(nextMonthKey(monthKey));
+  return Math.round((end.getTime() - start.getTime()) / DAY_MS);
+}
 function monthLabel(monthKey) {
   const d = startOfMonthUtc(monthKey);
   return d.toLocaleDateString("en-GB", {
@@ -522,6 +527,11 @@ function shouldPersistFinishedMonthTotals(monthKey, now) {
     return false;
   }
   return true;
+}
+function cachedFinishedMonthIsComplete(monthKey, cache) {
+  const rec = cache[monthKey];
+  if (!rec) return false;
+  return rec.days >= daysInMonthKey(monthKey);
 }
 function monthlyAverageCacheFromConfig() {
   const config = readPhoneCliConfig();
@@ -814,7 +824,11 @@ async function main() {
       const monthKeys = sortMonthKeysAsc(
         Array.from(/* @__PURE__ */ new Set([...cachedMonths, ...fetchWindowMonths]))
       );
-      const missingMonths = fetchWindowMonths.filter((m) => !monthlyCache[m]);
+      const priorFinishedMonth = previousMonthKey(from);
+      const missingMonths = fetchWindowMonths.filter((m) => {
+        if (!monthlyCache[m]) return true;
+        return m === priorFinishedMonth && shouldPersistFinishedMonthTotals(m, from) && !cachedFinishedMonthIsComplete(m, monthlyCache);
+      });
       let eMonthlyDaily = { ...eDaily };
       let gMonthlyDaily = { ...gDaily };
       let eMonthlyKwh = { ...eDailyKwh };
@@ -922,6 +936,9 @@ async function main() {
         gMonthlyKwh
       );
       for (const mk of Object.keys(computedMonthly)) {
+        if (monthlyCache[mk] && !missingMonths.includes(mk) && mk !== currentMonthKey(from)) {
+          continue;
+        }
         monthlyForDisplay[mk] = computedMonthly[mk];
       }
       if (missingMonths.length > 0) {

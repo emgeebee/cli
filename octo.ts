@@ -599,6 +599,12 @@ function nextMonthKey(monthKey: string): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+function daysInMonthKey(monthKey: string): number {
+  const start = startOfMonthUtc(monthKey);
+  const end = startOfMonthUtc(nextMonthKey(monthKey));
+  return Math.round((end.getTime() - start.getTime()) / DAY_MS);
+}
+
 function monthLabel(monthKey: string): string {
   const d = startOfMonthUtc(monthKey);
   return d.toLocaleDateString("en-GB", {
@@ -699,6 +705,12 @@ function shouldPersistFinishedMonthTotals(monthKey: string, now: Date): boolean 
     return false;
   }
   return true;
+}
+
+function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCache): boolean {
+  const rec = cache[monthKey];
+  if (!rec) return false;
+  return rec.days >= daysInMonthKey(monthKey);
 }
 
 function monthlyAverageCacheFromConfig(): MonthlyAverageCache {
@@ -1055,7 +1067,15 @@ async function main(): Promise<void> {
       const monthKeys = sortMonthKeysAsc(
         Array.from(new Set([...cachedMonths, ...fetchWindowMonths])),
       );
-      const missingMonths = fetchWindowMonths.filter((m) => !monthlyCache[m]);
+      const priorFinishedMonth = previousMonthKey(from);
+      const missingMonths = fetchWindowMonths.filter((m) => {
+        if (!monthlyCache[m]) return true;
+        return (
+          m === priorFinishedMonth &&
+          shouldPersistFinishedMonthTotals(m, from) &&
+          !cachedFinishedMonthIsComplete(m, monthlyCache)
+        );
+      });
 
       let eMonthlyDaily = { ...eDaily };
       let gMonthlyDaily = { ...gDaily };
@@ -1181,6 +1201,13 @@ async function main(): Promise<void> {
         gMonthlyKwh,
       );
       for (const mk of Object.keys(computedMonthly)) {
+        if (
+          monthlyCache[mk] &&
+          !missingMonths.includes(mk) &&
+          mk !== currentMonthKey(from)
+        ) {
+          continue;
+        }
         monthlyForDisplay[mk] = computedMonthly[mk];
       }
 

@@ -18,7 +18,7 @@ var phone_cli_exports = {};
 module.exports = __toCommonJS(phone_cli_exports);
 var import_node_child_process = require("node:child_process");
 var import_node_path = require("node:path");
-var COMMANDS = /* @__PURE__ */ new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp"]);
+var COMMANDS = /* @__PURE__ */ new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar"]);
 function printUsage() {
   console.log("phone_cli commands:");
   console.log("  ball   Football fixtures / PL table");
@@ -33,6 +33,7 @@ function printUsage() {
   console.log("  fuel   UK fuel prices (near, station, list)");
   console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("  temp   House temperature history (last 24h)");
+  console.log("  solar  Solar yield and power history");
   console.log("");
   console.log("Usage:");
   console.log("  npx @emgeebee/phone_cli <command> [args]");
@@ -46,6 +47,7 @@ function printUsage() {
   console.log('  npx @emgeebee/phone_cli fuel near "SE1 9SG" --fuel E10');
   console.log("  npx @emgeebee/phone_cli r departures KGX");
   console.log("  npx @emgeebee/phone_cli temp");
+  console.log("  npx @emgeebee/phone_cli solar");
 }
 function runSubcommand(command, args) {
   const scriptPath = (0, import_node_path.join)(__dirname, `${command}.js`);
