@@ -34,7 +34,12 @@ const numericField = z.preprocess((value) => {
 
 const SolarResponseSchema = z.object({
   yield: z.record(z.string(), numericField).default({}),
-  power: z.record(z.string(), numericField).default({}),
+  powerNow: z
+    .object({
+      value: numericField,
+    })
+    .optional(),
+  powerAvg: z.record(z.string(), numericField).default({}),
 });
 
 type SolarResponse = z.infer<typeof SolarResponseSchema>;
@@ -212,6 +217,10 @@ function formatColoredPowerPoint(value: number): string {
   return `${colorize(CHART_POINT, colorForPower(value))} `;
 }
 
+function formatColoredWattsPrecise(value: number): string {
+  return colorize(formatWattsPrecise(value), colorForPower(value));
+}
+
 function visibleLength(value: string): number {
   return stringWidth(stripAnsi(value));
 }
@@ -252,14 +261,30 @@ function normalizeDailyYield(data: SolarResponse): DailyYield[] {
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-function normalizePowerReadings(data: SolarResponse): PowerReading[] {
-  return Object.entries(data.power)
+function normalizePowerAvgReadings(data: SolarResponse): PowerReading[] {
+  return Object.entries(data.powerAvg)
     .map(([key, value]) => {
       const parsed = parseDateTimeKey(key);
       return parsed && Number.isFinite(value) ? { time: parsed.getTime(), value } : null;
     })
     .filter((entry): entry is PowerReading => entry != null)
     .sort((a, b) => a.time - b.time);
+}
+
+function normalizePowerNow(data: SolarResponse): number | null {
+  const value = data.powerNow?.value;
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
+function buildPowerRows(powerNow: number | null, powerAvgReadings: PowerReading[]): string[][] {
+  const latestAvg = powerAvgReadings.at(-1);
+  return [
+    ["Now", powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)],
+    [
+      latestAvg ? `Avg ${formatHourLabel(latestAvg.time)}` : "Latest avg",
+      latestAvg == null ? "-" : formatColoredWattsPrecise(latestAvg.value),
+    ],
+  ];
 }
 
 function latestYieldDay(yields: DailyYield[]): Date {
@@ -390,7 +415,8 @@ async function main(): Promise<void> {
 
     const data = await fetchSolarData();
     const yields = normalizeDailyYield(data);
-    const powerReadings = normalizePowerReadings(data);
+    const powerNow = normalizePowerNow(data);
+    const powerAvgReadings = normalizePowerAvgReadings(data);
 
     console.log("Solar");
     console.log(`Source: ${SOLAR_API_URL}`);
@@ -407,17 +433,14 @@ async function main(): Promise<void> {
     }
 
     console.log("");
-    const latestPower = powerReadings.at(-1);
-    console.log(
-      `Current power: ${
-        latestPower
-          ? colorize(formatWattsPrecise(latestPower.value), colorForPower(latestPower.value))
-          : "-"
-      }`,
-    );
+    console.log("Power");
+    for (const line of makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings))) {
+      console.log(line);
+    }
+
     console.log("");
-    console.log(`Power graph (last ${POWER_HISTORY_HOURS} available hours)`);
-    for (const line of renderPowerGraph(powerReadings)) {
+    console.log(`Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`);
+    for (const line of renderPowerGraph(powerAvgReadings)) {
       console.log(line);
     }
   } catch (error: unknown) {
