@@ -18,7 +18,7 @@ var phone_cli_exports = {};
 module.exports = __toCommonJS(phone_cli_exports);
 var import_node_child_process = require("node:child_process");
 var import_node_path = require("node:path");
-var COMMANDS = /* @__PURE__ */ new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar"]);
+var COMMANDS = /* @__PURE__ */ new Set(["i", "ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar"]);
 function printUsage() {
   console.log("phone_cli commands:");
   console.log("  ball   Football fixtures / PL table");
@@ -34,6 +34,10 @@ function printUsage() {
   console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("  temp   House temperature history (last 24h)");
   console.log("  solar  Solar yield and power history");
+  console.log("");
+  console.log("Or run the interactive picker:");
+  console.log("  npx @emgeebee/phone_cli i");
+  console.log("  i");
   console.log("");
   console.log("Usage:");
   console.log("  npx @emgeebee/phone_cli <command> [args]");

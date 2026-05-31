@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const COMMANDS = new Set(["ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar"]);
+const COMMANDS = new Set(["i", "ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar"]);
 
 function printUsage(): void {
   console.log("phone_cli commands:");
@@ -20,6 +20,10 @@ function printUsage(): void {
   console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("  temp   House temperature history (last 24h)");
   console.log("  solar  Solar yield and power history");
+  console.log("");
+  console.log("Or run the interactive picker:");
+  console.log("  npx @emgeebee/phone_cli i");
+  console.log("  i");
   console.log("");
   console.log("Usage:");
   console.log("  npx @emgeebee/phone_cli <command> [args]");
