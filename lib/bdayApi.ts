@@ -116,10 +116,7 @@ export function formatUpcomingBdayLine(entry: UpcomingBirthday): string {
 export function upcomingBdaySectionLines(
   config: BdayConfig | null,
   now: Date,
-  sectionDivider: (name: string) => string,
   limit = 3,
 ): string[] {
-  const lines = nextUpcomingBirthdays(config, now, limit).map(formatUpcomingBdayLine);
-  if (lines.length === 0) return [];
-  return [sectionDivider("bday"), ...lines];
+  return nextUpcomingBirthdays(config, now, limit).map(formatUpcomingBdayLine);
 }

@@ -218,7 +218,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     sectionDivider("time"),
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
-    ...upcomingBdaySectionLines(state.bdayConfig, now, sectionDivider),
+    ...upcomingBdaySectionLines(state.bdayConfig, now),
     sectionDivider("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
@@ -249,7 +249,6 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     state.houseOcto.gas.todayLine,
     state.houseOcto.gas.tomorrowLine,
     ...state.houseOcto.electricityLines,
-    "",
     statusShortcutFooter(),
   ];
 }
