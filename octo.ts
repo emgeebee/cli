@@ -2,54 +2,25 @@
 
 import { writeFileSync } from "node:fs";
 import { getConfigPath, readPhoneCliConfig } from "./config";
-
-type OctopusAgreement = {
-  tariff_code?: string;
-  valid_from?: string;
-  valid_to?: string | null;
-};
-
-type OctopusMeterPoint = {
-  mpan?: string;
-  mprn?: string;
-  meters?: Array<{
-    serial_number?: string;
-    active_from?: string;
-  }>;
-  agreements?: OctopusAgreement[];
-};
-
-type OctopusProperty = {
-  electricity_meter_points?: OctopusMeterPoint[];
-  gas_meter_points?: OctopusMeterPoint[];
-};
-
-type OctopusAccountResponse = {
-  properties?: OctopusProperty[];
-};
-
-type OctopusRate = {
-  valid_from?: string;
-  valid_to?: string;
-  value_inc_vat?: number;
-  value_exc_vat?: number;
-};
-
-type OctopusRatesResponse = {
-  next?: string | null;
-  results?: OctopusRate[];
-};
-
-type TariffDerivation = {
-  electricityMeters: Array<{ mpan: string; serial: string }>;
-  gasMeters: Array<{ mprn: string; serial: string }>;
-  etariff: OctopusAgreement;
-  gtariff: OctopusAgreement;
-  etariffPrices: string;
-  gtariffPrices: string;
-  etariffStanding: string;
-  gtariffStanding: string;
-};
+import {
+  DAY_MS,
+  OCTOPUS_BASE_URL,
+  colorForRate,
+  dayKeyUK,
+  deriveTariffs,
+  fetchAllOctopusResults,
+  fetchOctopusJson,
+  formatRateLine,
+  loadElectricityRatesForDays,
+  loadGasRatesForDays,
+  ratesUrlWithWindow,
+  resolveOctoCredentials,
+  toIsoNoMs,
+  ukTomorrowYmd,
+  type FuelType,
+  type OctopusAccountResponse,
+  type OctopusRate,
+} from "./lib/octoApi";
 
 type OctopusConsumption = {
   interval_start?: string;
@@ -62,8 +33,6 @@ type OctopusConsumptionResponse = {
   results?: OctopusConsumption[];
 };
 
-const OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
-const DAY_MS = 24 * 60 * 60 * 1000;
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -73,7 +42,6 @@ const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_AMBER_GAS = "\x1b[38;5;214m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
-type FuelType = "electricity" | "gas";
 type DailyTotals = Record<string, number>;
 type MonthlyAverages = {
   eCost: number;
@@ -96,200 +64,6 @@ function usage(): void {
   console.log("  OCTOPUS_GAS_KWH_PER_UNIT (default 11.2)");
 }
 
-function resolveOctoCredentials(): {
-  token: string;
-  accountNumber: string;
-  gasKwhPerUnit: number;
-} {
-  const parseGasFactor = (value: string | undefined): number | null => {
-    if (!value) return null;
-    const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("OCTOPUS_GAS_KWH_PER_UNIT must be a positive number.");
-    }
-    return n;
-  };
-
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const token = String(octo.basicAuthToken || octo.token || "").trim();
-  const accountNumber = String(octo.accountNumber || "").trim();
-  const envGasFactor = String(
-    octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "",
-  ).trim();
-  const configuredGasFactor = parseGasFactor(
-    String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() ||
-      undefined,
-  );
-  if (!token || !accountNumber) {
-    throw new Error(
-      [
-        "Missing Octopus credentials.",
-        `Configure ${getConfigPath()} with:`,
-        `{ "octo": { "basicAuthToken": "...", "accountNumber": "A-..." } }`,
-      ].join(" "),
-    );
-  }
-  return {
-    token,
-    accountNumber,
-    gasKwhPerUnit: parseGasFactor(envGasFactor) ?? configuredGasFactor ?? 11.2,
-  };
-}
-
-function latestAgreement(
-  agreements: OctopusAgreement[] | undefined,
-): OctopusAgreement {
-  if (!agreements || agreements.length === 0) {
-    throw new Error("No agreement found on meter point.");
-  }
-  const sorted = [...agreements].sort((a, b) => {
-    const aTs = new Date(a.valid_from || "").getTime();
-    const bTs = new Date(b.valid_from || "").getTime();
-    return aTs - bTs;
-  });
-  return sorted[sorted.length - 1];
-}
-
-function productFromTariffCode(tariffCode: string): string {
-  // Mirrors: tariff_code.split('-').slice(0, -1).slice(2).join('-')
-  const parts = tariffCode.split("-").slice(0, -1).slice(2);
-  if (parts.length === 0) {
-    throw new Error(
-      `Unable to derive product code from tariff code: ${tariffCode}`,
-    );
-  }
-  return parts.join("-");
-}
-
-function deriveTariffs(account: OctopusAccountResponse): TariffDerivation {
-  const property = account.properties?.[0];
-  if (!property) {
-    throw new Error("No property found on account.");
-  }
-
-  const ePoints = property.electricity_meter_points || [];
-  const gPoints = property.gas_meter_points || [];
-  const emPoint = ePoints[0];
-  const gmPoint = gPoints[0];
-  if (!emPoint || !gmPoint) {
-    throw new Error("Electricity and gas meter points are required.");
-  }
-  const meterRefs = (
-    points: OctopusMeterPoint[] | undefined,
-    key: "mpan" | "mprn",
-  ): Array<{ mpxn: string; serial: string }> => {
-    const refs: Array<{ mpxn: string; serial: string }> = [];
-    for (const point of points || []) {
-      const mpxn = String(point[key] || "").trim();
-      if (!mpxn) continue;
-      for (const meter of point.meters || []) {
-        const serial = String(meter.serial_number || "").trim();
-        if (!serial) continue;
-        refs.push({ mpxn, serial });
-      }
-    }
-    // Deduplicate pairs.
-    const seen = new Set<string>();
-    return refs.filter((ref) => {
-      const id = `${ref.mpxn}::${ref.serial}`;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  };
-
-  const electricityMeters = meterRefs(ePoints, "mpan").map((m) => ({
-    mpan: m.mpxn,
-    serial: m.serial,
-  }));
-  const gasMeters = meterRefs(gPoints, "mprn").map((m) => ({
-    mprn: m.mpxn,
-    serial: m.serial,
-  }));
-  if (electricityMeters.length === 0 || gasMeters.length === 0) {
-    throw new Error("Missing electricity or gas meter serials on account.");
-  }
-
-  const etariff = latestAgreement(emPoint.agreements);
-  const gtariff = latestAgreement(gmPoint.agreements);
-  if (!etariff.tariff_code || !gtariff.tariff_code) {
-    throw new Error("Missing tariff_code on one or more agreements.");
-  }
-
-  const eProduct = productFromTariffCode(etariff.tariff_code);
-  const gProduct = productFromTariffCode(gtariff.tariff_code);
-
-  return {
-    electricityMeters,
-    gasMeters,
-    etariff,
-    gtariff,
-    etariffPrices: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standard-unit-rates/`,
-    gtariffPrices: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standard-unit-rates/`,
-    etariffStanding: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standing-charges/`,
-    gtariffStanding: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standing-charges/`,
-  };
-}
-
-async function fetchOctopusJson<T>(url: string, token: string): Promise<T> {
-  const raw = token.trim();
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Basic ${Buffer.from(`${raw}`).toString("base64")}`,
-    },
-  });
-  if (response.ok) {
-    return (await response.json()) as T;
-  }
-  if (response.status !== 401) {
-    throw new Error(
-      `Octopus API request failed (${response.status}) for ${url}`,
-    );
-  }
-
-  throw new Error(`Octopus API request failed (${response.status}) for ${url}`);
-}
-
-type PagedResults<T> = {
-  next?: string | null;
-  results?: T[];
-};
-
-async function fetchAllOctopusResults<T>(
-  url: string,
-  token: string,
-): Promise<T[]> {
-  const all: T[] = [];
-  let nextUrl: string | null = url;
-  let pageGuard = 0;
-
-  while (nextUrl) {
-    pageGuard += 1;
-    if (pageGuard > 500) {
-      throw new Error("Too many Octopus API pages while fetching results.");
-    }
-    const page = await fetchOctopusJson<PagedResults<T>>(nextUrl, token);
-    all.push(...(page.results || []));
-    nextUrl = page.next || null;
-  }
-
-  return all;
-}
-
-function toIsoNoMs(date: Date): string {
-  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
-function ratesUrlWithWindow(baseUrl: string, from: Date, to: Date): string {
-  const url = new URL(baseUrl);
-  url.searchParams.set("period_from", toIsoNoMs(from));
-  url.searchParams.set("period_to", toIsoNoMs(to));
-  return url.toString();
-}
-
 function shouldUseColor(): boolean {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
@@ -297,70 +71,6 @@ function shouldUseColor(): boolean {
 function colorize(text: string, color: string): string {
   if (!shouldUseColor()) return text;
   return `${color}${text}${ANSI_RESET}`;
-}
-
-function formatWindow(rate: OctopusRate): string {
-  const from = rate.valid_from ? new Date(rate.valid_from) : null;
-  const to = rate.valid_to ? new Date(rate.valid_to) : null;
-  if (
-    !from ||
-    Number.isNaN(from.getTime()) ||
-    !to ||
-    Number.isNaN(to.getTime())
-  ) {
-    return "unknown";
-  }
-  const dayLabel = from.toLocaleDateString("en-GB", {
-    weekday: "short",
-    timeZone: "Europe/London",
-  });
-  const day = from.toLocaleDateString("en-GB", {
-    day: "numeric",
-    timeZone: "Europe/London",
-  });
-  const month = from.toLocaleDateString("en-GB", {
-    month: "numeric",
-    timeZone: "Europe/London",
-  });
-  const startTime = from.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Europe/London",
-  });
-  const endTime = to.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Europe/London",
-  });
-  const capDay =
-    dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1).toLowerCase();
-  return `${capDay} ${day}/${month} ${startTime} -> ${endTime}`;
-}
-
-function colorForRate(rateIncVat: number, fuel: FuelType): string {
-  if (fuel === "electricity") {
-    if (rateIncVat <= 5) return ANSI_GREEN;
-    if (rateIncVat <= 12) return ANSI_YELLOW;
-    if (rateIncVat < 20) return ANSI_ORANGE;
-    return ANSI_RED;
-  }
-
-  if (rateIncVat < 4) return ANSI_GREEN;
-  if (rateIncVat <= 5) return ANSI_YELLOW;
-  if (rateIncVat < 6) return ANSI_ORANGE;
-  return ANSI_RED;
-}
-
-function formatRateLine(rate: OctopusRate, fuel: FuelType): string {
-  const window = formatWindow(rate);
-  const inc =
-    rate.value_inc_vat == null ? "?" : `${rate.value_inc_vat.toFixed(4)}p`;
-  if (rate.value_inc_vat == null) {
-    return `${window} | ${inc}`;
-  }
-  return `${window} | ${colorize(inc, colorForRate(rate.value_inc_vat, fuel))}`;
 }
 
 function printRates(title: string, rates: OctopusRate[], fuel: FuelType): void {
@@ -399,11 +109,6 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
       `| ${row.map((v, i) => padCell(v || "", widths[i])).join(" | ")} |`,
   );
   return [border, headerLine, border, ...body, border];
-}
-
-function dayKeyUK(date: Date): string {
-  const y = date.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  return y; // YYYY-MM-DD
 }
 
 function dayLabelShort(dayKey: string): string {
@@ -945,9 +650,13 @@ async function main(): Promise<void> {
 
     const from = new Date();
     const to = new Date(from.getTime() + 2 * DAY_MS);
+    const todayYmd = dayKeyUK(from);
+    const tomorrowYmd = ukTomorrowYmd(from);
     const historyFrom = new Date(from.getTime() - 35 * DAY_MS);
-    const eRatesUrl = ratesUrlWithWindow(derived.etariffPrices, from, to);
-    const gRatesUrl = ratesUrlWithWindow(derived.gtariffPrices, from, to);
+    const [electricityResults, gasResults] = await Promise.all([
+      loadElectricityRatesForDays([todayYmd, tomorrowYmd], from),
+      loadGasRatesForDays([todayYmd, tomorrowYmd], from),
+    ]);
     const eHistoryUrl = ratesUrlWithWindow(
       derived.etariffPrices,
       historyFrom,
@@ -986,15 +695,11 @@ async function main(): Promise<void> {
     );
 
     const [
-      electricityResults,
-      gasResults,
       eHistoryResults,
       gHistoryResults,
       eStandingResults,
       gStandingResults,
     ] = await Promise.all([
-      fetchAllOctopusResults<OctopusRate>(eRatesUrl, token),
-      fetchAllOctopusResults<OctopusRate>(gRatesUrl, token),
       fetchAllOctopusResults<OctopusRate>(eHistoryUrl, token),
       fetchAllOctopusResults<OctopusRate>(gHistoryUrl, token),
       fetchAllOctopusResults<OctopusRate>(eStandingUrl, token),

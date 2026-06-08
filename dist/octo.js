@@ -16,7 +16,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // octo.ts
 var octo_exports = {};
 module.exports = __toCommonJS(octo_exports);
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 
 // config.ts
 var import_node_fs = require("node:fs");
@@ -44,28 +44,16 @@ function readPhoneCliConfig() {
   }
 }
 
-// octo.ts
+// lib/octoApi.ts
+var import_node_fs2 = require("node:fs");
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
+var UK_TZ = "Europe/London";
 var ANSI_RESET = "\x1B[0m";
 var ANSI_GREEN = "\x1B[32m";
 var ANSI_YELLOW = "\x1B[33m";
 var ANSI_ORANGE = "\x1B[38;5;208m";
 var ANSI_RED = "\x1B[31m";
-var ANSI_BRIGHT_GREEN = "\x1B[92m";
-var ANSI_AMBER_GAS = "\x1B[38;5;214m";
-var ANSI_BRIGHT_RED = "\x1B[91m";
-var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
-function usage() {
-  console.log("Usage:");
-  console.log("  octo");
-  console.log("");
-  console.log("Credentials can come from :");
-  console.log(`  Config file: ${getConfigPath()} (section: "octo")`);
-  console.log("");
-  console.log("Optional:");
-  console.log("  OCTOPUS_GAS_KWH_PER_UNIT (default 11.2)");
-}
 function resolveOctoCredentials() {
   const parseGasFactor = (value) => {
     if (!value) return null;
@@ -237,27 +225,27 @@ function formatWindow(rate) {
   }
   const dayLabel = from.toLocaleDateString("en-GB", {
     weekday: "short",
-    timeZone: "Europe/London"
+    timeZone: UK_TZ
   });
   const day = from.toLocaleDateString("en-GB", {
     day: "numeric",
-    timeZone: "Europe/London"
+    timeZone: UK_TZ
   });
   const month = from.toLocaleDateString("en-GB", {
     month: "numeric",
-    timeZone: "Europe/London"
+    timeZone: UK_TZ
   });
   const startTime = from.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: "Europe/London"
+    timeZone: UK_TZ
   });
   const endTime = to.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: "Europe/London"
+    timeZone: UK_TZ
   });
   const capDay = dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1).toLowerCase();
   return `${capDay} ${day}/${month} ${startTime} -> ${endTime}`;
@@ -275,12 +263,242 @@ function colorForRate(rateIncVat, fuel) {
   return ANSI_RED;
 }
 function formatRateLine(rate, fuel) {
-  const window = formatWindow(rate);
   const inc = rate.value_inc_vat == null ? "?" : `${rate.value_inc_vat.toFixed(4)}p`;
   if (rate.value_inc_vat == null) {
-    return `${window} | ${inc}`;
+    return inc;
   }
-  return `${window} | ${colorize(inc, colorForRate(rate.value_inc_vat, fuel))}`;
+  const colored = colorize(inc, colorForRate(rate.value_inc_vat, fuel));
+  if (!rate.valid_from) {
+    return colored;
+  }
+  const window = formatWindow(rate);
+  if (window === "unknown") {
+    return colored;
+  }
+  return `${window} | ${colored}`;
+}
+function dayKeyUK(date) {
+  return date.toLocaleDateString("en-CA", { timeZone: UK_TZ });
+}
+function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
+  const [year, month, day] = dayKeyUK(now).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + 1));
+  return date.toISOString().slice(0, 10);
+}
+function gasRatesForDay(rates, dayYmd) {
+  return rates.filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
+}
+function normalizeCachedDayPrices(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return [value];
+  }
+  if (!Array.isArray(value)) return null;
+  const prices = value.filter((entry) => typeof entry === "number" && Number.isFinite(entry));
+  return prices.length > 0 ? prices : null;
+}
+function readGasPriceCache() {
+  const config = readPhoneCliConfig();
+  const octo = config.octo || {};
+  const raw = octo.gas;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const cache = {};
+  for (const [dayKey, value] of Object.entries(raw)) {
+    const prices = normalizeCachedDayPrices(value);
+    if (prices) {
+      cache[dayKey] = prices;
+    }
+  }
+  return cache;
+}
+function writeOctoConfigSection(section, value) {
+  const configPath = getConfigPath();
+  const config = readPhoneCliConfig();
+  const octo = config.octo || {};
+  octo[section] = value;
+  config.octo = octo;
+  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}
+`, "utf8");
+}
+function saveGasPriceCache(cache) {
+  writeOctoConfigSection("gas", cache);
+}
+function hasCachedDay(cache, dayYmd) {
+  const prices = cache[dayYmd];
+  return Array.isArray(prices) && prices.length > 0;
+}
+function pricesFromDayRates(rates, dayYmd) {
+  return gasRatesForDay(rates, dayYmd).map((rate) => rate.value_inc_vat).filter((value) => value != null && Number.isFinite(value));
+}
+function syntheticRatesFromPrices(prices) {
+  return prices.map((value) => ({ value_inc_vat: value }));
+}
+async function ensureGasPricesCached(dayKeys, now) {
+  const cache = readGasPriceCache();
+  const missing = dayKeys.filter((dayKey) => !hasCachedDay(cache, dayKey));
+  if (missing.length === 0) {
+    return cache;
+  }
+  const from = new Date(now);
+  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const fetched = await fetchGasRates(from, to);
+  let updated = false;
+  for (const dayKey of missing) {
+    const prices = pricesFromDayRates(fetched, dayKey);
+    if (prices.length > 0) {
+      cache[dayKey] = prices;
+      updated = true;
+    }
+  }
+  if (updated) {
+    saveGasPriceCache(cache);
+  }
+  return cache;
+}
+async function loadGasRatesForDays(dayKeys, now = /* @__PURE__ */ new Date()) {
+  const cache = await ensureGasPricesCached(dayKeys, now);
+  const rates = [];
+  for (const dayKey of dayKeys) {
+    const prices = cache[dayKey];
+    if (prices?.length) {
+      rates.push(...syntheticRatesFromPrices(prices));
+    }
+  }
+  return rates;
+}
+async function fetchGasRates(from, to) {
+  const { token, accountNumber } = resolveOctoCredentials();
+  const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
+  const account = await fetchOctopusJson(accountUrl, token);
+  const derived = deriveTariffs(account);
+  const url = ratesUrlWithWindow(derived.gtariffPrices, from, to);
+  return fetchAllOctopusResults(url, token);
+}
+function normalizeCachedElectricityDay(value) {
+  if (!Array.isArray(value)) return null;
+  const rates = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry;
+    const validFrom = String(record.valid_from || "").trim();
+    const validTo = String(record.valid_to || "").trim();
+    const price = record.value_inc_vat;
+    if (!validFrom || !validTo || typeof price !== "number" || !Number.isFinite(price)) {
+      continue;
+    }
+    rates.push({
+      valid_from: validFrom,
+      valid_to: validTo,
+      value_inc_vat: price
+    });
+  }
+  return rates.length > 0 ? rates : null;
+}
+function readElectricityPriceCache() {
+  const config = readPhoneCliConfig();
+  const octo = config.octo || {};
+  const raw = octo.electricity;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const cache = {};
+  for (const [dayKey, value] of Object.entries(raw)) {
+    const rates = normalizeCachedElectricityDay(value);
+    if (rates) {
+      cache[dayKey] = rates;
+    }
+  }
+  return cache;
+}
+function saveElectricityPriceCache(cache) {
+  writeOctoConfigSection("electricity", cache);
+}
+function hasCachedElectricityDay(cache, dayYmd) {
+  const rates = cache[dayYmd];
+  return Array.isArray(rates) && rates.length > 0;
+}
+function electricityRatesToCache(rates) {
+  return rates.filter((rate) => rate.valid_from && rate.valid_to && rate.value_inc_vat != null).map((rate) => ({
+    valid_from: rate.valid_from,
+    valid_to: rate.valid_to,
+    value_inc_vat: rate.value_inc_vat
+  }));
+}
+function cachedElectricityToRates(cached) {
+  return cached.map((rate) => ({
+    valid_from: rate.valid_from,
+    valid_to: rate.valid_to,
+    value_inc_vat: rate.value_inc_vat
+  }));
+}
+async function fetchElectricityRates(from, to) {
+  const { token, accountNumber } = resolveOctoCredentials();
+  const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
+  const account = await fetchOctopusJson(accountUrl, token);
+  const derived = deriveTariffs(account);
+  const url = ratesUrlWithWindow(derived.etariffPrices, from, to);
+  return fetchAllOctopusResults(url, token);
+}
+async function ensureElectricityPricesCached(dayKeys, now) {
+  const cache = readElectricityPriceCache();
+  const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
+  if (missing.length === 0) {
+    return cache;
+  }
+  const from = new Date(now);
+  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const fetched = await fetchElectricityRates(from, to);
+  let updated = false;
+  for (const dayKey of missing) {
+    const cached = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
+    if (cached.length > 0) {
+      cache[dayKey] = cached;
+      updated = true;
+    }
+  }
+  if (updated) {
+    saveElectricityPriceCache(cache);
+  }
+  return cache;
+}
+async function loadElectricityRatesForDays(dayKeys, now = /* @__PURE__ */ new Date()) {
+  const cache = await ensureElectricityPricesCached(dayKeys, now);
+  const rates = [];
+  for (const dayKey of dayKeys) {
+    const cached = cache[dayKey];
+    if (cached?.length) {
+      rates.push(...cachedElectricityToRates(cached));
+    }
+  }
+  return rates;
+}
+
+// octo.ts
+var ANSI_RESET2 = "\x1B[0m";
+var ANSI_GREEN2 = "\x1B[32m";
+var ANSI_ORANGE2 = "\x1B[38;5;208m";
+var ANSI_RED2 = "\x1B[31m";
+var ANSI_BRIGHT_GREEN = "\x1B[92m";
+var ANSI_AMBER_GAS = "\x1B[38;5;214m";
+var ANSI_BRIGHT_RED = "\x1B[91m";
+var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
+function usage() {
+  console.log("Usage:");
+  console.log("  octo");
+  console.log("");
+  console.log("Credentials can come from :");
+  console.log(`  Config file: ${getConfigPath()} (section: "octo")`);
+  console.log("");
+  console.log("Optional:");
+  console.log("  OCTOPUS_GAS_KWH_PER_UNIT (default 11.2)");
+}
+function shouldUseColor2() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize2(text, color) {
+  if (!shouldUseColor2()) return text;
+  return `${color}${text}${ANSI_RESET2}`;
 }
 function printRates(title, rates, fuel) {
   console.log("");
@@ -315,10 +533,6 @@ function makeAsciiTable(headers, rows) {
     (row) => `| ${row.map((v, i) => padCell(v || "", widths[i])).join(" | ")} |`
   );
   return [border, headerLine, border, ...body, border];
-}
-function dayKeyUK(date) {
-  const y = date.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  return y;
 }
 function dayLabelShort(dayKey) {
   const d = /* @__PURE__ */ new Date(`${dayKey}T00:00:00Z`);
@@ -406,7 +620,7 @@ function rankedColorByDay(dayKeys, totals, fuel) {
   const rankableDays = dayKeys.slice(0, Math.max(0, dayKeys.length - 2));
   const entries = rankableDays.map((day) => ({ day, value: totals[day] || 0 }));
   entries.sort((a, b) => a.value - b.value);
-  const palette = fuel === "electricity" ? { low: ANSI_GREEN, mid: ANSI_ORANGE, high: ANSI_RED } : { low: ANSI_BRIGHT_GREEN, mid: ANSI_AMBER_GAS, high: ANSI_BRIGHT_RED };
+  const palette = fuel === "electricity" ? { low: ANSI_GREEN2, mid: ANSI_ORANGE2, high: ANSI_RED2 } : { low: ANSI_BRIGHT_GREEN, mid: ANSI_AMBER_GAS, high: ANSI_BRIGHT_RED };
   const map = {};
   for (let i = 0; i < entries.length; i += 1) {
     const bucket = i < 4 ? palette.low : i < 8 ? palette.mid : palette.high;
@@ -568,7 +782,7 @@ function saveMonthlyAverageCache(cache) {
   const octo = config.octo || {};
   octo.monthlyAverageCache = cache;
   config.octo = octo;
-  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}
+  (0, import_node_fs3.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}
 `, "utf8");
 }
 function monthlyAveragesFromDaily(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh) {
@@ -626,8 +840,8 @@ function printPast14DaysHorizontal(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh,
   ];
   const rows = dayKeys.map((k) => [
     dayLabelShort(k),
-    colorize(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET),
-    colorize(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET),
+    colorize2(formatPence(eDailyCost[k] || 0), eColorByDay[k] || ANSI_RESET2),
+    colorize2(formatPence(gDailyCost[k] || 0), gColorByDay[k] || ANSI_RESET2),
     formatPence((eDailyCost[k] || 0) + (gDailyCost[k] || 0)),
     formatKwh(eDailyKwh[k] || 0),
     formatKwh(gDailyKwh[k] || 0)
@@ -719,9 +933,13 @@ async function main() {
     const derived = deriveTariffs(account);
     const from = /* @__PURE__ */ new Date();
     const to = new Date(from.getTime() + 2 * DAY_MS);
+    const todayYmd = dayKeyUK(from);
+    const tomorrowYmd = ukTomorrowYmd(from);
     const historyFrom = new Date(from.getTime() - 35 * DAY_MS);
-    const eRatesUrl = ratesUrlWithWindow(derived.etariffPrices, from, to);
-    const gRatesUrl = ratesUrlWithWindow(derived.gtariffPrices, from, to);
+    const [electricityResults, gasResults] = await Promise.all([
+      loadElectricityRatesForDays([todayYmd, tomorrowYmd], from),
+      loadGasRatesForDays([todayYmd, tomorrowYmd], from)
+    ]);
     const eHistoryUrl = ratesUrlWithWindow(
       derived.etariffPrices,
       historyFrom,
@@ -749,15 +967,11 @@ async function main() {
       (meter) => `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}/meters/${encodeURIComponent(meter.serial)}/consumption/?period_from=${encodeURIComponent(toIsoNoMs(historyFrom))}&period_to=${encodeURIComponent(toIsoNoMs(from))}&order_by=period`
     );
     const [
-      electricityResults,
-      gasResults,
       eHistoryResults,
       gHistoryResults,
       eStandingResults,
       gStandingResults
     ] = await Promise.all([
-      fetchAllOctopusResults(eRatesUrl, token),
-      fetchAllOctopusResults(gRatesUrl, token),
       fetchAllOctopusResults(eHistoryUrl, token),
       fetchAllOctopusResults(gHistoryUrl, token),
       fetchAllOctopusResults(eStandingUrl, token),

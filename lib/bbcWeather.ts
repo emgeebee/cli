@@ -54,6 +54,12 @@ export function ukTodayYmd(now: Date = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: UK_TZ });
 }
 
+export function ukTomorrowYmd(now: Date = new Date()): string {
+  const [year, month, day] = ukTodayYmd(now).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + 1));
+  return date.toISOString().slice(0, 10);
+}
+
 export async function fetchBbcWeatherAggregated(location: string): Promise<BbcWeatherResponse> {
   const postcode = sanitizeWeatherLocation(location);
   const url = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
@@ -80,23 +86,37 @@ export function dailyReportsFromWeather(data: BbcWeatherResponse): BbcWeatherDai
     .filter((report): report is BbcWeatherDailyReport => Boolean(report));
 }
 
+export function weatherReportForDate(
+  data: BbcWeatherResponse,
+  dayYmd: string,
+): BbcWeatherDailyReport | null {
+  const reports = dailyReportsFromWeather(data);
+  return reports.find((report) => report.localDate === dayYmd) || null;
+}
+
 export function todayWeatherReport(
   data: BbcWeatherResponse,
   todayYmd: string = ukTodayYmd(),
 ): BbcWeatherDailyReport | null {
-  const reports = dailyReportsFromWeather(data);
-  return reports.find((report) => report.localDate === todayYmd) || reports[0] || null;
+  return weatherReportForDate(data, todayYmd) || dailyReportsFromWeather(data)[0] || null;
+}
+
+export function sunriseSunsetForDate(
+  data: BbcWeatherResponse,
+  dayYmd: string,
+): { sunrise: string; sunset: string } {
+  const report = weatherReportForDate(data, dayYmd);
+  return {
+    sunrise: report?.sunrise || "-",
+    sunset: report?.sunset || "-",
+  };
 }
 
 export function todaySunriseSunset(
   data: BbcWeatherResponse,
   todayYmd: string = ukTodayYmd(),
 ): { sunrise: string; sunset: string } {
-  const report = todayWeatherReport(data, todayYmd);
-  return {
-    sunrise: report?.sunrise || "-",
-    sunset: report?.sunset || "-",
-  };
+  return sunriseSunsetForDate(data, todayYmd);
 }
 
 function shouldUseColor(): boolean {
@@ -117,7 +137,7 @@ function formatRainPercent(value?: number | null): string {
   return colorize(text, ANSI_GREEN);
 }
 
-export function formatTodayWeatherLine(report: BbcWeatherDailyReport | null): string {
+export function formatWeatherLine(report: BbcWeatherDailyReport | null): string {
   if (!report) return "-";
 
   const summary =
@@ -127,4 +147,8 @@ export function formatTodayWeatherLine(report: BbcWeatherDailyReport | null): st
   const rain = formatRainPercent(report.precipitationProbabilityInPercent);
 
   return `${summary}, max ${max}, min ${min}, rain ${rain}`;
+}
+
+export function formatTodayWeatherLine(report: BbcWeatherDailyReport | null): string {
+  return formatWeatherLine(report);
 }

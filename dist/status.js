@@ -98,6 +98,11 @@ function resolveDefaultLocation() {
 function ukTodayYmd(now = /* @__PURE__ */ new Date()) {
   return now.toLocaleDateString("en-CA", { timeZone: UK_TZ });
 }
+function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
+  const [year, month, day] = ukTodayYmd(now).split("-").map(Number);
+  const date5 = new Date(Date.UTC(year, month - 1, day + 1));
+  return date5.toISOString().slice(0, 10);
+}
 async function fetchBbcWeatherAggregated(location) {
   const postcode = sanitizeWeatherLocation(location);
   const url2 = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
@@ -120,12 +125,15 @@ async function fetchBbcWeatherAggregated(location) {
 function dailyReportsFromWeather(data) {
   return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
 }
-function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
+function weatherReportForDate(data, dayYmd) {
   const reports = dailyReportsFromWeather(data);
-  return reports.find((report) => report.localDate === todayYmd) || reports[0] || null;
+  return reports.find((report) => report.localDate === dayYmd) || null;
 }
-function todaySunriseSunset(data, todayYmd = ukTodayYmd()) {
-  const report = todayWeatherReport(data, todayYmd);
+function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
+  return weatherReportForDate(data, todayYmd) || dailyReportsFromWeather(data)[0] || null;
+}
+function sunriseSunsetForDate(data, dayYmd) {
+  const report = weatherReportForDate(data, dayYmd);
   return {
     sunrise: report?.sunrise || "-",
     sunset: report?.sunset || "-"
@@ -146,13 +154,16 @@ function formatRainPercent(value) {
   if (value >= 25) return colorize2(text, ANSI_YELLOW2);
   return colorize2(text, ANSI_GREEN2);
 }
-function formatTodayWeatherLine(report) {
+function formatWeatherLine(report) {
   if (!report) return "-";
   const summary = (report.weatherTypeText || report.enhancedWeatherDescription || "Unknown").trim() || "Unknown";
   const max = formatTemperatureText(report.maxTempC, { scale: "max" });
   const min = formatTemperatureText(report.minTempC, { scale: "min" });
   const rain = formatRainPercent(report.precipitationProbabilityInPercent);
   return `${summary}, max ${max}, min ${min}, rain ${rain}`;
+}
+function formatTodayWeatherLine(report) {
+  return formatWeatherLine(report);
 }
 
 // node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
@@ -14858,6 +14869,449 @@ function latestRoomTemp(data, room) {
   return latest?.temp ?? null;
 }
 
+// lib/octoApi.ts
+var import_node_fs2 = require("node:fs");
+var ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"];
+var ELECTRICITY_PERIODS = [
+  { label: "< 6", minHour: 0, maxHour: 6 },
+  { label: "6-9", minHour: 6, maxHour: 9 },
+  { label: "9-4", minHour: 9, maxHour: 16 },
+  { label: "4-7", minHour: 16, maxHour: 19 },
+  { label: "> 7", minHour: 19, maxHour: 24 }
+];
+var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var UK_TZ3 = "Europe/London";
+var ANSI_RESET4 = "\x1B[0m";
+var ANSI_GREEN4 = "\x1B[32m";
+var ANSI_YELLOW4 = "\x1B[33m";
+var ANSI_ORANGE4 = "\x1B[38;5;208m";
+var ANSI_RED4 = "\x1B[31m";
+function resolveOctoCredentials() {
+  const parseGasFactor = (value) => {
+    if (!value) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error("OCTOPUS_GAS_KWH_PER_UNIT must be a positive number.");
+    }
+    return n;
+  };
+  const config2 = readPhoneCliConfig();
+  const octo = config2.octo || {};
+  const token = String(octo.basicAuthToken || octo.token || "").trim();
+  const accountNumber = String(octo.accountNumber || "").trim();
+  const envGasFactor = String(
+    octo.gasKwhPerUnit || octo.gas_kwh_per_unit || ""
+  ).trim();
+  const configuredGasFactor = parseGasFactor(
+    String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() || void 0
+  );
+  if (!token || !accountNumber) {
+    throw new Error(
+      [
+        "Missing Octopus credentials.",
+        `Configure ${getConfigPath()} with:`,
+        `{ "octo": { "basicAuthToken": "...", "accountNumber": "A-..." } }`
+      ].join(" ")
+    );
+  }
+  return {
+    token,
+    accountNumber,
+    gasKwhPerUnit: parseGasFactor(envGasFactor) ?? configuredGasFactor ?? 11.2
+  };
+}
+function latestAgreement(agreements) {
+  if (!agreements || agreements.length === 0) {
+    throw new Error("No agreement found on meter point.");
+  }
+  const sorted = [...agreements].sort((a, b) => {
+    const aTs = new Date(a.valid_from || "").getTime();
+    const bTs = new Date(b.valid_from || "").getTime();
+    return aTs - bTs;
+  });
+  return sorted[sorted.length - 1];
+}
+function productFromTariffCode(tariffCode) {
+  const parts = tariffCode.split("-").slice(0, -1).slice(2);
+  if (parts.length === 0) {
+    throw new Error(
+      `Unable to derive product code from tariff code: ${tariffCode}`
+    );
+  }
+  return parts.join("-");
+}
+function deriveTariffs(account) {
+  const property = account.properties?.[0];
+  if (!property) {
+    throw new Error("No property found on account.");
+  }
+  const ePoints = property.electricity_meter_points || [];
+  const gPoints = property.gas_meter_points || [];
+  const emPoint = ePoints[0];
+  const gmPoint = gPoints[0];
+  if (!emPoint || !gmPoint) {
+    throw new Error("Electricity and gas meter points are required.");
+  }
+  const meterRefs = (points, key) => {
+    const refs = [];
+    for (const point of points || []) {
+      const mpxn = String(point[key] || "").trim();
+      if (!mpxn) continue;
+      for (const meter of point.meters || []) {
+        const serial = String(meter.serial_number || "").trim();
+        if (!serial) continue;
+        refs.push({ mpxn, serial });
+      }
+    }
+    const seen = /* @__PURE__ */ new Set();
+    return refs.filter((ref) => {
+      const id = `${ref.mpxn}::${ref.serial}`;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+  const electricityMeters = meterRefs(ePoints, "mpan").map((m) => ({
+    mpan: m.mpxn,
+    serial: m.serial
+  }));
+  const gasMeters = meterRefs(gPoints, "mprn").map((m) => ({
+    mprn: m.mpxn,
+    serial: m.serial
+  }));
+  if (electricityMeters.length === 0 || gasMeters.length === 0) {
+    throw new Error("Missing electricity or gas meter serials on account.");
+  }
+  const etariff = latestAgreement(emPoint.agreements);
+  const gtariff = latestAgreement(gmPoint.agreements);
+  if (!etariff.tariff_code || !gtariff.tariff_code) {
+    throw new Error("Missing tariff_code on one or more agreements.");
+  }
+  const eProduct = productFromTariffCode(etariff.tariff_code);
+  const gProduct = productFromTariffCode(gtariff.tariff_code);
+  return {
+    electricityMeters,
+    gasMeters,
+    etariff,
+    gtariff,
+    etariffPrices: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standard-unit-rates/`,
+    gtariffPrices: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standard-unit-rates/`,
+    etariffStanding: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standing-charges/`,
+    gtariffStanding: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standing-charges/`
+  };
+}
+async function fetchOctopusJson(url2, token) {
+  const raw = token.trim();
+  const response = await fetch(url2, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Basic ${Buffer.from(`${raw}`).toString("base64")}`
+    }
+  });
+  if (response.ok) {
+    return await response.json();
+  }
+  if (response.status !== 401) {
+    throw new Error(
+      `Octopus API request failed (${response.status}) for ${url2}`
+    );
+  }
+  throw new Error(`Octopus API request failed (${response.status}) for ${url2}`);
+}
+async function fetchAllOctopusResults(url2, token) {
+  const all = [];
+  let nextUrl = url2;
+  let pageGuard = 0;
+  while (nextUrl) {
+    pageGuard += 1;
+    if (pageGuard > 500) {
+      throw new Error("Too many Octopus API pages while fetching results.");
+    }
+    const page = await fetchOctopusJson(nextUrl, token);
+    all.push(...page.results || []);
+    nextUrl = page.next || null;
+  }
+  return all;
+}
+function toIsoNoMs(date5) {
+  return date5.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function ratesUrlWithWindow(baseUrl, from, to) {
+  const url2 = new URL(baseUrl);
+  url2.searchParams.set("period_from", toIsoNoMs(from));
+  url2.searchParams.set("period_to", toIsoNoMs(to));
+  return url2.toString();
+}
+function shouldUseColor4() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize4(text, color) {
+  if (!shouldUseColor4()) return text;
+  return `${color}${text}${ANSI_RESET4}`;
+}
+function colorForRate(rateIncVat, fuel) {
+  if (fuel === "electricity") {
+    if (rateIncVat <= 5) return ANSI_GREEN4;
+    if (rateIncVat <= 12) return ANSI_YELLOW4;
+    if (rateIncVat < 20) return ANSI_ORANGE4;
+    return ANSI_RED4;
+  }
+  if (rateIncVat < 4) return ANSI_GREEN4;
+  if (rateIncVat <= 5) return ANSI_YELLOW4;
+  if (rateIncVat < 6) return ANSI_ORANGE4;
+  return ANSI_RED4;
+}
+function dayKeyUK(date5) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
+}
+function ukTomorrowYmd2(now = /* @__PURE__ */ new Date()) {
+  const [year, month, day] = dayKeyUK(now).split("-").map(Number);
+  const date5 = new Date(Date.UTC(year, month - 1, day + 1));
+  return date5.toISOString().slice(0, 10);
+}
+function gasRatesForDay(rates, dayYmd) {
+  return rates.filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
+}
+function normalizeCachedDayPrices(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return [value];
+  }
+  if (!Array.isArray(value)) return null;
+  const prices = value.filter((entry) => typeof entry === "number" && Number.isFinite(entry));
+  return prices.length > 0 ? prices : null;
+}
+function readGasPriceCache() {
+  const config2 = readPhoneCliConfig();
+  const octo = config2.octo || {};
+  const raw = octo.gas;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const cache = {};
+  for (const [dayKey, value] of Object.entries(raw)) {
+    const prices = normalizeCachedDayPrices(value);
+    if (prices) {
+      cache[dayKey] = prices;
+    }
+  }
+  return cache;
+}
+function writeOctoConfigSection(section, value) {
+  const configPath = getConfigPath();
+  const config2 = readPhoneCliConfig();
+  const octo = config2.octo || {};
+  octo[section] = value;
+  config2.octo = octo;
+  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config2, null, 2)}
+`, "utf8");
+}
+function saveGasPriceCache(cache) {
+  writeOctoConfigSection("gas", cache);
+}
+function hasCachedDay(cache, dayYmd) {
+  const prices = cache[dayYmd];
+  return Array.isArray(prices) && prices.length > 0;
+}
+function pricesFromDayRates(rates, dayYmd) {
+  return gasRatesForDay(rates, dayYmd).map((rate) => rate.value_inc_vat).filter((value) => value != null && Number.isFinite(value));
+}
+function syntheticRatesFromPrices(prices) {
+  return prices.map((value) => ({ value_inc_vat: value }));
+}
+async function ensureGasPricesCached(dayKeys, now) {
+  const cache = readGasPriceCache();
+  const missing = dayKeys.filter((dayKey) => !hasCachedDay(cache, dayKey));
+  if (missing.length === 0) {
+    return cache;
+  }
+  const from = new Date(now);
+  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const fetched = await fetchGasRates(from, to);
+  let updated = false;
+  for (const dayKey of missing) {
+    const prices = pricesFromDayRates(fetched, dayKey);
+    if (prices.length > 0) {
+      cache[dayKey] = prices;
+      updated = true;
+    }
+  }
+  if (updated) {
+    saveGasPriceCache(cache);
+  }
+  return cache;
+}
+async function fetchGasRates(from, to) {
+  const { token, accountNumber } = resolveOctoCredentials();
+  const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
+  const account = await fetchOctopusJson(accountUrl, token);
+  const derived = deriveTariffs(account);
+  const url2 = ratesUrlWithWindow(derived.gtariffPrices, from, to);
+  return fetchAllOctopusResults(url2, token);
+}
+async function loadTodayTomorrowGasRates(now = /* @__PURE__ */ new Date()) {
+  const todayYmd = dayKeyUK(now);
+  const tomorrowYmd = ukTomorrowYmd2(now);
+  const cache = await ensureGasPricesCached([todayYmd, tomorrowYmd], now);
+  return {
+    today: syntheticRatesFromPrices(cache[todayYmd] ?? []),
+    tomorrow: syntheticRatesFromPrices(cache[tomorrowYmd] ?? [])
+  };
+}
+function formatGasPrice(rate) {
+  const inc = rate.value_inc_vat;
+  if (inc == null) return "?";
+  const text = `${inc.toFixed(4)}p`;
+  return colorize4(text, colorForRate(inc, "gas"));
+}
+function formatDayGasLine(label, rates) {
+  if (rates.length === 0) return `${label} gas: -`;
+  return `${label} gas: ${rates.map(formatGasPrice).join(", ")}`;
+}
+function normalizeCachedElectricityDay(value) {
+  if (!Array.isArray(value)) return null;
+  const rates = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record2 = entry;
+    const validFrom = String(record2.valid_from || "").trim();
+    const validTo = String(record2.valid_to || "").trim();
+    const price = record2.value_inc_vat;
+    if (!validFrom || !validTo || typeof price !== "number" || !Number.isFinite(price)) {
+      continue;
+    }
+    rates.push({
+      valid_from: validFrom,
+      valid_to: validTo,
+      value_inc_vat: price
+    });
+  }
+  return rates.length > 0 ? rates : null;
+}
+function readElectricityPriceCache() {
+  const config2 = readPhoneCliConfig();
+  const octo = config2.octo || {};
+  const raw = octo.electricity;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const cache = {};
+  for (const [dayKey, value] of Object.entries(raw)) {
+    const rates = normalizeCachedElectricityDay(value);
+    if (rates) {
+      cache[dayKey] = rates;
+    }
+  }
+  return cache;
+}
+function saveElectricityPriceCache(cache) {
+  writeOctoConfigSection("electricity", cache);
+}
+function hasCachedElectricityDay(cache, dayYmd) {
+  const rates = cache[dayYmd];
+  return Array.isArray(rates) && rates.length > 0;
+}
+function electricityRatesToCache(rates) {
+  return rates.filter((rate) => rate.valid_from && rate.valid_to && rate.value_inc_vat != null).map((rate) => ({
+    valid_from: rate.valid_from,
+    valid_to: rate.valid_to,
+    value_inc_vat: rate.value_inc_vat
+  }));
+}
+function cachedElectricityToRates(cached2) {
+  return cached2.map((rate) => ({
+    valid_from: rate.valid_from,
+    valid_to: rate.valid_to,
+    value_inc_vat: rate.value_inc_vat
+  }));
+}
+async function fetchElectricityRates(from, to) {
+  const { token, accountNumber } = resolveOctoCredentials();
+  const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
+  const account = await fetchOctopusJson(accountUrl, token);
+  const derived = deriveTariffs(account);
+  const url2 = ratesUrlWithWindow(derived.etariffPrices, from, to);
+  return fetchAllOctopusResults(url2, token);
+}
+async function ensureElectricityPricesCached(dayKeys, now) {
+  const cache = readElectricityPriceCache();
+  const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
+  if (missing.length === 0) {
+    return cache;
+  }
+  const from = new Date(now);
+  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const fetched = await fetchElectricityRates(from, to);
+  let updated = false;
+  for (const dayKey of missing) {
+    const cached2 = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
+    if (cached2.length > 0) {
+      cache[dayKey] = cached2;
+      updated = true;
+    }
+  }
+  if (updated) {
+    saveElectricityPriceCache(cache);
+  }
+  return cache;
+}
+async function loadTodayTomorrowElectricityRates(now = /* @__PURE__ */ new Date()) {
+  const todayYmd = dayKeyUK(now);
+  const tomorrowYmd = ukTomorrowYmd2(now);
+  const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
+  return {
+    today: cachedElectricityToRates(cache[todayYmd] ?? []),
+    tomorrow: cachedElectricityToRates(cache[tomorrowYmd] ?? [])
+  };
+}
+function ukHourFromIso(iso) {
+  const date5 = new Date(iso);
+  if (Number.isNaN(date5.getTime())) return null;
+  const hour = Number(date5.toLocaleTimeString("en-GB", {
+    hour: "numeric",
+    hour12: false,
+    timeZone: UK_TZ3
+  }));
+  return Number.isFinite(hour) ? hour : null;
+}
+function averageElectricityByPeriod(rates) {
+  const buckets = Object.fromEntries(
+    ELECTRICITY_PERIODS.map((period) => [period.label, []])
+  );
+  for (const rate of rates) {
+    if (rate.value_inc_vat == null || !rate.valid_from) continue;
+    const hour = ukHourFromIso(rate.valid_from);
+    if (hour == null) continue;
+    const period = ELECTRICITY_PERIODS.find(
+      (entry) => hour >= entry.minHour && hour < entry.maxHour
+    );
+    if (period) {
+      buckets[period.label].push(rate.value_inc_vat);
+    }
+  }
+  return Object.fromEntries(
+    ELECTRICITY_PERIODS.map((period) => {
+      const values = buckets[period.label];
+      const average = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      return [period.label, average];
+    })
+  );
+}
+function formatElectricityPrice(pence) {
+  const text = `${pence.toFixed(2)}p`;
+  return colorize4(text, colorForRate(pence, "electricity"));
+}
+function formatElectricityPeriodAvgLine(label, pence, dayLabel) {
+  const prefix = dayLabel ? `${dayLabel} avg ${label}` : `avg ${label}`;
+  return pence == null ? `${prefix}: -` : `${prefix}: ${formatElectricityPrice(pence)}`;
+}
+function formatElectricityPeriodAvgLines(rates, dayLabel) {
+  const averages = averageElectricityByPeriod(rates);
+  return ELECTRICITY_PERIOD_LABELS.map(
+    (label) => formatElectricityPeriodAvgLine(label, averages[label], dayLabel)
+  );
+}
+
 // lib/wfhApi.ts
 var WFH_API_URL = "http://emgeebee.buzz:1880/api/wfh";
 var WfhResponseSchema = external_exports.object({
@@ -14887,14 +15341,38 @@ function formatWfhLine(wfh) {
   return `wfh: ${wfh ? "yes" : "no"}`;
 }
 
+// lib/terminal.ts
+var ANSI_ENTER_ALTERNATE_SCREEN = "\x1B[?1049h";
+var ANSI_LEAVE_ALTERNATE_SCREEN = "\x1B[?1049l";
+var ANSI_CLEAR_SCREEN = "\x1B[2J";
+var ANSI_HOME = "\x1B[H";
+var ANSI_ERASE_TO_END = "\x1B[J";
+var ANSI_HIDE_CURSOR = "\x1B[?25l";
+var ANSI_SHOW_CURSOR = "\x1B[?25h";
+function enterFullscreen() {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(`${ANSI_ENTER_ALTERNATE_SCREEN}${ANSI_CLEAR_SCREEN}${ANSI_HOME}${ANSI_HIDE_CURSOR}`);
+}
+function leaveFullscreen() {
+  if (!process.stdout.isTTY) return;
+  process.stdout.write(`${ANSI_SHOW_CURSOR}${ANSI_LEAVE_ALTERNATE_SCREEN}`);
+}
+function writeFullscreenLines(lines) {
+  process.stdout.write(ANSI_HOME);
+  for (const line of lines) {
+    process.stdout.write(`\x1B[2K${line}
+`);
+  }
+  process.stdout.write(ANSI_ERASE_TO_END);
+}
+
 // status.ts
-var UK_TZ3 = "Europe/London";
+var UK_TZ4 = "Europe/London";
 var TICK_MS = 1e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
 var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
 var TEMP_REFRESH_MS = 10 * 60 * 1e3;
-var ANSI_HIDE_CURSOR = "\x1B[?25l";
-var ANSI_SHOW_CURSOR = "\x1B[?25h";
+var GAS_REFRESH_MS = 30 * 60 * 1e3;
 function usage() {
   console.log("Usage:");
   console.log("  status");
@@ -14904,6 +15382,7 @@ function usage() {
   console.log("Solar daily yield refreshes every 30 minutes.");
   console.log("Solar power now and hourly average refresh every 10 minutes.");
   console.log("Downstairs and shed temperatures refresh every 10 minutes.");
+  console.log("Gas and electricity prices refresh every 30 minutes (requires octo config).");
 }
 function formatTime(now) {
   return now.toLocaleTimeString("en-GB", {
@@ -14911,7 +15390,7 @@ function formatTime(now) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: UK_TZ3
+    timeZone: UK_TZ4
   });
 }
 function formatDate(now) {
@@ -14920,7 +15399,7 @@ function formatDate(now) {
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: UK_TZ3
+    timeZone: UK_TZ4
   });
 }
 function parseClockMinutes(value) {
@@ -14932,19 +15411,6 @@ function parseClockMinutes(value) {
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
   return hours * 60 + minutes;
 }
-function ukSecondsSinceMidnight(now) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: UK_TZ3,
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hour12: false
-  }).formatToParts(now);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value);
-  const second = Number(parts.find((part) => part.type === "second")?.value);
-  return hour * 3600 + minute * 60 + second;
-}
 function formatDurationMinutes(totalMinutes) {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -14952,16 +15418,24 @@ function formatDurationMinutes(totalMinutes) {
   if (hours > 0) return `${hours}h`;
   return `${minutes}m`;
 }
-function formatSunRelative(clock, now) {
+function sunEventTime(clock, dayYmd) {
   const eventMinutes = parseClockMinutes(clock);
-  if (eventMinutes == null) return "";
-  const diffMinutes = Math.round((ukSecondsSinceMidnight(now) - eventMinutes * 60) / 60);
+  if (eventMinutes == null) return null;
+  const [year, month, day] = dayYmd.split("-").map(Number);
+  const hours = Math.floor(eventMinutes / 60);
+  const minutes = eventMinutes % 60;
+  return ukWallTimeToDate(year, month, day, hours, minutes);
+}
+function formatSunRelative(clock, now, dayYmd) {
+  const event = sunEventTime(clock, dayYmd);
+  if (!event) return "";
+  const diffMinutes = Math.round((now.getTime() - event.getTime()) / 6e4);
   if (diffMinutes === 0) return " (now)";
   if (diffMinutes > 0) return ` (${formatDurationMinutes(diffMinutes)} ago)`;
   return ` (in ${formatDurationMinutes(-diffMinutes)})`;
 }
-function formatSunLine(label, clock, now) {
-  return `${label}: ${clock}${formatSunRelative(clock, now)}`;
+function formatSunLine(label, clock, now, dayYmd) {
+  return `${label}: ${clock}${formatSunRelative(clock, now, dayYmd)}`;
 }
 function formatSolarYieldLine(solarYield) {
   return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
@@ -14976,19 +15450,43 @@ function formatSolarHourAvgLine(powerAvg, now) {
 function formatRoomTempLine(label, temp) {
   return `${label}: ${formatTemperatureText(temp, { fractionDigits: 1, unknownText: "-" })}`;
 }
-function buildDisplayLines(now, sunrise, sunset, weatherLine, wfh, downstairsTemp, shedTemp, solarYield, powerNow, powerHourAvg) {
+function sectionDivider(name) {
+  return `\u2500\u2500 ${name} \u2500\u2500`;
+}
+function formatDayWeatherLine(label, line) {
+  return line === "-" ? `${label}: -` : `${label}: ${line}`;
+}
+function weatherSnapshotFromData(weather, todayYmd) {
+  const tomorrowYmd = ukTomorrowYmd(/* @__PURE__ */ new Date(`${todayYmd}T12:00:00Z`));
+  const todaySun = sunriseSunsetForDate(weather, todayYmd);
+  return {
+    weatherLine: formatTodayWeatherLine(todayWeatherReport(weather, todayYmd)),
+    tomorrowWeatherLine: formatWeatherLine(weatherReportForDate(weather, tomorrowYmd)),
+    sunrise: todaySun.sunrise,
+    sunset: todaySun.sunset
+  };
+}
+function buildDisplayLines(now, todayYmd, weather, houseOcto, wfh, downstairsTemp, shedTemp, solarYield, powerNow, powerHourAvg) {
   return [
+    sectionDivider("time"),
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
-    formatWfhLine(wfh),
-    weatherLine,
-    formatRoomTempLine("downstairs temp", downstairsTemp),
-    formatRoomTempLine("shed temp", shedTemp),
-    formatSunLine("sunrise", sunrise, now),
-    formatSunLine("sunset", sunset, now),
+    sectionDivider("weather"),
+    formatDayWeatherLine("today", weather.weatherLine),
+    formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
+    formatSunLine("sunrise", weather.sunrise, now, todayYmd),
+    formatSunLine("sunset", weather.sunset, now, todayYmd),
+    sectionDivider("solar"),
     formatSolarYieldLine(solarYield),
     formatSolarNowLine(powerNow),
-    formatSolarHourAvgLine(powerHourAvg, now)
+    formatSolarHourAvgLine(powerHourAvg, now),
+    sectionDivider("house"),
+    formatWfhLine(wfh),
+    houseOcto.gas.todayLine,
+    houseOcto.gas.tomorrowLine,
+    ...houseOcto.electricityLines,
+    formatRoomTempLine("downstairs temp", downstairsTemp),
+    formatRoomTempLine("shed temp", shedTemp)
   ];
 }
 function solarSnapshotFromData(data, dayKey, now) {
@@ -14998,17 +15496,13 @@ function solarSnapshotFromData(data, dayKey, now) {
     powerHourAvg: currentHourPowerAvgWatts(data, now)
   };
 }
-function writeDisplay(lines, isUpdate) {
-  if (!isUpdate) {
-    for (const line of lines) {
-      console.log(line);
-    }
+function writeDisplay(lines, fullscreen) {
+  if (fullscreen) {
+    writeFullscreenLines(lines);
     return;
   }
-  process.stdout.write(`\x1B[${lines.length}A`);
   for (const line of lines) {
-    process.stdout.write(`\x1B[2K${line}
-`);
+    console.log(line);
   }
 }
 async function loadSolarSnapshot(dayKey, now) {
@@ -15032,23 +15526,64 @@ async function loadTemps() {
     return { downstairsTemp: null, shedTemp: null };
   }
 }
+function emptyGasSnapshot() {
+  return {
+    todayLine: formatDayGasLine("today", []),
+    tomorrowLine: formatDayGasLine("tomorrow", [])
+  };
+}
+function gasSnapshotFromRates(rates) {
+  return {
+    todayLine: formatDayGasLine("today", rates.today),
+    tomorrowLine: formatDayGasLine("tomorrow", rates.tomorrow)
+  };
+}
+function emptyElectricityLines() {
+  return [
+    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null)),
+    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null, "tomorrow"))
+  ];
+}
+function emptyHouseOctoSnapshot() {
+  return {
+    gas: emptyGasSnapshot(),
+    electricityLines: emptyElectricityLines()
+  };
+}
+async function loadHouseOctoPrices(now = /* @__PURE__ */ new Date()) {
+  try {
+    const [gasRates, electricityRates] = await Promise.all([
+      loadTodayTomorrowGasRates(now),
+      loadTodayTomorrowElectricityRates(now)
+    ]);
+    return {
+      gas: gasSnapshotFromRates(gasRates),
+      electricityLines: [
+        ...formatElectricityPeriodAvgLines(electricityRates.today),
+        ...formatElectricityPeriodAvgLines(electricityRates.tomorrow, "tomorrow")
+      ]
+    };
+  } catch {
+    return emptyHouseOctoSnapshot();
+  }
+}
 async function printOnce() {
   const now = /* @__PURE__ */ new Date();
   const dayKey = ukTodayYmd(now);
-  const [weather, solar, wfh, temps] = await Promise.all([
+  const [weather, solar, wfh, temps, houseOcto] = await Promise.all([
     fetchBbcWeatherAggregated(resolveDefaultLocation()),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
-    loadTemps()
+    loadTemps(),
+    loadHouseOctoPrices(now)
   ]);
-  const { sunrise, sunset } = todaySunriseSunset(weather, dayKey);
-  const weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, dayKey));
+  const weatherSnapshot = weatherSnapshotFromData(weather, dayKey);
   writeDisplay(
     buildDisplayLines(
       now,
-      sunrise,
-      sunset,
-      weatherLine,
+      dayKey,
+      weatherSnapshot,
+      houseOcto,
       wfh,
       temps.downstairsTemp,
       temps.shedTemp,
@@ -15063,9 +15598,9 @@ async function runLive() {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
   let weather = await fetchBbcWeatherAggregated(location);
-  let { sunrise, sunset } = todaySunriseSunset(weather, trackedDate);
-  let weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+  let weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
   let wfh = null;
+  let houseOcto = emptyHouseOctoSnapshot();
   let downstairsTemp = null;
   let shedTemp = null;
   let solarYield = null;
@@ -15075,36 +15610,39 @@ async function runLive() {
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
-  [wfh, { downstairsTemp, shedTemp }] = await Promise.all([
+  let lastGasRefreshAt = 0;
+  [wfh, { downstairsTemp, shedTemp }, houseOcto] = await Promise.all([
     fetchWfhStatus(),
-    loadTemps()
+    loadTemps(),
+    loadHouseOctoPrices()
   ]);
-  lastTempRefreshAt = Date.now();
+  const startedAt = Date.now();
+  lastTempRefreshAt = startedAt;
+  lastGasRefreshAt = startedAt;
   try {
     const data = await fetchSolarData();
-    const startedAt = Date.now();
-    const started = new Date(startedAt);
+    const startedAt2 = Date.now();
+    const started = new Date(startedAt2);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
-    lastSolarYieldRefreshAt = startedAt;
-    lastPowerRefreshAt = startedAt;
+    lastSolarYieldRefreshAt = startedAt2;
+    lastPowerRefreshAt = startedAt2;
     lastPowerHourStart = ukHourStartMs(started);
   } catch {
   }
   const stop = () => {
     clearInterval(timer);
-    process.stdout.write(ANSI_SHOW_CURSOR);
-    process.stdout.write("\n");
+    leaveFullscreen();
     process.exit(0);
   };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
-  process.stdout.write(ANSI_HIDE_CURSOR);
+  enterFullscreen();
   writeDisplay(
     buildDisplayLines(
       /* @__PURE__ */ new Date(),
-      sunrise,
-      sunset,
-      weatherLine,
+      trackedDate,
+      weatherSnapshot,
+      houseOcto,
       wfh,
       downstairsTemp,
       shedTemp,
@@ -15112,7 +15650,7 @@ async function runLive() {
       powerNow,
       powerHourAvg
     ),
-    false
+    true
   );
   const timer = setInterval(() => {
     void (async () => {
@@ -15124,14 +15662,14 @@ async function runLive() {
       const hourChanged = ukHourStartMs(now) !== lastPowerHourStart;
       const needPowerRefresh = dayChanged || hourChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
       const needTempRefresh = dayChanged || nowMs - lastTempRefreshAt >= TEMP_REFRESH_MS;
+      const needGasRefresh = dayChanged || nowMs - lastGasRefreshAt >= GAS_REFRESH_MS;
       if (dayChanged) {
         trackedDate = today;
         [weather, wfh] = await Promise.all([
           fetchBbcWeatherAggregated(location),
           fetchWfhStatus()
         ]);
-        ({ sunrise, sunset } = todaySunriseSunset(weather, trackedDate));
-        weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+        weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
       }
       if (needYieldRefresh || needPowerRefresh) {
         try {
@@ -15156,12 +15694,16 @@ async function runLive() {
         } catch {
         }
       }
+      if (needGasRefresh) {
+        houseOcto = await loadHouseOctoPrices(now);
+        lastGasRefreshAt = nowMs;
+      }
       writeDisplay(
         buildDisplayLines(
           now,
-          sunrise,
-          sunset,
-          weatherLine,
+          trackedDate,
+          weatherSnapshot,
+          houseOcto,
           wfh,
           downstairsTemp,
           shedTemp,
@@ -15173,10 +15715,9 @@ async function runLive() {
       );
     })().catch((error51) => {
       clearInterval(timer);
-      process.stdout.write(ANSI_SHOW_CURSOR);
+      leaveFullscreen();
       const message = error51 instanceof Error ? error51.message : String(error51);
-      console.error(`
-${message}`);
+      console.error(message);
       process.exit(1);
     });
   }, TICK_MS);
@@ -15197,7 +15738,7 @@ async function main() {
   await printOnce();
 }
 void main().catch((error51) => {
-  process.stdout.write(ANSI_SHOW_CURSOR);
+  leaveFullscreen();
   const message = error51 instanceof Error ? error51.message : String(error51);
   console.error(message);
   console.error("");
