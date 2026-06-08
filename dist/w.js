@@ -189,11 +189,43 @@ function formatTemperatureText(value, options) {
   return colourTemperatureText(text, value, options?.scale ?? "max");
 }
 
+// lib/bbcWeather.ts
+var BBC_WEATHER_AGGREGATED_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+var DEFAULT_WEATHER_LOCATION = "cm2";
+function sanitizeWeatherLocation(input) {
+  return String(input || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+function resolveDefaultLocation() {
+  const config = readPhoneCliConfig();
+  const configured = String(config.defaultLocation ?? "").trim();
+  if (configured) {
+    return sanitizeWeatherLocation(configured);
+  }
+  return DEFAULT_WEATHER_LOCATION;
+}
+async function fetchBbcWeatherAggregated(location) {
+  const postcode = sanitizeWeatherLocation(location);
+  const url = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "*/*",
+      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Priority: "u=1, i",
+      Referer: "https://www.bbc.co.uk/"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Weather API request failed (${response.status})`);
+  }
+  return await response.json();
+}
+
 // w.ts
-var WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
 var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
 var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
-var DEFAULT_POSTCODE = "cm2";
 var ANSI_RESET2 = "\x1B[0m";
 var ANSI_GREEN2 = "\x1B[32m";
 var ANSI_YELLOW2 = "\x1B[33m";
@@ -238,43 +270,22 @@ function usage() {
   console.log("  w sw1a");
   console.log("");
 }
-function sanitizePostcode(input) {
-  return String(input || "").trim().toLowerCase().replace(/\s+/g, "");
-}
 function parseArgs(argv) {
   const args = argv.slice(2);
   if (args[0] === "--help" || args[0] === "-h") {
     return { help: true };
   }
   if (args.length === 0) {
-    return { postcode: DEFAULT_POSTCODE };
+    return { postcode: resolveDefaultLocation() };
   }
   if (args.length > 1) {
     throw new Error("Pass at most one postcode.");
   }
-  const postcode = sanitizePostcode(args[0]);
+  const postcode = sanitizeWeatherLocation(args[0]);
   if (!postcode) {
-    return { postcode: DEFAULT_POSTCODE };
+    return { postcode: resolveDefaultLocation() };
   }
   return { postcode };
-}
-async function fetchWeather(postcode) {
-  const url = `${WEATHER_BASE_URL}/${encodeURIComponent(postcode)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Accept: "*/*",
-      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      Priority: "u=1, i",
-      Referer: "https://www.bbc.co.uk/"
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Weather API request failed (${response.status})`);
-  }
-  return await response.json();
 }
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -595,8 +606,8 @@ async function main() {
       usage();
       return;
     }
-    const postcode = parsed.postcode || DEFAULT_POSTCODE;
-    const data = await fetchWeather(postcode);
+    const postcode = parsed.postcode || resolveDefaultLocation();
+    const data = await fetchBbcWeatherAggregated(postcode);
     await printForecast(data, postcode);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

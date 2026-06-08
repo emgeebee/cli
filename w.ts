@@ -4,6 +4,11 @@ import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
 import { getConfigPath, readPhoneCliConfig } from "./config";
+import {
+  fetchBbcWeatherAggregated,
+  resolveDefaultLocation,
+  sanitizeWeatherLocation,
+} from "./lib/bbcWeather";
 import { formatTemperatureText } from "./lib/temperatureColours";
 
 type DailyReport = {
@@ -51,10 +56,8 @@ type MoonApiResponse = {
   };
 };
 
-const WEATHER_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
 const MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
 const MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
-const DEFAULT_POSTCODE = "cm2";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_BLUE = "\x1b[34m";
 const ANSI_GREEN = "\x1b[32m";
@@ -113,48 +116,22 @@ function usage(): void {
   console.log("");
 }
 
-function sanitizePostcode(input: string): string {
-  return String(input || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "");
-}
-
 function parseArgs(argv: string[]): { help?: true; postcode?: string } {
   const args = argv.slice(2);
   if (args[0] === "--help" || args[0] === "-h") {
     return { help: true };
   }
   if (args.length === 0) {
-    return { postcode: DEFAULT_POSTCODE };
+    return { postcode: resolveDefaultLocation() };
   }
   if (args.length > 1) {
     throw new Error("Pass at most one postcode.");
   }
-  const postcode = sanitizePostcode(args[0]);
+  const postcode = sanitizeWeatherLocation(args[0]);
   if (!postcode) {
-    return { postcode: DEFAULT_POSTCODE };
+    return { postcode: resolveDefaultLocation() };
   }
   return { postcode };
-}
-
-async function fetchWeather(postcode: string): Promise<WeatherResponse> {
-  const url = `${WEATHER_BASE_URL}/${encodeURIComponent(postcode)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Accept: "*/*",
-      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      Priority: "u=1, i",
-      Referer: "https://www.bbc.co.uk/",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Weather API request failed (${response.status})`);
-  }
-  return (await response.json()) as WeatherResponse;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -555,8 +532,8 @@ async function main(): Promise<void> {
       usage();
       return;
     }
-    const postcode = parsed.postcode || DEFAULT_POSTCODE;
-    const data = await fetchWeather(postcode);
+    const postcode = parsed.postcode || resolveDefaultLocation();
+    const data = (await fetchBbcWeatherAggregated(postcode)) as WeatherResponse;
     await printForecast(data, postcode);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

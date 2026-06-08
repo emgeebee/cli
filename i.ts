@@ -28,6 +28,7 @@ const COMMANDS: CommandChoice[] = [
   { value: 12, cmd: "r", name: "CHM", description: "UK rail boards (departures, arrivals, search)", extraArgs: 'CHM' },
   { value: 13, cmd: "temp", name: "temp", description: "House temperature history", extraArgs: '' },
   { value: 14, cmd: "solar", name: "solar", description: "Solar yield and power history", extraArgs: '' },
+  { value: 15, cmd: "status", name: "status", description: "Clock, date, sunrise/sunset", extraArgs: '' },
 ];
 
 function usage(): void {

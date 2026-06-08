@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 export type CliConfig = Record<string, unknown>;
 
 export type PhoneCliConfig = {
+  /** UK postcode district for geo lookups (e.g. weather sunrise/sunset). */
+  defaultLocation?: string;
   octo?: CliConfig;
   cric?: CliConfig;
   ball?: CliConfig;
@@ -12,7 +14,7 @@ export type PhoneCliConfig = {
   money?: CliConfig;
   w?: CliConfig;
   cal?: CliConfig;
-  [section: string]: CliConfig | undefined;
+  [section: string]: CliConfig | string | undefined;
 };
 
 const CONFIG_FILE = ".phone_cli.json";

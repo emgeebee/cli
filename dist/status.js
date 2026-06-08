@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
-};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -20,124 +15,145 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// node_modules/.pnpm/ansi-regex@5.0.1/node_modules/ansi-regex/index.js
-var require_ansi_regex = __commonJS({
-  "node_modules/.pnpm/ansi-regex@5.0.1/node_modules/ansi-regex/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = ({ onlyFirst = false } = {}) => {
-      const pattern = [
-        "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)",
-        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))"
-      ].join("|");
-      return new RegExp(pattern, onlyFirst ? void 0 : "g");
-    };
-  }
-});
+// status.ts
+var status_exports = {};
+module.exports = __toCommonJS(status_exports);
 
-// node_modules/.pnpm/strip-ansi@6.0.1/node_modules/strip-ansi/index.js
-var require_strip_ansi = __commonJS({
-  "node_modules/.pnpm/strip-ansi@6.0.1/node_modules/strip-ansi/index.js"(exports2, module2) {
-    "use strict";
-    var ansiRegex = require_ansi_regex();
-    module2.exports = (string4) => typeof string4 === "string" ? string4.replace(ansiRegex(), "") : string4;
+// config.ts
+var import_node_fs = require("node:fs");
+var import_node_path = require("node:path");
+var import_node_os = require("node:os");
+var CONFIG_FILE = ".phone_cli.json";
+function getConfigPath() {
+  return (0, import_node_path.join)((0, import_node_os.homedir)(), CONFIG_FILE);
+}
+function readPhoneCliConfig() {
+  const path = getConfigPath();
+  try {
+    const raw = (0, import_node_fs.readFileSync)(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Top-level JSON must be an object.");
+    }
+    return parsed;
+  } catch (error51) {
+    if (typeof error51 === "object" && error51 != null && "code" in error51 && error51.code === "ENOENT") {
+      return {};
+    }
+    const message = error51 instanceof Error ? error51.message : String(error51);
+    throw new Error(`Failed to read config at ${path}: ${message}`);
   }
-});
+}
 
-// node_modules/.pnpm/is-fullwidth-code-point@3.0.0/node_modules/is-fullwidth-code-point/index.js
-var require_is_fullwidth_code_point = __commonJS({
-  "node_modules/.pnpm/is-fullwidth-code-point@3.0.0/node_modules/is-fullwidth-code-point/index.js"(exports2, module2) {
-    "use strict";
-    var isFullwidthCodePoint = (codePoint) => {
-      if (Number.isNaN(codePoint)) {
-        return false;
-      }
-      if (codePoint >= 4352 && (codePoint <= 4447 || // Hangul Jamo
-      codePoint === 9001 || // LEFT-POINTING ANGLE BRACKET
-      codePoint === 9002 || // RIGHT-POINTING ANGLE BRACKET
-      // CJK Radicals Supplement .. Enclosed CJK Letters and Months
-      11904 <= codePoint && codePoint <= 12871 && codePoint !== 12351 || // Enclosed CJK Letters and Months .. CJK Unified Ideographs Extension A
-      12880 <= codePoint && codePoint <= 19903 || // CJK Unified Ideographs .. Yi Radicals
-      19968 <= codePoint && codePoint <= 42182 || // Hangul Jamo Extended-A
-      43360 <= codePoint && codePoint <= 43388 || // Hangul Syllables
-      44032 <= codePoint && codePoint <= 55203 || // CJK Compatibility Ideographs
-      63744 <= codePoint && codePoint <= 64255 || // Vertical Forms
-      65040 <= codePoint && codePoint <= 65049 || // CJK Compatibility Forms .. Small Form Variants
-      65072 <= codePoint && codePoint <= 65131 || // Halfwidth and Fullwidth Forms
-      65281 <= codePoint && codePoint <= 65376 || 65504 <= codePoint && codePoint <= 65510 || // Kana Supplement
-      110592 <= codePoint && codePoint <= 110593 || // Enclosed Ideographic Supplement
-      127488 <= codePoint && codePoint <= 127569 || // CJK Unified Ideographs Extension B .. Tertiary Ideographic Plane
-      131072 <= codePoint && codePoint <= 262141)) {
-        return true;
-      }
-      return false;
-    };
-    module2.exports = isFullwidthCodePoint;
-    module2.exports.default = isFullwidthCodePoint;
+// lib/temperatureColours.ts
+var ANSI_RESET = "\x1B[0m";
+var ANSI_BLUE = "\x1B[34m";
+var ANSI_GREEN = "\x1B[32m";
+var ANSI_YELLOW = "\x1B[33m";
+var ANSI_ORANGE = "\x1B[38;5;208m";
+var ANSI_RED = "\x1B[31m";
+function shouldUseColor() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize(value, color) {
+  if (!shouldUseColor()) return value;
+  return `${color}${value}${ANSI_RESET}`;
+}
+function colourTemperatureText(text, value, _scale = "max") {
+  if (value < 5) return colorize(text, ANSI_BLUE);
+  if (value <= 10) return colorize(text, ANSI_GREEN);
+  if (value <= 16) return colorize(text, ANSI_YELLOW);
+  if (value <= 23) return colorize(text, ANSI_ORANGE);
+  return colorize(text, ANSI_RED);
+}
+function formatTemperatureText(value, options) {
+  if (value == null) return options?.unknownText ?? "?";
+  const fractionDigits = options?.fractionDigits ?? 0;
+  const text = `${value.toFixed(fractionDigits)}C`;
+  return colourTemperatureText(text, value, options?.scale ?? "max");
+}
+
+// lib/bbcWeather.ts
+var ANSI_RESET2 = "\x1B[0m";
+var ANSI_GREEN2 = "\x1B[32m";
+var ANSI_YELLOW2 = "\x1B[33m";
+var ANSI_ORANGE2 = "\x1B[38;5;208m";
+var ANSI_RED2 = "\x1B[31m";
+var BBC_WEATHER_AGGREGATED_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+var DEFAULT_WEATHER_LOCATION = "cm2";
+var UK_TZ = "Europe/London";
+function sanitizeWeatherLocation(input) {
+  return String(input || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+function resolveDefaultLocation() {
+  const config2 = readPhoneCliConfig();
+  const configured = String(config2.defaultLocation ?? "").trim();
+  if (configured) {
+    return sanitizeWeatherLocation(configured);
   }
-});
-
-// node_modules/.pnpm/emoji-regex@8.0.0/node_modules/emoji-regex/index.js
-var require_emoji_regex = __commonJS({
-  "node_modules/.pnpm/emoji-regex@8.0.0/node_modules/emoji-regex/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = function() {
-      return /\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62(?:\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67|\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74|\uDB40\uDC77\uDB40\uDC6C\uDB40\uDC73)\uDB40\uDC7F|\uD83D\uDC68(?:\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68\uD83C\uDFFB|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFE])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D)?\uD83D\uDC68|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D[\uDC66\uDC67])|[\u2695\u2696\u2708]\uFE0F|\uD83D[\uDC66\uDC67]|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|(?:\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708])\uFE0F|\uD83C\uDFFB\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C[\uDFFB-\uDFFF])|(?:\uD83E\uDDD1\uD83C\uDFFB\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)\uD83C\uDFFB|\uD83E\uDDD1(?:\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1)|(?:\uD83E\uDDD1\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D(?:\uD83D[\uDC68\uDC69]))(?:\uD83C[\uDFFB-\uDFFE])|(?:\uD83E\uDDD1\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB\uDFFC])|\uD83D\uDC69(?:\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFD-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFB\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFC-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC\uDFFE\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D(?:\uD83D[\uDC68\uDC69])|\uD83D[\uDC68\uDC69])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD]))|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|(?:\uD83E\uDDD1\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB-\uDFFD])|\uD83D\uDC69\u200D\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D\uDC41\uFE0F\u200D\uD83D\uDDE8|\uD83D\uDC69(?:\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708]|\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\u200D[\u2695\u2696\u2708])|(?:(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)\uFE0F|\uD83D\uDC6F|\uD83E[\uDD3C\uDDDE\uDDDF])\u200D[\u2640\u2642]|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|\u200D[\u2640\u2642])|\uD83C\uDFF4\u200D\u2620)\uFE0F|\uD83D\uDC69\u200D\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|\uD83C\uDFF3\uFE0F\u200D\uD83C\uDF08|\uD83D\uDC15\u200D\uD83E\uDDBA|\uD83D\uDC69\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC67|\uD83C\uDDFD\uD83C\uDDF0|\uD83C\uDDF4\uD83C\uDDF2|\uD83C\uDDF6\uD83C\uDDE6|[#\*0-9]\uFE0F\u20E3|\uD83C\uDDE7(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEF\uDDF1-\uDDF4\uDDF6-\uDDF9\uDDFB\uDDFC\uDDFE\uDDFF])|\uD83C\uDDF9(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDED\uDDEF-\uDDF4\uDDF7\uDDF9\uDDFB\uDDFC\uDDFF])|\uD83C\uDDEA(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDED\uDDF7-\uDDFA])|\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF7(?:\uD83C[\uDDEA\uDDF4\uDDF8\uDDFA\uDDFC])|\uD83D\uDC69(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF2(?:\uD83C[\uDDE6\uDDE8-\uDDED\uDDF0-\uDDFF])|\uD83C\uDDE6(?:\uD83C[\uDDE8-\uDDEC\uDDEE\uDDF1\uDDF2\uDDF4\uDDF6-\uDDFA\uDDFC\uDDFD\uDDFF])|\uD83C\uDDF0(?:\uD83C[\uDDEA\uDDEC-\uDDEE\uDDF2\uDDF3\uDDF5\uDDF7\uDDFC\uDDFE\uDDFF])|\uD83C\uDDED(?:\uD83C[\uDDF0\uDDF2\uDDF3\uDDF7\uDDF9\uDDFA])|\uD83C\uDDE9(?:\uD83C[\uDDEA\uDDEC\uDDEF\uDDF0\uDDF2\uDDF4\uDDFF])|\uD83C\uDDFE(?:\uD83C[\uDDEA\uDDF9])|\uD83C\uDDEC(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEE\uDDF1-\uDDF3\uDDF5-\uDDFA\uDDFC\uDDFE])|\uD83C\uDDF8(?:\uD83C[\uDDE6-\uDDEA\uDDEC-\uDDF4\uDDF7-\uDDF9\uDDFB\uDDFD-\uDDFF])|\uD83C\uDDEB(?:\uD83C[\uDDEE-\uDDF0\uDDF2\uDDF4\uDDF7])|\uD83C\uDDF5(?:\uD83C[\uDDE6\uDDEA-\uDDED\uDDF0-\uDDF3\uDDF7-\uDDF9\uDDFC\uDDFE])|\uD83C\uDDFB(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDEE\uDDF3\uDDFA])|\uD83C\uDDF3(?:\uD83C[\uDDE6\uDDE8\uDDEA-\uDDEC\uDDEE\uDDF1\uDDF4\uDDF5\uDDF7\uDDFA\uDDFF])|\uD83C\uDDE8(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDEE\uDDF0-\uDDF5\uDDF7\uDDFA-\uDDFF])|\uD83C\uDDF1(?:\uD83C[\uDDE6-\uDDE8\uDDEE\uDDF0\uDDF7-\uDDFB\uDDFE])|\uD83C\uDDFF(?:\uD83C[\uDDE6\uDDF2\uDDFC])|\uD83C\uDDFC(?:\uD83C[\uDDEB\uDDF8])|\uD83C\uDDFA(?:\uD83C[\uDDE6\uDDEC\uDDF2\uDDF3\uDDF8\uDDFE\uDDFF])|\uD83C\uDDEE(?:\uD83C[\uDDE8-\uDDEA\uDDF1-\uDDF4\uDDF6-\uDDF9])|\uD83C\uDDEF(?:\uD83C[\uDDEA\uDDF2\uDDF4\uDDF5])|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:\uD83C[\uDFFB-\uDFFF])|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u261D\u270A-\u270D]|\uD83C[\uDF85\uDFC2\uDFC7]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66\uDC67\uDC6B-\uDC6D\uDC70\uDC72\uDC74-\uDC76\uDC78\uDC7C\uDC83\uDC85\uDCAA\uDD74\uDD7A\uDD90\uDD95\uDD96\uDE4C\uDE4F\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1C\uDD1E\uDD1F\uDD30-\uDD36\uDDB5\uDDB6\uDDBB\uDDD2-\uDDD5])(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u231A\u231B\u23E9-\u23EC\u23F0\u23F3\u25FD\u25FE\u2614\u2615\u2648-\u2653\u267F\u2693\u26A1\u26AA\u26AB\u26BD\u26BE\u26C4\u26C5\u26CE\u26D4\u26EA\u26F2\u26F3\u26F5\u26FA\u26FD\u2705\u270A\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B\u2B1C\u2B50\u2B55]|\uD83C[\uDC04\uDCCF\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE1A\uDE2F\uDE32-\uDE36\uDE38-\uDE3A\uDE50\uDE51\uDF00-\uDF20\uDF2D-\uDF35\uDF37-\uDF7C\uDF7E-\uDF93\uDFA0-\uDFCA\uDFCF-\uDFD3\uDFE0-\uDFF0\uDFF4\uDFF8-\uDFFF]|\uD83D[\uDC00-\uDC3E\uDC40\uDC42-\uDCFC\uDCFF-\uDD3D\uDD4B-\uDD4E\uDD50-\uDD67\uDD7A\uDD95\uDD96\uDDA4\uDDFB-\uDE4F\uDE80-\uDEC5\uDECC\uDED0-\uDED2\uDED5\uDEEB\uDEEC\uDEF4-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])|(?:[#\*0-9\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u261D\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692-\u2697\u2699\u269B\u269C\u26A0\u26A1\u26AA\u26AB\u26B0\u26B1\u26BD\u26BE\u26C4\u26C5\u26C8\u26CE\u26CF\u26D1\u26D3\u26D4\u26E9\u26EA\u26F0-\u26F5\u26F7-\u26FA\u26FD\u2702\u2705\u2708-\u270D\u270F\u2712\u2714\u2716\u271D\u2721\u2728\u2733\u2734\u2744\u2747\u274C\u274E\u2753-\u2755\u2757\u2763\u2764\u2795-\u2797\u27A1\u27B0\u27BF\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u3030\u303D\u3297\u3299]|\uD83C[\uDC04\uDCCF\uDD70\uDD71\uDD7E\uDD7F\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE02\uDE1A\uDE2F\uDE32-\uDE3A\uDE50\uDE51\uDF00-\uDF21\uDF24-\uDF93\uDF96\uDF97\uDF99-\uDF9B\uDF9E-\uDFF0\uDFF3-\uDFF5\uDFF7-\uDFFF]|\uD83D[\uDC00-\uDCFD\uDCFF-\uDD3D\uDD49-\uDD4E\uDD50-\uDD67\uDD6F\uDD70\uDD73-\uDD7A\uDD87\uDD8A-\uDD8D\uDD90\uDD95\uDD96\uDDA4\uDDA5\uDDA8\uDDB1\uDDB2\uDDBC\uDDC2-\uDDC4\uDDD1-\uDDD3\uDDDC-\uDDDE\uDDE1\uDDE3\uDDE8\uDDEF\uDDF3\uDDFA-\uDE4F\uDE80-\uDEC5\uDECB-\uDED2\uDED5\uDEE0-\uDEE5\uDEE9\uDEEB\uDEEC\uDEF0\uDEF3-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])\uFE0F|(?:[\u261D\u26F9\u270A-\u270D]|\uD83C[\uDF85\uDFC2-\uDFC4\uDFC7\uDFCA-\uDFCC]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66-\uDC78\uDC7C\uDC81-\uDC83\uDC85-\uDC87\uDC8F\uDC91\uDCAA\uDD74\uDD75\uDD7A\uDD90\uDD95\uDD96\uDE45-\uDE47\uDE4B-\uDE4F\uDEA3\uDEB4-\uDEB6\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1F\uDD26\uDD30-\uDD39\uDD3C-\uDD3E\uDDB5\uDDB6\uDDB8\uDDB9\uDDBB\uDDCD-\uDDCF\uDDD1-\uDDDD])/g;
-    };
+  return DEFAULT_WEATHER_LOCATION;
+}
+function ukTodayYmd(now = /* @__PURE__ */ new Date()) {
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ });
+}
+async function fetchBbcWeatherAggregated(location) {
+  const postcode = sanitizeWeatherLocation(location);
+  const url2 = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
+  const response = await fetch(url2, {
+    method: "GET",
+    headers: {
+      Accept: "*/*",
+      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Priority: "u=1, i",
+      Referer: "https://www.bbc.co.uk/"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Weather API request failed (${response.status})`);
   }
-});
-
-// node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js
-var require_string_width = __commonJS({
-  "node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js"(exports2, module2) {
-    "use strict";
-    var stripAnsi2 = require_strip_ansi();
-    var isFullwidthCodePoint = require_is_fullwidth_code_point();
-    var emojiRegex = require_emoji_regex();
-    var stringWidth2 = (string4) => {
-      if (typeof string4 !== "string" || string4.length === 0) {
-        return 0;
-      }
-      string4 = stripAnsi2(string4);
-      if (string4.length === 0) {
-        return 0;
-      }
-      string4 = string4.replace(emojiRegex(), "  ");
-      let width = 0;
-      for (let i = 0; i < string4.length; i++) {
-        const code = string4.codePointAt(i);
-        if (code <= 31 || code >= 127 && code <= 159) {
-          continue;
-        }
-        if (code >= 768 && code <= 879) {
-          continue;
-        }
-        if (code > 65535) {
-          i++;
-        }
-        width += isFullwidthCodePoint(code) ? 2 : 1;
-      }
-      return width;
-    };
-    module2.exports = stringWidth2;
-    module2.exports.default = stringWidth2;
-  }
-});
-
-// solar.ts
-var solar_exports = {};
-module.exports = __toCommonJS(solar_exports);
-var import_strip_ansi = __toESM(require_strip_ansi());
-var import_string_width = __toESM(require_string_width());
+  return await response.json();
+}
+function dailyReportsFromWeather(data) {
+  return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
+}
+function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
+  const reports = dailyReportsFromWeather(data);
+  return reports.find((report) => report.localDate === todayYmd) || reports[0] || null;
+}
+function todaySunriseSunset(data, todayYmd = ukTodayYmd()) {
+  const report = todayWeatherReport(data, todayYmd);
+  return {
+    sunrise: report?.sunrise || "-",
+    sunset: report?.sunset || "-"
+  };
+}
+function shouldUseColor2() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize2(text, color) {
+  if (!shouldUseColor2()) return text;
+  return `${color}${text}${ANSI_RESET2}`;
+}
+function formatRainPercent(value) {
+  if (value == null) return "?%";
+  const text = `${value}%`;
+  if (value > 80) return colorize2(text, ANSI_RED2);
+  if (value >= 50) return colorize2(text, ANSI_ORANGE2);
+  if (value >= 25) return colorize2(text, ANSI_YELLOW2);
+  return colorize2(text, ANSI_GREEN2);
+}
+function formatTodayWeatherLine(report) {
+  if (!report) return "-";
+  const summary = (report.weatherTypeText || report.enhancedWeatherDescription || "Unknown").trim() || "Unknown";
+  const max = formatTemperatureText(report.maxTempC, { scale: "max" });
+  const min = formatTemperatureText(report.minTempC, { scale: "min" });
+  const rain = formatRainPercent(report.precipitationProbabilityInPercent);
+  return `${summary}, max ${max}, min ${min}, rain ${rain}`;
+}
 
 // node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -14655,11 +14671,11 @@ config(en_default());
 
 // lib/solarApi.ts
 var SOLAR_API_URL = "http://api.emgeebee.buzz:1880/api/solar";
-var ANSI_RESET = "\x1B[0m";
-var ANSI_GREEN = "\x1B[32m";
-var ANSI_YELLOW = "\x1B[33m";
-var ANSI_ORANGE = "\x1B[38;5;208m";
-var ANSI_RED = "\x1B[31m";
+var ANSI_RESET3 = "\x1B[0m";
+var ANSI_GREEN3 = "\x1B[32m";
+var ANSI_YELLOW3 = "\x1B[33m";
+var ANSI_ORANGE3 = "\x1B[38;5;208m";
+var ANSI_RED3 = "\x1B[31m";
 var numericField = external_exports.preprocess((value) => {
   if (typeof value === "string") {
     const parsed = Number(value);
@@ -14685,44 +14701,48 @@ async function fetchSolarData() {
   }
   return SolarResponseSchema.parse(await response.json());
 }
-function shouldUseColor() {
+function todayYieldKwh(data, dayKey) {
+  const value = data.yield[dayKey];
+  return value != null && Number.isFinite(value) ? value : null;
+}
+function shouldUseColor3() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize(text, color) {
-  if (!shouldUseColor()) return text;
-  return `${color}${text}${ANSI_RESET}`;
+function colorize3(text, color) {
+  if (!shouldUseColor3()) return text;
+  return `${color}${text}${ANSI_RESET3}`;
 }
 function colorForYield(kwh) {
-  if (kwh > 4) return ANSI_GREEN;
-  if (kwh > 2.5) return ANSI_YELLOW;
-  if (kwh > 1.5) return ANSI_ORANGE;
-  return ANSI_RED;
+  if (kwh > 4) return ANSI_GREEN3;
+  if (kwh > 2.5) return ANSI_YELLOW3;
+  if (kwh > 1.5) return ANSI_ORANGE3;
+  return ANSI_RED3;
 }
 function formatKwh(value) {
   return `${value.toFixed(1)} kWh`;
 }
 function formatColoredKwh(value) {
-  return colorize(formatKwh(value), colorForYield(value));
+  return colorize3(formatKwh(value), colorForYield(value));
 }
-var UK_TZ = "Europe/London";
+var UK_TZ2 = "Europe/London";
 function colorForPower(watts) {
-  if (watts > 400) return ANSI_GREEN;
-  if (watts > 200) return ANSI_YELLOW;
-  if (watts > 100) return ANSI_ORANGE;
-  return ANSI_RED;
+  if (watts > 400) return ANSI_GREEN3;
+  if (watts > 200) return ANSI_YELLOW3;
+  if (watts > 100) return ANSI_ORANGE3;
+  return ANSI_RED3;
 }
 function formatWattsPrecise(value) {
   if (value >= 1e3) return `${(value / 1e3).toFixed(1)}kW`;
   return `${value.toFixed(1)}W`;
 }
 function formatColoredWattsPrecise(value) {
-  return colorize(formatWattsPrecise(value), colorForPower(value));
+  return colorize3(formatWattsPrecise(value), colorForPower(value));
 }
 function ukWallTimeToDate(year, month, day, hour, minute) {
   let ts = Date.UTC(year, month - 1, day, hour, minute);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: UK_TZ,
+      timeZone: UK_TZ2,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -14757,55 +14777,11 @@ function parsePowerDateTimeKey(key) {
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
   return ukWallTimeToDate(year, month, day, hour, minute);
 }
-
-// solar.ts
-var DAY_MS = 24 * 60 * 60 * 1e3;
-var HOUR_MS = 60 * 60 * 1e3;
-var DAILY_YIELD_DAYS = 28;
-var AVERAGE_WINDOWS = [7, 14, 31];
-var POWER_HISTORY_HOURS = 34;
-var POWER_CHART_MIN_W = 0;
-var POWER_CHART_MAX_W = 800;
-var POWER_CHART_STEP_W = 50;
-var POWER_CHART_HEIGHT = (POWER_CHART_MAX_W - POWER_CHART_MIN_W) / POWER_CHART_STEP_W + 1;
-var CHART_POINT = "\u25CF";
-var UK_TZ2 = "Europe/London";
-var ANSI_RESET2 = "\x1B[0m";
-var ANSI_GREEN2 = "\x1B[32m";
-var ANSI_YELLOW2 = "\x1B[33m";
-var ANSI_ORANGE2 = "\x1B[38;5;208m";
-var ANSI_RED2 = "\x1B[31m";
-function usage() {
-  console.log("Usage:");
-  console.log("  solar");
-  console.log("");
-  console.log("Shows solar daily yield, rolling averages, and a power graph.");
+function powerNowWatts(data) {
+  const value = data.powerNow?.value;
+  return value != null && Number.isFinite(value) ? value : null;
 }
-function parseDateKey(key) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date5 = new Date(Date.UTC(year, month - 1, day));
-  return Number.isNaN(date5.getTime()) ? null : date5;
-}
-function toYmd(date5) {
-  return date5.toISOString().slice(0, 10);
-}
-function dayKeyUK(date5 = /* @__PURE__ */ new Date()) {
-  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ2 });
-}
-function subtractDayKey(dayKey, days) {
-  const [year, month, day] = dayKey.split("-").map(Number);
-  const date5 = new Date(Date.UTC(year, month - 1, day));
-  date5.setUTCDate(date5.getUTCDate() - days);
-  return toYmd(date5);
-}
-function startOfUtcDay(date5) {
-  return new Date(Date.UTC(date5.getUTCFullYear(), date5.getUTCMonth(), date5.getUTCDate()));
-}
-function startOfUkHour(ms) {
+function ukHourStartMs(date5) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: UK_TZ2,
     year: "numeric",
@@ -14813,24 +14789,14 @@ function startOfUkHour(ms) {
     day: "2-digit",
     hour: "2-digit",
     hour12: false
-  }).formatToParts(new Date(ms));
+  }).formatToParts(date5);
   const year = Number(parts.find((part) => part.type === "year")?.value);
   const month = Number(parts.find((part) => part.type === "month")?.value);
   const day = Number(parts.find((part) => part.type === "day")?.value);
   const hour = Number(parts.find((part) => part.type === "hour")?.value);
   return ukWallTimeToDate(year, month, day, hour, 0).getTime();
 }
-function formatDateLabel(ymd) {
-  const date5 = parseDateKey(ymd);
-  if (!date5) return ymd;
-  return date5.toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "UTC"
-  });
-}
-function formatHourLabel(ms) {
+function formatUkHourLabel(ms) {
   return new Date(ms).toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
@@ -14838,202 +14804,250 @@ function formatHourLabel(ms) {
     timeZone: UK_TZ2
   });
 }
-function formatWatts(value) {
-  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}kW`;
-  return `${Math.round(value)}W`;
-}
-function shouldUseColor2() {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-function colorize2(text, color) {
-  if (!shouldUseColor2()) return text;
-  return `${color}${text}${ANSI_RESET2}`;
-}
-function colorForPower2(watts) {
-  if (watts > 400) return ANSI_GREEN2;
-  if (watts > 200) return ANSI_YELLOW2;
-  if (watts > 100) return ANSI_ORANGE2;
-  return ANSI_RED2;
-}
-function formatColoredPowerPoint(value) {
-  return `${colorize2(CHART_POINT, colorForPower2(value))} `;
-}
-function visibleLength(value) {
-  return (0, import_string_width.default)((0, import_strip_ansi.default)(value));
-}
-function padCell(value, width) {
-  return value + " ".repeat(Math.max(0, width - visibleLength(value)));
-}
-function makeAsciiTable(headers, rows) {
-  const widths = headers.map(
-    (header, idx) => Math.max(
-      visibleLength(header),
-      ...rows.map((row) => visibleLength(row[idx] || ""))
-    )
-  );
-  const border = `+-${widths.map((width) => "-".repeat(width)).join("-+-")}-+`;
-  const headerLine = `| ${headers.map((header, idx) => padCell(header, widths[idx])).join(" | ")} |`;
-  const body = rows.map((row) => `| ${row.map((value, idx) => padCell(value || "", widths[idx])).join(" | ")} |`);
-  return [border, headerLine, border, ...body, border];
-}
-function normalizeDailyYield(data) {
-  return Object.entries(data.yield).map(([date5, value]) => ({ date: date5, value })).filter((entry) => parseDateKey(entry.date) && Number.isFinite(entry.value)).sort((a, b) => a.date.localeCompare(b.date));
-}
-function normalizePowerAvgReadings(data) {
-  return Object.entries(data.powerAvg).map(([key, value]) => {
+function currentHourPowerAvgWatts(data, now = /* @__PURE__ */ new Date()) {
+  const hourStart = ukHourStartMs(now);
+  for (const [key, value] of Object.entries(data.powerAvg)) {
     const parsed = parsePowerDateTimeKey(key);
-    return parsed && Number.isFinite(value) ? { time: parsed.getTime(), value } : null;
-  }).filter((entry) => entry != null).sort((a, b) => a.time - b.time);
-}
-function normalizePowerNow(data) {
-  const value = data.powerNow?.value;
-  return value != null && Number.isFinite(value) ? value : null;
-}
-function buildPowerRows(powerNow, powerAvgReadings) {
-  const latestAvg = powerAvgReadings.at(-1);
-  return [
-    ["Now", powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)],
-    [
-      latestAvg ? `Avg ${formatHourLabel(latestAvg.time)}` : "Latest avg",
-      latestAvg == null ? "-" : formatColoredWattsPrecise(latestAvg.value)
-    ]
-  ];
-}
-function latestYieldDay(yields) {
-  const latest = yields.at(-1);
-  return latest ? parseDateKey(latest.date) ?? startOfUtcDay(/* @__PURE__ */ new Date()) : startOfUtcDay(/* @__PURE__ */ new Date());
-}
-function buildDailyYieldRows(yields) {
-  const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
-  const end = latestYieldDay(yields);
-  const start = new Date(end.getTime() - (DAILY_YIELD_DAYS - 1) * DAY_MS);
-  const rows = [];
-  for (let offset = 0; offset < DAILY_YIELD_DAYS; offset += 1) {
-    const date5 = new Date(start.getTime() + offset * DAY_MS);
-    const ymd = toYmd(date5);
-    const value = byDate.get(ymd);
-    rows.push([formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)]);
-  }
-  return rows;
-}
-function buildAverageRows(yields) {
-  const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
-  const todayKey = dayKeyUK();
-  return AVERAGE_WINDOWS.map((days) => {
-    const values = [];
-    for (let back = 1; back <= days; back += 1) {
-      const value = byDate.get(subtractDayKey(todayKey, back));
-      if (value != null) values.push(value);
+    if (parsed?.getTime() === hourStart && Number.isFinite(value)) {
+      return value;
     }
-    const average = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-    return [
-      `${days} days`,
-      average == null ? "-" : formatColoredKwh(average),
-      `${values.length}/${days}`
-    ];
+  }
+  return null;
+}
+
+// status.ts
+var UK_TZ3 = "Europe/London";
+var TICK_MS = 1e3;
+var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
+var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
+var ANSI_HIDE_CURSOR = "\x1B[?25l";
+var ANSI_SHOW_CURSOR = "\x1B[?25h";
+function usage() {
+  console.log("Usage:");
+  console.log("  status");
+  console.log("");
+  console.log("In a TTY, stays open and updates every second. Piped output prints once.");
+  console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
+  console.log("Solar daily yield refreshes every 30 minutes.");
+  console.log("Solar power now and hourly average refresh every 10 minutes.");
+}
+function formatTime(now) {
+  return now.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: UK_TZ3
   });
 }
-function buildHourlyPowerSeries(readings) {
-  const latestHour = startOfUkHour(Date.now());
-  const firstHour = latestHour - (POWER_HISTORY_HOURS - 1) * HOUR_MS;
-  const buckets = Array.from({ length: POWER_HISTORY_HOURS }, () => []);
-  for (const reading of readings) {
-    const hour = startOfUkHour(reading.time);
-    const index = Math.floor((hour - firstHour) / HOUR_MS);
-    if (index < 0 || index >= buckets.length) continue;
-    buckets[index].push(reading.value);
-  }
+function formatDate(now) {
+  return now.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: UK_TZ3
+  });
+}
+function parseClockMinutes(value) {
+  if (!value || value === "-") return null;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+function ukSecondsSinceMidnight(now) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: UK_TZ3,
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  const second = Number(parts.find((part) => part.type === "second")?.value);
+  return hour * 3600 + minute * 60 + second;
+}
+function formatDurationMinutes(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
+}
+function formatSunRelative(clock, now) {
+  const eventMinutes = parseClockMinutes(clock);
+  if (eventMinutes == null) return "";
+  const diffMinutes = Math.round((ukSecondsSinceMidnight(now) - eventMinutes * 60) / 60);
+  if (diffMinutes === 0) return " (now)";
+  if (diffMinutes > 0) return ` (${formatDurationMinutes(diffMinutes)} ago)`;
+  return ` (in ${formatDurationMinutes(-diffMinutes)})`;
+}
+function formatSunLine(label, clock, now) {
+  return `${label}: ${clock}${formatSunRelative(clock, now)}`;
+}
+function formatSolarYieldLine(solarYield) {
+  return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
+}
+function formatSolarNowLine(powerNow) {
+  return `solar now: ${powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)}`;
+}
+function formatSolarHourAvgLine(powerAvg, now) {
+  const hourLabel = formatUkHourLabel(ukHourStartMs(now));
+  return `solar avg: ${powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg)} (${hourLabel})`;
+}
+function buildDisplayLines(now, sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg) {
+  return [
+    `time: ${formatTime(now)}`,
+    `date: ${formatDate(now)}`,
+    weatherLine,
+    formatSunLine("sunrise", sunrise, now),
+    formatSunLine("sunset", sunset, now),
+    formatSolarYieldLine(solarYield),
+    formatSolarNowLine(powerNow),
+    formatSolarHourAvgLine(powerHourAvg, now)
+  ];
+}
+function solarSnapshotFromData(data, dayKey, now) {
   return {
-    firstHour,
-    series: buckets.map(
-      (bucket) => bucket.length > 0 ? bucket.reduce((sum, value) => sum + value, 0) / bucket.length : null
-    )
+    yield: todayYieldKwh(data, dayKey),
+    powerNow: powerNowWatts(data),
+    powerHourAvg: currentHourPowerAvgWatts(data, now)
   };
 }
-function powerRowForValue(value) {
-  const clamped = Math.max(POWER_CHART_MIN_W, Math.min(POWER_CHART_MAX_W, value));
-  return Math.max(
-    0,
-    Math.min(
-      POWER_CHART_HEIGHT - 1,
-      Math.round((POWER_CHART_MAX_W - clamped) / POWER_CHART_STEP_W)
-    )
+function writeDisplay(lines, isUpdate) {
+  if (!isUpdate) {
+    for (const line of lines) {
+      console.log(line);
+    }
+    return;
+  }
+  process.stdout.write(`\x1B[${lines.length}A`);
+  for (const line of lines) {
+    process.stdout.write(`\x1B[2K${line}
+`);
+  }
+}
+async function loadSolarSnapshot(dayKey, now) {
+  try {
+    const data = await fetchSolarData();
+    return solarSnapshotFromData(data, dayKey, now);
+  } catch {
+    return { yield: null, powerNow: null, powerHourAvg: null };
+  }
+}
+async function printOnce() {
+  const now = /* @__PURE__ */ new Date();
+  const dayKey = ukTodayYmd(now);
+  const [weather, solar] = await Promise.all([
+    fetchBbcWeatherAggregated(resolveDefaultLocation()),
+    loadSolarSnapshot(dayKey, now)
+  ]);
+  const { sunrise, sunset } = todaySunriseSunset(weather, dayKey);
+  const weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, dayKey));
+  writeDisplay(
+    buildDisplayLines(now, sunrise, sunset, weatherLine, solar.yield, solar.powerNow, solar.powerHourAvg),
+    false
   );
 }
-function renderPowerGraph(readings) {
-  const { firstHour, series } = buildHourlyPowerSeries(readings);
-  const values = series.filter((value) => value != null);
-  if (values.length === 0) {
-    return [`No power readings in the last ${POWER_HISTORY_HOURS} available hours.`];
+async function runLive() {
+  const location = resolveDefaultLocation();
+  let trackedDate = ukTodayYmd();
+  let weather = await fetchBbcWeatherAggregated(location);
+  let { sunrise, sunset } = todaySunriseSunset(weather, trackedDate);
+  let weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+  let solarYield = null;
+  let powerNow = null;
+  let powerHourAvg = null;
+  let lastSolarYieldRefreshAt = 0;
+  let lastPowerRefreshAt = 0;
+  try {
+    const data = await fetchSolarData();
+    const startedAt = Date.now();
+    ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, new Date(startedAt)));
+    lastSolarYieldRefreshAt = startedAt;
+    lastPowerRefreshAt = startedAt;
+  } catch {
   }
-  const grid = Array.from(
-    { length: POWER_CHART_HEIGHT },
-    () => Array.from({ length: series.length }, () => "  ")
+  const stop = () => {
+    clearInterval(timer);
+    process.stdout.write(ANSI_SHOW_CURSOR);
+    process.stdout.write("\n");
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  process.stdout.write(ANSI_HIDE_CURSOR);
+  writeDisplay(
+    buildDisplayLines(/* @__PURE__ */ new Date(), sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+    false
   );
-  for (let col = 0; col < series.length; col += 1) {
-    const value = series[col];
-    if (value == null) continue;
-    grid[powerRowForValue(value)][col] = formatColoredPowerPoint(value);
-  }
-  const lines = [];
-  for (let row = 0; row < POWER_CHART_HEIGHT; row += 1) {
-    const labelValue = POWER_CHART_MAX_W - row * POWER_CHART_STEP_W;
-    lines.push(`${formatWatts(labelValue).padStart(6)} |${grid[row].join("")}`);
-  }
-  lines.push(`       +${"-".repeat(series.length * 2)}`);
-  const labelChars = Array(series.length * 2).fill(" ");
-  for (let col = 0; col < series.length; col += 6) {
-    const label = formatHourLabel(firstHour + col * HOUR_MS);
-    const pos = col * 2;
-    for (let idx = 0; idx < label.length && pos + idx < labelChars.length; idx += 1) {
-      labelChars[pos + idx] = label[idx] || " ";
-    }
-  }
-  lines.push(`        ${labelChars.join("")}`);
-  return lines;
+  const timer = setInterval(() => {
+    void (async () => {
+      const now = /* @__PURE__ */ new Date();
+      const nowMs = now.getTime();
+      const today = ukTodayYmd(now);
+      const dayChanged = today !== trackedDate;
+      const needYieldRefresh = dayChanged || nowMs - lastSolarYieldRefreshAt >= SOLAR_YIELD_REFRESH_MS;
+      const needPowerRefresh = dayChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
+      if (dayChanged) {
+        trackedDate = today;
+        weather = await fetchBbcWeatherAggregated(location);
+        ({ sunrise, sunset } = todaySunriseSunset(weather, trackedDate));
+        weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+      }
+      if (needYieldRefresh || needPowerRefresh) {
+        try {
+          const data = await fetchSolarData();
+          if (needYieldRefresh) {
+            solarYield = todayYieldKwh(data, trackedDate);
+            lastSolarYieldRefreshAt = nowMs;
+          }
+          if (needPowerRefresh) {
+            powerNow = powerNowWatts(data);
+            powerHourAvg = currentHourPowerAvgWatts(data, now);
+            lastPowerRefreshAt = nowMs;
+          }
+        } catch {
+        }
+      }
+      writeDisplay(
+        buildDisplayLines(now, sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+        true
+      );
+    })().catch((error51) => {
+      clearInterval(timer);
+      process.stdout.write(ANSI_SHOW_CURSOR);
+      const message = error51 instanceof Error ? error51.message : String(error51);
+      console.error(`
+${message}`);
+      process.exit(1);
+    });
+  }, TICK_MS);
 }
 async function main() {
-  try {
-    const args = process.argv.slice(2);
-    if (args[0] === "--help" || args[0] === "-h") {
-      usage();
-      return;
-    }
-    if (args.length > 0) {
-      throw new Error("solar does not take arguments.");
-    }
-    const data = await fetchSolarData();
-    const yields = normalizeDailyYield(data);
-    const powerNow = normalizePowerNow(data);
-    const powerAvgReadings = normalizePowerAvgReadings(data);
-    console.log("Solar");
-    console.log(`Source: ${SOLAR_API_URL}`);
-    console.log("");
-    console.log("Daily yield (last 4 weeks)");
-    for (const line of makeAsciiTable(["Date", "Yield"], buildDailyYieldRows(yields))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log("Average daily yield");
-    for (const line of makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log("Power");
-    for (const line of makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log(`Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`);
-    for (const line of renderPowerGraph(powerAvgReadings)) {
-      console.log(line);
-    }
-  } catch (error51) {
-    const message = error51 instanceof external_exports.ZodError ? `Unexpected solar API response: ${error51.issues.map((issue2) => issue2.message).join("; ")}` : error51 instanceof Error ? error51.message : String(error51);
-    console.error(message);
-    console.error("");
+  const args = process.argv.slice(2);
+  if (args[0] === "--help" || args[0] === "-h") {
     usage();
-    process.exit(1);
+    return;
   }
+  if (args.length > 0) {
+    throw new Error("status does not take arguments.");
+  }
+  if (process.stdout.isTTY) {
+    await runLive();
+    return;
+  }
+  await printOnce();
 }
-void main();
+void main().catch((error51) => {
+  process.stdout.write(ANSI_SHOW_CURSOR);
+  const message = error51 instanceof Error ? error51.message : String(error51);
+  console.error(message);
+  console.error("");
+  usage();
+  process.exit(1);
+});

@@ -4,7 +4,16 @@ import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 import { z } from "zod";
 
-const SOLAR_API_URL = "http://api.emgeebee.buzz:1880/api/solar";
+import {
+  fetchSolarData,
+  formatColoredKwh,
+  formatColoredWattsPrecise,
+  formatKwh,
+  parsePowerDateTimeKey,
+  SOLAR_API_URL,
+  ukWallTimeToDate,
+  type SolarResponse,
+} from "./lib/solarApi";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_YIELD_DAYS = 28;
@@ -24,25 +33,6 @@ const ANSI_YELLOW = "\x1b[33m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_RED = "\x1b[31m";
 
-const numericField = z.preprocess((value) => {
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : value;
-  }
-  return value;
-}, z.number());
-
-const SolarResponseSchema = z.object({
-  yield: z.record(z.string(), numericField).default({}),
-  powerNow: z
-    .object({
-      value: numericField,
-    })
-    .optional(),
-  powerAvg: z.record(z.string(), numericField).default({}),
-});
-
-type SolarResponse = z.infer<typeof SolarResponseSchema>;
 type DailyYield = {
   date: string;
   value: number;
@@ -67,54 +57,6 @@ function parseDateKey(key: string): Date | null {
   const day = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day));
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function parseDateTimeKey(key: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/.exec(String(key).trim());
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  return ukWallTimeToDate(year, month, day, hour, minute);
-}
-
-/** API timestamps are UK wall-clock times without a zone suffix. */
-function ukWallTimeToDate(year: number, month: number, day: number, hour: number, minute: number): Date {
-  let ts = Date.UTC(year, month - 1, day, hour, minute);
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: UK_TZ,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date(ts));
-    const got = {
-      year: Number(parts.find((part) => part.type === "year")?.value),
-      month: Number(parts.find((part) => part.type === "month")?.value),
-      day: Number(parts.find((part) => part.type === "day")?.value),
-      hour: Number(parts.find((part) => part.type === "hour")?.value),
-      minute: Number(parts.find((part) => part.type === "minute")?.value),
-    };
-    if (
-      got.year === year &&
-      got.month === month &&
-      got.day === day &&
-      got.hour === hour &&
-      got.minute === minute
-    ) {
-      return new Date(ts);
-    }
-    const gotMs = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute);
-    const wantMs = Date.UTC(year, month - 1, day, hour, minute);
-    ts += wantMs - gotMs;
-  }
-  return new Date(ts);
 }
 
 function toYmd(date: Date): string {
@@ -172,18 +114,9 @@ function formatHourLabel(ms: number): string {
   });
 }
 
-function formatKwh(value: number): string {
-  return `${value.toFixed(1)} kWh`;
-}
-
 function formatWatts(value: number): string {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}kW`;
   return `${Math.round(value)}W`;
-}
-
-function formatWattsPrecise(value: number): string {
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}kW`;
-  return `${value.toFixed(1)}W`;
 }
 
 function shouldUseColor(): boolean {
@@ -195,13 +128,6 @@ function colorize(text: string, color: string): string {
   return `${color}${text}${ANSI_RESET}`;
 }
 
-function colorForYield(kwh: number): string {
-  if (kwh > 4) return ANSI_GREEN;
-  if (kwh > 2.5) return ANSI_YELLOW;
-  if (kwh > 1.5) return ANSI_ORANGE;
-  return ANSI_RED;
-}
-
 function colorForPower(watts: number): string {
   if (watts > 400) return ANSI_GREEN;
   if (watts > 200) return ANSI_YELLOW;
@@ -209,16 +135,8 @@ function colorForPower(watts: number): string {
   return ANSI_RED;
 }
 
-function formatColoredKwh(value: number): string {
-  return colorize(formatKwh(value), colorForYield(value));
-}
-
 function formatColoredPowerPoint(value: number): string {
   return `${colorize(CHART_POINT, colorForPower(value))} `;
-}
-
-function formatColoredWattsPrecise(value: number): string {
-  return colorize(formatWattsPrecise(value), colorForPower(value));
 }
 
 function visibleLength(value: string): number {
@@ -242,18 +160,6 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
-async function fetchSolarData(): Promise<SolarResponse> {
-  const response = await fetch(SOLAR_API_URL, {
-    headers: {
-      Accept: "application/json",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Solar API request failed (${response.status})`);
-  }
-  return SolarResponseSchema.parse(await response.json());
-}
-
 function normalizeDailyYield(data: SolarResponse): DailyYield[] {
   return Object.entries(data.yield)
     .map(([date, value]) => ({ date, value }))
@@ -264,7 +170,7 @@ function normalizeDailyYield(data: SolarResponse): DailyYield[] {
 function normalizePowerAvgReadings(data: SolarResponse): PowerReading[] {
   return Object.entries(data.powerAvg)
     .map(([key, value]) => {
-      const parsed = parseDateTimeKey(key);
+      const parsed = parsePowerDateTimeKey(key);
       return parsed && Number.isFinite(value) ? { time: parsed.getTime(), value } : null;
     })
     .filter((entry): entry is PowerReading => entry != null)
