@@ -14653,6 +14653,44 @@ function date4(params) {
 // node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
 config(en_default());
 
+// lib/tempApi.ts
+var TEMP_API_URL = "http://api.emgeebee.buzz:1880/api/get-house-temp";
+var nullableNumericField = external_exports.preprocess((value) => {
+  if (value == null || value === "" || value === "null" || value === "undefined") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return value;
+}, external_exports.number().nullable().optional());
+var ReadingSchema = external_exports.object({
+  time: nullableNumericField,
+  temp: nullableNumericField
+});
+var TemperatureResponseSchema = external_exports.record(external_exports.string(), external_exports.array(ReadingSchema));
+async function fetchTemperatureHistory() {
+  const response = await fetch(TEMP_API_URL, {
+    method: "GET",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Temperature API request failed (${response.status})`);
+  }
+  const payload = TemperatureResponseSchema.parse(await response.json());
+  const cleaned = {};
+  for (const [room, readings] of Object.entries(payload)) {
+    cleaned[room] = readings.filter((reading) => Number.isFinite(reading.time) && Number.isFinite(reading.temp)).map((reading) => ({
+      time: reading.time,
+      temp: reading.temp
+    }));
+  }
+  return cleaned;
+}
+
 // lib/temperatureColours.ts
 var ANSI_RESET = "\x1B[0m";
 var ANSI_BLUE = "\x1B[34m";
@@ -14682,7 +14720,6 @@ function formatTemperatureText(value, options) {
 }
 
 // temp.ts
-var TEMP_API_URL = "http://api.emgeebee.buzz:1880/api/get-house-temp";
 var BBC_WEATHER_OVERLAY_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/maps/forecasts-observations?locations=CM2";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var HOUR_MS = 60 * 60 * 1e3;
@@ -14714,7 +14751,7 @@ var ROOM_COLORS = [
   ANSI_WHITE
 ];
 var DISPLAY_ROOM_ORDER = ["Outdoor", "Shed", "Downstairs"];
-var nullableNumericField = external_exports.preprocess((value) => {
+var nullableNumericField2 = external_exports.preprocess((value) => {
   if (value == null || value === "" || value === "null" || value === "undefined") {
     return null;
   }
@@ -14724,23 +14761,18 @@ var nullableNumericField = external_exports.preprocess((value) => {
   }
   return value;
 }, external_exports.number().nullable().optional());
-var ReadingSchema = external_exports.object({
-  time: nullableNumericField,
-  temp: nullableNumericField
-});
-var TemperatureResponseSchema = external_exports.record(external_exports.string(), external_exports.array(ReadingSchema));
 var BbcOverlayEntrySchema = external_exports.object({
   time: external_exports.object({
     utc: external_exports.string()
   }),
   temperature: external_exports.object({
-    c: nullableNumericField
+    c: nullableNumericField2
   }),
   windDirection: external_exports.object({
     description: external_exports.string().nullable().optional()
   }).optional(),
   averageWindSpeed: external_exports.object({
-    mph: nullableNumericField
+    mph: nullableNumericField2
   }).optional()
 });
 var BbcOverlayFeatureSchema = external_exports.object({
@@ -14811,26 +14843,6 @@ function startOfHour(ms) {
   const d = new Date(ms);
   d.setMinutes(0, 0, 0);
   return d.getTime();
-}
-async function fetchTemperatureHistory() {
-  const response = await fetch(TEMP_API_URL, {
-    method: "GET",
-    headers: {
-      Accept: "application/json"
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Temperature API request failed (${response.status})`);
-  }
-  const payload = TemperatureResponseSchema.parse(await response.json());
-  const cleaned = {};
-  for (const [room, readings] of Object.entries(payload)) {
-    cleaned[room] = readings.filter((reading) => Number.isFinite(reading.time) && Number.isFinite(reading.temp)).map((reading) => ({
-      time: reading.time,
-      temp: reading.temp
-    }));
-  }
-  return cleaned;
 }
 function toTemperatureReading(utc, tempC) {
   if (tempC == null || !Number.isFinite(tempC)) return null;

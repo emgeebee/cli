@@ -20,11 +20,19 @@ import {
   ukHourStartMs,
   type SolarResponse,
 } from "./lib/solarApi";
+import {
+  fetchTemperatureHistory,
+  latestRoomTemp,
+  type TemperatureResponse,
+} from "./lib/tempApi";
+import { formatTemperatureText } from "./lib/temperatureColours";
+import { fetchWfhStatus, formatWfhLine } from "./lib/wfhApi";
 
 const UK_TZ = "Europe/London";
 const TICK_MS = 1000;
 const SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1000;
 const SOLAR_POWER_REFRESH_MS = 10 * 60 * 1000;
+const TEMP_REFRESH_MS = 10 * 60 * 1000;
 const ANSI_HIDE_CURSOR = "\x1b[?25l";
 const ANSI_SHOW_CURSOR = "\x1b[?25h";
 
@@ -36,6 +44,7 @@ function usage(): void {
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
   console.log("Solar power now and hourly average refresh every 10 minutes.");
+  console.log("Downstairs and shed temperatures refresh every 10 minutes.");
 }
 
 function formatTime(now: Date): string {
@@ -117,11 +126,18 @@ function formatSolarHourAvgLine(powerAvg: number | null, now: Date): string {
   return `solar avg: ${powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg)} (${hourLabel})`;
 }
 
+function formatRoomTempLine(label: string, temp: number | null): string {
+  return `${label}: ${formatTemperatureText(temp, { fractionDigits: 1, unknownText: "-" })}`;
+}
+
 function buildDisplayLines(
   now: Date,
   sunrise: string,
   sunset: string,
   weatherLine: string,
+  wfh: boolean | null,
+  downstairsTemp: number | null,
+  shedTemp: number | null,
   solarYield: number | null,
   powerNow: number | null,
   powerHourAvg: number | null,
@@ -129,7 +145,10 @@ function buildDisplayLines(
   return [
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
+    formatWfhLine(wfh),
     weatherLine,
+    formatRoomTempLine("downstairs temp", downstairsTemp),
+    formatRoomTempLine("shed temp", shedTemp),
     formatSunLine("sunrise", sunrise, now),
     formatSunLine("sunset", sunset, now),
     formatSolarYieldLine(solarYield),
@@ -176,17 +195,51 @@ async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
   }
 }
 
+function tempsFromData(data: TemperatureResponse): {
+  downstairsTemp: number | null;
+  shedTemp: number | null;
+} {
+  return {
+    downstairsTemp: latestRoomTemp(data, "Downstairs"),
+    shedTemp: latestRoomTemp(data, "Shed"),
+  };
+}
+
+async function loadTemps(): Promise<{
+  downstairsTemp: number | null;
+  shedTemp: number | null;
+}> {
+  try {
+    return tempsFromData(await fetchTemperatureHistory());
+  } catch {
+    return { downstairsTemp: null, shedTemp: null };
+  }
+}
+
 async function printOnce(): Promise<void> {
   const now = new Date();
   const dayKey = ukTodayYmd(now);
-  const [weather, solar] = await Promise.all([
+  const [weather, solar, wfh, temps] = await Promise.all([
     fetchBbcWeatherAggregated(resolveDefaultLocation()),
     loadSolarSnapshot(dayKey, now),
+    fetchWfhStatus(),
+    loadTemps(),
   ]);
   const { sunrise, sunset } = todaySunriseSunset(weather, dayKey);
   const weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, dayKey));
   writeDisplay(
-    buildDisplayLines(now, sunrise, sunset, weatherLine, solar.yield, solar.powerNow, solar.powerHourAvg),
+    buildDisplayLines(
+      now,
+      sunrise,
+      sunset,
+      weatherLine,
+      wfh,
+      temps.downstairsTemp,
+      temps.shedTemp,
+      solar.yield,
+      solar.powerNow,
+      solar.powerHourAvg,
+    ),
     false,
   );
 }
@@ -197,12 +250,22 @@ async function runLive(): Promise<void> {
   let weather = await fetchBbcWeatherAggregated(location);
   let { sunrise, sunset } = todaySunriseSunset(weather, trackedDate);
   let weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+  let wfh: boolean | null = null;
+  let downstairsTemp: number | null = null;
+  let shedTemp: number | null = null;
   let solarYield: number | null = null;
   let powerNow: number | null = null;
   let powerHourAvg: number | null = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
+  let lastTempRefreshAt = 0;
+
+  [wfh, { downstairsTemp, shedTemp }] = await Promise.all([
+    fetchWfhStatus(),
+    loadTemps(),
+  ]);
+  lastTempRefreshAt = Date.now();
 
   try {
     const data = await fetchSolarData();
@@ -228,7 +291,18 @@ async function runLive(): Promise<void> {
 
   process.stdout.write(ANSI_HIDE_CURSOR);
   writeDisplay(
-    buildDisplayLines(new Date(), sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+    buildDisplayLines(
+      new Date(),
+      sunrise,
+      sunset,
+      weatherLine,
+      wfh,
+      downstairsTemp,
+      shedTemp,
+      solarYield,
+      powerNow,
+      powerHourAvg,
+    ),
     false,
   );
 
@@ -242,10 +316,14 @@ async function runLive(): Promise<void> {
       const hourChanged = ukHourStartMs(now) !== lastPowerHourStart;
       const needPowerRefresh =
         dayChanged || hourChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
+      const needTempRefresh = dayChanged || nowMs - lastTempRefreshAt >= TEMP_REFRESH_MS;
 
       if (dayChanged) {
         trackedDate = today;
-        weather = await fetchBbcWeatherAggregated(location);
+        [weather, wfh] = await Promise.all([
+          fetchBbcWeatherAggregated(location),
+          fetchWfhStatus(),
+        ]);
         ({ sunrise, sunset } = todaySunriseSunset(weather, trackedDate));
         weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
       }
@@ -268,8 +346,28 @@ async function runLive(): Promise<void> {
         }
       }
 
+      if (needTempRefresh) {
+        try {
+          ({ downstairsTemp, shedTemp } = tempsFromData(await fetchTemperatureHistory()));
+          lastTempRefreshAt = nowMs;
+        } catch {
+          // Keep last known values on transient API errors.
+        }
+      }
+
       writeDisplay(
-        buildDisplayLines(now, sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+        buildDisplayLines(
+          now,
+          sunrise,
+          sunset,
+          weatherLine,
+          wfh,
+          downstairsTemp,
+          shedTemp,
+          solarYield,
+          powerNow,
+          powerHourAvg,
+        ),
         true,
       );
     })().catch((error: unknown) => {

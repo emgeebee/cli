@@ -29,7 +29,7 @@ function printUsage() {
   console.log("  bday   Birthday age table");
   console.log("  money  Monthly countdown value");
   console.log("  cmd    Home automation shortcuts");
-  console.log("         slon, slof, smon, smof, shon, shof, blon, blof");
+  console.log("         slon, slof, smon, smof, shon, shof, blon, blof, wfh");
   console.log("  fuel   UK fuel prices (near, station, list)");
   console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("  temp   House temperature history (last 24h)");

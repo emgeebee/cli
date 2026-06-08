@@ -4,9 +4,13 @@ import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 import { z } from "zod";
 
+import {
+  fetchTemperatureHistory,
+  TEMP_API_URL,
+  type TemperatureReading,
+  type TemperatureResponse,
+} from "./lib/tempApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
-
-const TEMP_API_URL = "http://api.emgeebee.buzz:1880/api/get-house-temp";
 const BBC_WEATHER_OVERLAY_URL =
   "https://weather-broker-cdn.api.bbci.co.uk/en/maps/forecasts-observations?locations=CM2";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -41,7 +45,6 @@ const ROOM_COLORS = [
 ];
 const DISPLAY_ROOM_ORDER = ["Outdoor", "Shed", "Downstairs"] as const;
 
-/** API may send null temps as JSON null or the string "null". */
 const nullableNumericField = z.preprocess((value) => {
   if (value == null || value === "" || value === "null" || value === "undefined") {
     return null;
@@ -53,12 +56,6 @@ const nullableNumericField = z.preprocess((value) => {
   return value;
 }, z.number().nullable().optional());
 
-const ReadingSchema = z.object({
-  time: nullableNumericField,
-  temp: nullableNumericField,
-});
-
-const TemperatureResponseSchema = z.record(z.string(), z.array(ReadingSchema));
 const BbcOverlayEntrySchema = z.object({
   time: z.object({
     utc: z.string(),
@@ -83,12 +80,6 @@ const BbcOverlayResponseSchema = z.object({
   features: z.array(BbcOverlayFeatureSchema),
 });
 
-type TemperatureReading = {
-  time: number;
-  temp: number;
-};
-type RawTemperatureReading = z.infer<typeof ReadingSchema>;
-type TemperatureResponse = Record<string, TemperatureReading[]>;
 type RoomHistory = {
   room: string;
   color: string;
@@ -188,29 +179,6 @@ function startOfHour(ms: number): number {
   const d = new Date(ms);
   d.setMinutes(0, 0, 0);
   return d.getTime();
-}
-
-async function fetchTemperatureHistory(): Promise<TemperatureResponse> {
-  const response = await fetch(TEMP_API_URL, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Temperature API request failed (${response.status})`);
-  }
-  const payload = TemperatureResponseSchema.parse(await response.json());
-  const cleaned: TemperatureResponse = {};
-  for (const [room, readings] of Object.entries(payload)) {
-    cleaned[room] = (readings as RawTemperatureReading[])
-      .filter((reading) => Number.isFinite(reading.time) && Number.isFinite(reading.temp))
-      .map((reading) => ({
-        time: reading.time as number,
-        temp: reading.temp as number,
-      }));
-  }
-  return cleaned;
 }
 
 function toTemperatureReading(utc: string, tempC: number | null | undefined): TemperatureReading | null {

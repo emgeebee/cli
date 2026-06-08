@@ -14815,11 +14815,84 @@ function currentHourPowerAvgWatts(data, now = /* @__PURE__ */ new Date()) {
   return null;
 }
 
+// lib/tempApi.ts
+var TEMP_API_URL = "http://api.emgeebee.buzz:1880/api/get-house-temp";
+var nullableNumericField = external_exports.preprocess((value) => {
+  if (value == null || value === "" || value === "null" || value === "undefined") {
+    return null;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return value;
+}, external_exports.number().nullable().optional());
+var ReadingSchema = external_exports.object({
+  time: nullableNumericField,
+  temp: nullableNumericField
+});
+var TemperatureResponseSchema = external_exports.record(external_exports.string(), external_exports.array(ReadingSchema));
+async function fetchTemperatureHistory() {
+  const response = await fetch(TEMP_API_URL, {
+    method: "GET",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Temperature API request failed (${response.status})`);
+  }
+  const payload = TemperatureResponseSchema.parse(await response.json());
+  const cleaned = {};
+  for (const [room, readings] of Object.entries(payload)) {
+    cleaned[room] = readings.filter((reading) => Number.isFinite(reading.time) && Number.isFinite(reading.temp)).map((reading) => ({
+      time: reading.time,
+      temp: reading.temp
+    }));
+  }
+  return cleaned;
+}
+function latestRoomTemp(data, room) {
+  const readings = data[room] || [];
+  const latest = readings.at(-1);
+  return latest?.temp ?? null;
+}
+
+// lib/wfhApi.ts
+var WFH_API_URL = "http://emgeebee.buzz:1880/api/wfh";
+var WfhResponseSchema = external_exports.object({
+  wfh: external_exports.preprocess((value) => {
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return value;
+  }, external_exports.boolean())
+});
+async function fetchWfhStatus() {
+  try {
+    const response = await fetch(WFH_API_URL, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return WfhResponseSchema.parse(await response.json()).wfh;
+  } catch {
+    return null;
+  }
+}
+function formatWfhLine(wfh) {
+  if (wfh == null) return "wfh: -";
+  return `wfh: ${wfh ? "yes" : "no"}`;
+}
+
 // status.ts
 var UK_TZ3 = "Europe/London";
 var TICK_MS = 1e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
 var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
+var TEMP_REFRESH_MS = 10 * 60 * 1e3;
 var ANSI_HIDE_CURSOR = "\x1B[?25l";
 var ANSI_SHOW_CURSOR = "\x1B[?25h";
 function usage() {
@@ -14830,6 +14903,7 @@ function usage() {
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
   console.log("Solar power now and hourly average refresh every 10 minutes.");
+  console.log("Downstairs and shed temperatures refresh every 10 minutes.");
 }
 function formatTime(now) {
   return now.toLocaleTimeString("en-GB", {
@@ -14899,11 +14973,17 @@ function formatSolarHourAvgLine(powerAvg, now) {
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
   return `solar avg: ${powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg)} (${hourLabel})`;
 }
-function buildDisplayLines(now, sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg) {
+function formatRoomTempLine(label, temp) {
+  return `${label}: ${formatTemperatureText(temp, { fractionDigits: 1, unknownText: "-" })}`;
+}
+function buildDisplayLines(now, sunrise, sunset, weatherLine, wfh, downstairsTemp, shedTemp, solarYield, powerNow, powerHourAvg) {
   return [
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
+    formatWfhLine(wfh),
     weatherLine,
+    formatRoomTempLine("downstairs temp", downstairsTemp),
+    formatRoomTempLine("shed temp", shedTemp),
     formatSunLine("sunrise", sunrise, now),
     formatSunLine("sunset", sunset, now),
     formatSolarYieldLine(solarYield),
@@ -14939,17 +15019,43 @@ async function loadSolarSnapshot(dayKey, now) {
     return { yield: null, powerNow: null, powerHourAvg: null };
   }
 }
+function tempsFromData(data) {
+  return {
+    downstairsTemp: latestRoomTemp(data, "Downstairs"),
+    shedTemp: latestRoomTemp(data, "Shed")
+  };
+}
+async function loadTemps() {
+  try {
+    return tempsFromData(await fetchTemperatureHistory());
+  } catch {
+    return { downstairsTemp: null, shedTemp: null };
+  }
+}
 async function printOnce() {
   const now = /* @__PURE__ */ new Date();
   const dayKey = ukTodayYmd(now);
-  const [weather, solar] = await Promise.all([
+  const [weather, solar, wfh, temps] = await Promise.all([
     fetchBbcWeatherAggregated(resolveDefaultLocation()),
-    loadSolarSnapshot(dayKey, now)
+    loadSolarSnapshot(dayKey, now),
+    fetchWfhStatus(),
+    loadTemps()
   ]);
   const { sunrise, sunset } = todaySunriseSunset(weather, dayKey);
   const weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, dayKey));
   writeDisplay(
-    buildDisplayLines(now, sunrise, sunset, weatherLine, solar.yield, solar.powerNow, solar.powerHourAvg),
+    buildDisplayLines(
+      now,
+      sunrise,
+      sunset,
+      weatherLine,
+      wfh,
+      temps.downstairsTemp,
+      temps.shedTemp,
+      solar.yield,
+      solar.powerNow,
+      solar.powerHourAvg
+    ),
     false
   );
 }
@@ -14959,17 +15065,29 @@ async function runLive() {
   let weather = await fetchBbcWeatherAggregated(location);
   let { sunrise, sunset } = todaySunriseSunset(weather, trackedDate);
   let weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
+  let wfh = null;
+  let downstairsTemp = null;
+  let shedTemp = null;
   let solarYield = null;
   let powerNow = null;
   let powerHourAvg = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
+  let lastPowerHourStart = 0;
+  let lastTempRefreshAt = 0;
+  [wfh, { downstairsTemp, shedTemp }] = await Promise.all([
+    fetchWfhStatus(),
+    loadTemps()
+  ]);
+  lastTempRefreshAt = Date.now();
   try {
     const data = await fetchSolarData();
     const startedAt = Date.now();
-    ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, new Date(startedAt)));
+    const started = new Date(startedAt);
+    ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
     lastSolarYieldRefreshAt = startedAt;
     lastPowerRefreshAt = startedAt;
+    lastPowerHourStart = ukHourStartMs(started);
   } catch {
   }
   const stop = () => {
@@ -14982,7 +15100,18 @@ async function runLive() {
   process.on("SIGTERM", stop);
   process.stdout.write(ANSI_HIDE_CURSOR);
   writeDisplay(
-    buildDisplayLines(/* @__PURE__ */ new Date(), sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+    buildDisplayLines(
+      /* @__PURE__ */ new Date(),
+      sunrise,
+      sunset,
+      weatherLine,
+      wfh,
+      downstairsTemp,
+      shedTemp,
+      solarYield,
+      powerNow,
+      powerHourAvg
+    ),
     false
   );
   const timer = setInterval(() => {
@@ -14992,10 +15121,15 @@ async function runLive() {
       const today = ukTodayYmd(now);
       const dayChanged = today !== trackedDate;
       const needYieldRefresh = dayChanged || nowMs - lastSolarYieldRefreshAt >= SOLAR_YIELD_REFRESH_MS;
-      const needPowerRefresh = dayChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
+      const hourChanged = ukHourStartMs(now) !== lastPowerHourStart;
+      const needPowerRefresh = dayChanged || hourChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
+      const needTempRefresh = dayChanged || nowMs - lastTempRefreshAt >= TEMP_REFRESH_MS;
       if (dayChanged) {
         trackedDate = today;
-        weather = await fetchBbcWeatherAggregated(location);
+        [weather, wfh] = await Promise.all([
+          fetchBbcWeatherAggregated(location),
+          fetchWfhStatus()
+        ]);
         ({ sunrise, sunset } = todaySunriseSunset(weather, trackedDate));
         weatherLine = formatTodayWeatherLine(todayWeatherReport(weather, trackedDate));
       }
@@ -15010,12 +15144,31 @@ async function runLive() {
             powerNow = powerNowWatts(data);
             powerHourAvg = currentHourPowerAvgWatts(data, now);
             lastPowerRefreshAt = nowMs;
+            lastPowerHourStart = ukHourStartMs(now);
           }
         } catch {
         }
       }
+      if (needTempRefresh) {
+        try {
+          ({ downstairsTemp, shedTemp } = tempsFromData(await fetchTemperatureHistory()));
+          lastTempRefreshAt = nowMs;
+        } catch {
+        }
+      }
       writeDisplay(
-        buildDisplayLines(now, sunrise, sunset, weatherLine, solarYield, powerNow, powerHourAvg),
+        buildDisplayLines(
+          now,
+          sunrise,
+          sunset,
+          weatherLine,
+          wfh,
+          downstairsTemp,
+          shedTemp,
+          solarYield,
+          powerNow,
+          powerHourAvg
+        ),
         true
       );
     })().catch((error51) => {

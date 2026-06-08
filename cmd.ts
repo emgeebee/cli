@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { formatWfhLine, toggleWfhStatus } from "./lib/wfhApi";
+
 const BASE_URL = "http://api.emgeebee.buzz:1880";
 
 type CommandTarget = {
@@ -32,6 +34,7 @@ function usage(): void {
   console.log("  shof  shed heater off");
   console.log("  blon  bedroom lights on");
   console.log("  blof  bedroom lights off");
+  console.log("  wfh   toggle work-from-home status");
 }
 
 async function main(): Promise<void> {
@@ -48,6 +51,12 @@ async function main(): Promise<void> {
   }
 
   const code = args[0].toLowerCase();
+  if (code === "wfh") {
+    const wfh = await toggleWfhStatus();
+    console.log(formatWfhLine(wfh));
+    return;
+  }
+
   const target = COMMANDS[code];
   if (!target) {
     console.error(`Unknown command: ${args[0]}`);
