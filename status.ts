@@ -35,9 +35,7 @@ import {
   type TemperatureResponse,
 } from "./lib/tempApi";
 import {
-  ELECTRICITY_PERIOD_LABELS,
   formatDayGasLine,
-  formatElectricityPeriodAvgLine,
   formatElectricityPeriodAvgLines,
   loadTodayTomorrowElectricityRates,
   loadTodayTomorrowGasRates,
@@ -330,10 +328,7 @@ function gasSnapshotFromRates(rates: {
 }
 
 function emptyElectricityLines(): string[] {
-  return [
-    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null)),
-    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null, "tomorrow")),
-  ];
+  return [];
 }
 
 function emptyHouseOctoSnapshot(): HouseOctoSnapshot {

@@ -717,7 +717,9 @@ export function formatElectricityPeriodAvgLines(
   dayLabel?: string,
 ): string[] {
   const averages = averageElectricityByPeriod(rates);
-  return ELECTRICITY_PERIOD_LABELS.map((label) =>
-    formatElectricityPeriodAvgLine(label, averages[label], dayLabel),
-  );
+  return ELECTRICITY_PERIOD_LABELS.flatMap((label) => {
+    const pence = averages[label];
+    if (pence == null) return [];
+    return [formatElectricityPeriodAvgLine(label, pence, dayLabel)];
+  });
 }

@@ -15392,9 +15392,11 @@ function formatElectricityPeriodAvgLine(label, pence, dayLabel) {
 }
 function formatElectricityPeriodAvgLines(rates, dayLabel) {
   const averages = averageElectricityByPeriod(rates);
-  return ELECTRICITY_PERIOD_LABELS.map(
-    (label) => formatElectricityPeriodAvgLine(label, averages[label], dayLabel)
-  );
+  return ELECTRICITY_PERIOD_LABELS.flatMap((label) => {
+    const pence = averages[label];
+    if (pence == null) return [];
+    return [formatElectricityPeriodAvgLine(label, pence, dayLabel)];
+  });
 }
 
 // lib/bdayApi.ts
@@ -15528,7 +15530,7 @@ var STATUS_SHORTCUTS = [
   { key: "s", label: "solar", cmd: "solar" },
   { key: "w", label: "weather", cmd: "w" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "c", label: "cricket", cmd: "cric" },
+  { key: "c", label: "cric", cmd: "cric" },
   { key: "f", label: "footy", cmd: "ball" },
   { key: "d", label: "dates", cmd: "cal" },
   { key: "b", label: "bdays", cmd: "bday" }
@@ -15887,10 +15889,7 @@ function gasSnapshotFromRates(rates) {
   };
 }
 function emptyElectricityLines() {
-  return [
-    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null)),
-    ...ELECTRICITY_PERIOD_LABELS.map((label) => formatElectricityPeriodAvgLine(label, null, "tomorrow"))
-  ];
+  return [];
 }
 function emptyHouseOctoSnapshot() {
   return {
