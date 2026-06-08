@@ -15478,10 +15478,8 @@ function formatUpcomingBdayLine(entry) {
   }
   return `${entry.name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
 }
-function upcomingBdaySectionLines(config2, now, sectionDivider2, limit = 3) {
-  const lines = nextUpcomingBirthdays(config2, now, limit).map(formatUpcomingBdayLine);
-  if (lines.length === 0) return [];
-  return [sectionDivider2("bday"), ...lines];
+function upcomingBdaySectionLines(config2, now, limit = 3) {
+  return nextUpcomingBirthdays(config2, now, limit).map(formatUpcomingBdayLine);
 }
 
 // lib/moneyApi.ts
@@ -15804,7 +15802,7 @@ function buildStatusLines(state) {
     sectionDivider("time"),
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
-    ...upcomingBdaySectionLines(state.bdayConfig, now, sectionDivider),
+    ...upcomingBdaySectionLines(state.bdayConfig, now),
     sectionDivider("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
@@ -15835,7 +15833,6 @@ function buildStatusLines(state) {
     state.houseOcto.gas.todayLine,
     state.houseOcto.gas.tomorrowLine,
     ...state.houseOcto.electricityLines,
-    "",
     statusShortcutFooter()
   ];
 }
