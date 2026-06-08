@@ -225,7 +225,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
     formatNextRainChanceLine(
-      "next rain >40%",
+      "next rain horten 40%",
       nextRainChance(weather.hourlyReports, 40, now),
       todayYmd,
       ukTomorrowYmd(now),

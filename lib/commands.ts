@@ -50,10 +50,10 @@ export const STATUS_SHORTCUTS: StatusShortcut[] = [
   { key: "s", label: "solar", cmd: "solar" },
   { key: "w", label: "weather", cmd: "w" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "c", label: "cricket", cmd: "cric" },
-  { key: "f", label: "football", cmd: "ball" },
-  { key: "d", label: "calendar", cmd: "cal" },
-  { key: "b", label: "birthdays", cmd: "bday" },
+  { key: "c", label: "cric", cmd: "cric" },
+  { key: "f", label: "footy", cmd: "ball" },
+  { key: "d", label: "dates", cmd: "cal" },
+  { key: "b", label: "bdays", cmd: "bday" },
 ];
 
 const STATUS_SHORTCUT_BY_KEY = Object.fromEntries(

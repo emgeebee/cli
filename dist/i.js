@@ -2015,9 +2015,9 @@ var STATUS_SHORTCUTS = [
   { key: "w", label: "weather", cmd: "w" },
   { key: "o", label: "octo", cmd: "octo" },
   { key: "c", label: "cricket", cmd: "cric" },
-  { key: "f", label: "football", cmd: "ball" },
-  { key: "d", label: "calendar", cmd: "cal" },
-  { key: "b", label: "birthdays", cmd: "bday" }
+  { key: "f", label: "footy", cmd: "ball" },
+  { key: "d", label: "dates", cmd: "cal" },
+  { key: "b", label: "bdays", cmd: "bday" }
 ];
 var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
   STATUS_SHORTCUTS.map((shortcut) => [shortcut.key, shortcut])
