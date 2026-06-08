@@ -155,16 +155,52 @@ function formatRainChanceDayLabel(localDate: string, todayYmd: string, tomorrowY
   return date.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ });
 }
 
-export function formatNextRainChanceLine(
-  label: string,
+function formatRainChanceTime(timeslot: string): string {
+  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
+  if (!match) return timeslot;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (minutes !== 0) return timeslot;
+  const hour12 = hours % 12 || 12;
+  const suffix = hours < 12 ? "am" : "pm";
+  return `${hour12}${suffix}`;
+}
+
+function formatRainChancePart(
+  thresholdPercent: number,
   chance: RainChance | null,
   todayYmd: string,
   tomorrowYmd: string,
 ): string {
-  if (!chance) return `${label}: -`;
+  if (!chance) return `>${thresholdPercent}% -`;
   const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
+  const time = formatRainChanceTime(chance.timeslot);
   const rain = formatRainPercent(chance.percent);
-  return `${label}: ${dayLabel} ${chance.timeslot} (${rain})`;
+  return `>${thresholdPercent}% ${dayLabel} ${time} (${rain})`;
+}
+
+export function formatNextRainChancesLine(
+  reports: BbcWeatherHourlyReport[],
+  now: Date,
+  todayYmd: string,
+  tomorrowYmd: string,
+): string {
+  const part40 = formatRainChancePart(
+    40,
+    nextRainChance(reports, 40, now),
+    todayYmd,
+    tomorrowYmd,
+  );
+  const part70 = formatRainChancePart(
+    70,
+    nextRainChance(reports, 70, now),
+    todayYmd,
+    tomorrowYmd,
+  );
+  if (part40.endsWith("-") && part70.endsWith("-")) {
+    return "next rain: -";
+  }
+  return `next rain: ${part40} // ${part70}`;
 }
 
 export function dailyReportsFromWeather(data: BbcWeatherResponse): BbcWeatherDailyReport[] {

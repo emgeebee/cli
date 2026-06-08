@@ -14831,11 +14831,40 @@ function formatRainChanceDayLabel(localDate, todayYmd, tomorrowYmd) {
   if (Number.isNaN(date5.getTime())) return localDate;
   return date5.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ2 });
 }
-function formatNextRainChanceLine(label, chance, todayYmd, tomorrowYmd) {
-  if (!chance) return `${label}: -`;
+function formatRainChanceTime(timeslot) {
+  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
+  if (!match) return timeslot;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (minutes !== 0) return timeslot;
+  const hour12 = hours % 12 || 12;
+  const suffix = hours < 12 ? "am" : "pm";
+  return `${hour12}${suffix}`;
+}
+function formatRainChancePart(thresholdPercent, chance, todayYmd, tomorrowYmd) {
+  if (!chance) return `>${thresholdPercent}% -`;
   const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
+  const time3 = formatRainChanceTime(chance.timeslot);
   const rain = formatRainPercent(chance.percent);
-  return `${label}: ${dayLabel} ${chance.timeslot} (${rain})`;
+  return `>${thresholdPercent}% ${dayLabel} ${time3} (${rain})`;
+}
+function formatNextRainChancesLine(reports, now, todayYmd, tomorrowYmd) {
+  const part40 = formatRainChancePart(
+    40,
+    nextRainChance(reports, 40, now),
+    todayYmd,
+    tomorrowYmd
+  );
+  const part70 = formatRainChancePart(
+    70,
+    nextRainChance(reports, 70, now),
+    todayYmd,
+    tomorrowYmd
+  );
+  if (part40.endsWith("-") && part70.endsWith("-")) {
+    return "next rain: -";
+  }
+  return `next rain: ${part40} // ${part70}`;
 }
 function dailyReportsFromWeather(data) {
   return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
@@ -14943,6 +14972,7 @@ var ANSI_GREEN4 = "\x1B[32m";
 var ANSI_YELLOW4 = "\x1B[33m";
 var ANSI_ORANGE4 = "\x1B[38;5;208m";
 var ANSI_RED4 = "\x1B[31m";
+var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 function resolveOctoCredentials() {
   const parseGasFactor = (value) => {
     if (!value) return null;
@@ -15245,9 +15275,12 @@ function formatGasPrice(rate) {
   const text = `${inc.toFixed(4)}p`;
   return colorize4(text, colorForRate(inc, "gas"));
 }
-function formatDayGasLine(label, rates) {
-  if (rates.length === 0) return `${label} gas: -`;
-  return `${label} gas: ${rates.map(formatGasPrice).join(", ")}`;
+function formatGasPrices(rates) {
+  if (rates.length === 0) return "-";
+  return rates.map(formatGasPrice).join(", ");
+}
+function formatTodayTomorrowGasLine(today, tomorrow) {
+  return `today gas: ${formatGasPrices(today)}, tomorrow gas: ${formatGasPrices(tomorrow)}`;
 }
 function normalizeCachedElectricityDay(value) {
   if (!Array.isArray(value)) return null;
@@ -15386,17 +15419,49 @@ function formatElectricityPrice(pence) {
   const text = `${pence.toFixed(2)}p`;
   return colorize4(text, colorForRate(pence, "electricity"));
 }
-function formatElectricityPeriodAvgLine(label, pence, dayLabel) {
-  const prefix = dayLabel ? `${dayLabel} avg ${label}` : `avg ${label}`;
-  return pence == null ? `${prefix}: -` : `${prefix}: ${formatElectricityPrice(pence)}`;
+function formatElectricityPeriodLabel(label) {
+  return label.replace(/\s+/g, "");
 }
-function formatElectricityPeriodAvgLines(rates, dayLabel) {
+function padAsciiCell(value, width) {
+  const visible = value.replace(ANSI_REGEX, "").length;
+  return value + " ".repeat(Math.max(0, width - visible));
+}
+function makeAsciiTable(headers, rows) {
+  const widths = headers.map(
+    (header, idx) => Math.max(
+      header.replace(ANSI_REGEX, "").length,
+      ...rows.map((row) => (row[idx] || "").replace(ANSI_REGEX, "").length)
+    )
+  );
+  const border = `+-${widths.map((w) => "-".repeat(w)).join("-+-")}-+`;
+  const headerLine = `| ${headers.map((h, i) => padAsciiCell(h, widths[i])).join(" | ")} |`;
+  const body = rows.map(
+    (row) => `| ${row.map((v, i) => padAsciiCell(v || "", widths[i])).join(" | ")} |`
+  );
+  return [border, headerLine, border, ...body, border];
+}
+var ELECTRICITY_TABLE_HEADERS = [
+  "day",
+  ...ELECTRICITY_PERIOD_LABELS.map(formatElectricityPeriodLabel)
+];
+function electricityTableRow(dayName, rates) {
   const averages = averageElectricityByPeriod(rates);
-  return ELECTRICITY_PERIOD_LABELS.flatMap((label) => {
-    const pence = averages[label];
-    if (pence == null) return [];
-    return [formatElectricityPeriodAvgLine(label, pence, dayLabel)];
-  });
+  return [
+    dayName,
+    ...ELECTRICITY_PERIOD_LABELS.map((label) => {
+      const pence = averages[label];
+      return pence == null ? "-" : formatElectricityPrice(pence);
+    })
+  ];
+}
+function formatElectricityPeriodAvgTable(today, tomorrow) {
+  const rows = [
+    electricityTableRow("today", today),
+    electricityTableRow("tomorrow", tomorrow)
+  ];
+  const hasValue = rows.some((row) => row.slice(1).some((cell) => cell !== "-"));
+  if (!hasValue) return [];
+  return makeAsciiTable(ELECTRICITY_TABLE_HEADERS, rows);
 }
 
 // lib/bdayApi.ts
@@ -15501,13 +15566,17 @@ function moneyForToday(startAmount, now = /* @__PURE__ */ new Date()) {
   const remaining = startAmount - DAILY_DEDUCTION * dayOfMonth;
   return { dayOfMonth, remaining: Math.max(0, remaining) };
 }
-function formatMoneyLine(now = /* @__PURE__ */ new Date()) {
+function moneyRemaining(now = /* @__PURE__ */ new Date()) {
   try {
-    const { dayOfMonth, remaining } = moneyForToday(resolveBudget(), now);
-    return `money: Day ${dayOfMonth}: ${remaining}`;
+    return moneyForToday(resolveBudget(), now).remaining;
   } catch {
-    return "money: -";
+    return null;
   }
+}
+function datesSectionLabel(now = /* @__PURE__ */ new Date()) {
+  const remaining = moneyRemaining(now);
+  if (remaining == null) return "dates (-)";
+  return `dates (${remaining})`;
 }
 
 // lib/commands.ts
@@ -15577,9 +15646,19 @@ async function fetchWfhStatus() {
     return null;
   }
 }
-function formatWfhLine(wfh) {
-  if (wfh == null) return "wfh: -";
-  return `wfh: ${wfh ? "yes" : "no"}`;
+var UK_TZ5 = "Europe/London";
+function houseSectionLabel(now, wfh) {
+  const weekday = now.toLocaleDateString("en-GB", {
+    weekday: "long",
+    timeZone: UK_TZ5
+  }).toLowerCase();
+  if (weekday === "saturday" || weekday === "sunday") {
+    return "house (weekend)";
+  }
+  if (wfh === true) {
+    return "house (WFH)";
+  }
+  return "house (office)";
 }
 
 // lib/terminal.ts
@@ -15693,7 +15772,7 @@ ${prompt}`);
 }
 
 // status.ts
-var UK_TZ5 = "Europe/London";
+var UK_TZ6 = "Europe/London";
 var TICK_MS = 1e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
 var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
@@ -15717,7 +15796,7 @@ function formatTime(now) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: UK_TZ5
+    timeZone: UK_TZ6
   });
 }
 function formatDate(now) {
@@ -15726,7 +15805,7 @@ function formatDate(now) {
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: UK_TZ5
+    timeZone: UK_TZ6
   });
 }
 function parseClockMinutes(value) {
@@ -15761,24 +15840,31 @@ function formatSunRelative(clock, now, dayYmd) {
   if (diffMinutes > 0) return ` (${formatDurationMinutes(diffMinutes)} ago)`;
   return ` (in ${formatDurationMinutes(-diffMinutes)})`;
 }
-function formatSunLine(label, clock, now, dayYmd) {
-  return `${label}: ${clock}${formatSunRelative(clock, now, dayYmd)}`;
+function formatSunPart(label, clock, now, dayYmd) {
+  return `${label} ${clock}${formatSunRelative(clock, now, dayYmd)}`;
+}
+function formatSunriseSunsetLine(sunrise, sunset, now, dayYmd) {
+  return `${formatSunPart("sunrise", sunrise, now, dayYmd)} // ${formatSunPart("sunset", sunset, now, dayYmd)}`;
 }
 function formatSolarYieldLine(solarYield) {
   return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
-function formatSolarNowLine(powerNow) {
-  return `solar now: ${powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)}`;
-}
-function formatSolarHourAvgLine(powerAvg, now) {
+function formatSolarPowerLine(powerNow, powerAvg, now) {
+  const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
+  const avgText = powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  return `solar avg: ${powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg)} (${hourLabel})`;
+  return `solar: ${nowText} // avg (${hourLabel}): ${avgText}`;
 }
-function formatRoomTempLine(label, temp) {
-  return `${label}: ${formatTemperatureText(temp, { fractionDigits: 1, unknownText: "-" })}`;
+function formatHouseTempsLine(downstairsTemp, shedTemp) {
+  const kitchen = formatTemperatureText(downstairsTemp, { fractionDigits: 0, unknownText: "-" });
+  const shed = formatTemperatureText(shedTemp, { fractionDigits: 0, unknownText: "-" });
+  return `temp: ${kitchen} (kitchen) // ${shed} (shed)`;
 }
 function sectionDivider(name) {
   return `\u2500\u2500 ${name} \u2500\u2500`;
+}
+function sectionBreak(name) {
+  return ["", sectionDivider(name)];
 }
 function formatDayWeatherLine(label, line) {
   return line === "-" ? `${label}: -` : `${label}: ${line}`;
@@ -15799,40 +15885,27 @@ function buildStatusLines(state) {
   const todayYmd = state.todayYmd;
   const weather = state.weather;
   return [
-    sectionDivider("time"),
-    `time: ${formatTime(now)}`,
-    `date: ${formatDate(now)}`,
+    ...sectionBreak(datesSectionLabel(now)),
+    `time: ${formatTime(now)}, ${formatDate(now)}`,
     ...upcomingBdaySectionLines(state.bdayConfig, now),
-    sectionDivider("weather"),
+    ...sectionBreak("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
-    formatNextRainChanceLine(
-      "next rain horten 40%",
-      nextRainChance(weather.hourlyReports, 40, now),
+    formatNextRainChancesLine(
+      weather.hourlyReports,
+      now,
       todayYmd,
       ukTomorrowYmd(now)
     ),
-    formatNextRainChanceLine(
-      "next rain >70%",
-      nextRainChance(weather.hourlyReports, 70, now),
-      todayYmd,
-      ukTomorrowYmd(now)
-    ),
-    formatSunLine("sunrise", weather.sunrise, now, todayYmd),
-    formatSunLine("sunset", weather.sunset, now, todayYmd),
-    sectionDivider("solar"),
+    formatSunriseSunsetLine(weather.sunrise, weather.sunset, now, todayYmd),
+    ...sectionBreak("solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarNowLine(state.powerNow),
-    formatSolarHourAvgLine(state.powerHourAvg, now),
-    sectionDivider("house"),
-    formatWfhLine(state.wfh),
-    formatMoneyLine(now),
-    formatRoomTempLine("downstairs temp", state.downstairsTemp),
-    formatRoomTempLine("shed temp", state.shedTemp),
-    sectionDivider("power"),
-    state.houseOcto.gas.todayLine,
-    state.houseOcto.gas.tomorrowLine,
+    formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
+    ...sectionBreak(houseSectionLabel(now, state.wfh)),
+    formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
+    state.houseOcto.gas.line,
     ...state.houseOcto.electricityLines,
+    "",
     statusShortcutFooter()
   ];
 }
@@ -15875,14 +15948,12 @@ async function loadTemps() {
 }
 function emptyGasSnapshot() {
   return {
-    todayLine: formatDayGasLine("today", []),
-    tomorrowLine: formatDayGasLine("tomorrow", [])
+    line: formatTodayTomorrowGasLine([], [])
   };
 }
 function gasSnapshotFromRates(rates) {
   return {
-    todayLine: formatDayGasLine("today", rates.today),
-    tomorrowLine: formatDayGasLine("tomorrow", rates.tomorrow)
+    line: formatTodayTomorrowGasLine(rates.today, rates.tomorrow)
   };
 }
 function emptyElectricityLines() {
@@ -15902,10 +15973,10 @@ async function loadHouseOctoPrices(now = /* @__PURE__ */ new Date()) {
     ]);
     return {
       gas: gasSnapshotFromRates(gasRates),
-      electricityLines: [
-        ...formatElectricityPeriodAvgLines(electricityRates.today),
-        ...formatElectricityPeriodAvgLines(electricityRates.tomorrow, "tomorrow")
-      ]
+      electricityLines: formatElectricityPeriodAvgTable(
+        electricityRates.today,
+        electricityRates.tomorrow
+      )
     };
   } catch {
     return emptyHouseOctoSnapshot();

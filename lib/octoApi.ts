@@ -75,6 +75,7 @@ const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_RED = "\x1b[31m";
+const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 
 export type FuelType = "electricity" | "gas";
 
@@ -518,9 +519,20 @@ function formatGasPrice(rate: OctopusRate): string {
   return colorize(text, colorForRate(inc, "gas"));
 }
 
+function formatGasPrices(rates: OctopusRate[]): string {
+  if (rates.length === 0) return "-";
+  return rates.map(formatGasPrice).join(", ");
+}
+
 export function formatDayGasLine(label: string, rates: OctopusRate[]): string {
-  if (rates.length === 0) return `${label} gas: -`;
-  return `${label} gas: ${rates.map(formatGasPrice).join(", ")}`;
+  return `${label} gas: ${formatGasPrices(rates)}`;
+}
+
+export function formatTodayTomorrowGasLine(
+  today: OctopusRate[],
+  tomorrow: OctopusRate[],
+): string {
+  return `today gas: ${formatGasPrices(today)}, tomorrow gas: ${formatGasPrices(tomorrow)}`;
 }
 
 function normalizeCachedElectricityDay(value: unknown): CachedElectricityRate[] | null {
@@ -703,23 +715,58 @@ function formatElectricityPrice(pence: number): string {
   return colorize(text, colorForRate(pence, "electricity"));
 }
 
-export function formatElectricityPeriodAvgLine(
+function formatElectricityPeriodLabel(
   label: (typeof ELECTRICITY_PERIOD_LABELS)[number],
-  pence: number | null,
-  dayLabel?: string,
 ): string {
-  const prefix = dayLabel ? `${dayLabel} avg ${label}` : `avg ${label}`;
-  return pence == null ? `${prefix}: -` : `${prefix}: ${formatElectricityPrice(pence)}`;
+  return label.replace(/\s+/g, "");
 }
 
-export function formatElectricityPeriodAvgLines(
-  rates: OctopusRate[],
-  dayLabel?: string,
-): string[] {
+function padAsciiCell(value: string, width: number): string {
+  const visible = value.replace(ANSI_REGEX, "").length;
+  return value + " ".repeat(Math.max(0, width - visible));
+}
+
+function makeAsciiTable(headers: string[], rows: string[][]): string[] {
+  const widths = headers.map((header, idx) =>
+    Math.max(
+      header.replace(ANSI_REGEX, "").length,
+      ...rows.map((row) => (row[idx] || "").replace(ANSI_REGEX, "").length),
+    ),
+  );
+  const border = `+-${widths.map((w) => "-".repeat(w)).join("-+-")}-+`;
+  const headerLine = `| ${headers.map((h, i) => padAsciiCell(h, widths[i])).join(" | ")} |`;
+  const body = rows.map(
+    (row) =>
+      `| ${row.map((v, i) => padAsciiCell(v || "", widths[i])).join(" | ")} |`,
+  );
+  return [border, headerLine, border, ...body, border];
+}
+
+const ELECTRICITY_TABLE_HEADERS = [
+  "day",
+  ...ELECTRICITY_PERIOD_LABELS.map(formatElectricityPeriodLabel),
+];
+
+function electricityTableRow(dayName: string, rates: OctopusRate[]): string[] {
   const averages = averageElectricityByPeriod(rates);
-  return ELECTRICITY_PERIOD_LABELS.flatMap((label) => {
-    const pence = averages[label];
-    if (pence == null) return [];
-    return [formatElectricityPeriodAvgLine(label, pence, dayLabel)];
-  });
+  return [
+    dayName,
+    ...ELECTRICITY_PERIOD_LABELS.map((label) => {
+      const pence = averages[label];
+      return pence == null ? "-" : formatElectricityPrice(pence);
+    }),
+  ];
+}
+
+export function formatElectricityPeriodAvgTable(
+  today: OctopusRate[],
+  tomorrow: OctopusRate[],
+): string[] {
+  const rows = [
+    electricityTableRow("today", today),
+    electricityTableRow("tomorrow", tomorrow),
+  ];
+  const hasValue = rows.some((row) => row.slice(1).some((cell) => cell !== "-"));
+  if (!hasValue) return [];
+  return makeAsciiTable(ELECTRICITY_TABLE_HEADERS, rows);
 }

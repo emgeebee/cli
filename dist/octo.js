@@ -46,6 +46,7 @@ function readPhoneCliConfig() {
 
 // lib/octoApi.ts
 var import_node_fs2 = require("node:fs");
+var ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"];
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var CACHE_MAX_AGE_DAYS = 2;
@@ -503,6 +504,13 @@ async function loadElectricityRatesForDays(dayKeys, now = /* @__PURE__ */ new Da
   }
   return rates;
 }
+function formatElectricityPeriodLabel(label) {
+  return label.replace(/\s+/g, "");
+}
+var ELECTRICITY_TABLE_HEADERS = [
+  "day",
+  ...ELECTRICITY_PERIOD_LABELS.map(formatElectricityPeriodLabel)
+];
 
 // octo.ts
 var ANSI_RESET2 = "\x1B[0m";

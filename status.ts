@@ -3,11 +3,10 @@
 import { getConfigPath } from "./config";
 import {
   fetchBbcWeatherAggregated,
-  formatNextRainChanceLine,
+  formatNextRainChancesLine,
   formatTodayWeatherLine,
   formatWeatherLine,
   hourlyReportsFromWeather,
-  nextRainChance,
   resolveDefaultLocation,
   sunriseSunsetForDate,
   todayWeatherReport,
@@ -35,22 +34,22 @@ import {
   type TemperatureResponse,
 } from "./lib/tempApi";
 import {
-  formatDayGasLine,
-  formatElectricityPeriodAvgLines,
+  formatTodayTomorrowGasLine,
+  formatElectricityPeriodAvgTable,
   loadTodayTomorrowElectricityRates,
   loadTodayTomorrowGasRates,
   type OctopusRate,
 } from "./lib/octoApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
 import { readBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib/bdayApi";
-import { formatMoneyLine } from "./lib/moneyApi";
+import { datesSectionLabel } from "./lib/moneyApi";
 import {
   runStatusShortcut,
   statusShortcutFooter,
   statusShortcutForKey,
   type StatusShortcut,
 } from "./lib/commands";
-import { fetchWfhStatus, formatWfhLine } from "./lib/wfhApi";
+import { fetchWfhStatus, houseSectionLabel } from "./lib/wfhApi";
 import { enterFullscreen, leaveFullscreen, writeFullscreenLines } from "./lib/terminal";
 import {
   enableRawTerminalInput,
@@ -136,29 +135,46 @@ function formatSunRelative(clock: string, now: Date, dayYmd: string): string {
   return ` (in ${formatDurationMinutes(-diffMinutes)})`;
 }
 
-function formatSunLine(label: string, clock: string, now: Date, dayYmd: string): string {
-  return `${label}: ${clock}${formatSunRelative(clock, now, dayYmd)}`;
+function formatSunPart(label: string, clock: string, now: Date, dayYmd: string): string {
+  return `${label} ${clock}${formatSunRelative(clock, now, dayYmd)}`;
+}
+
+function formatSunriseSunsetLine(
+  sunrise: string,
+  sunset: string,
+  now: Date,
+  dayYmd: string,
+): string {
+  return `${formatSunPart("sunrise", sunrise, now, dayYmd)} // ${formatSunPart("sunset", sunset, now, dayYmd)}`;
 }
 
 function formatSolarYieldLine(solarYield: number | null): string {
   return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
 
-function formatSolarNowLine(powerNow: number | null): string {
-  return `solar now: ${powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)}`;
-}
-
-function formatSolarHourAvgLine(powerAvg: number | null, now: Date): string {
+function formatSolarPowerLine(
+  powerNow: number | null,
+  powerAvg: number | null,
+  now: Date,
+): string {
+  const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
+  const avgText = powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  return `solar avg: ${powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg)} (${hourLabel})`;
+  return `solar: ${nowText} // avg (${hourLabel}): ${avgText}`;
 }
 
-function formatRoomTempLine(label: string, temp: number | null): string {
-  return `${label}: ${formatTemperatureText(temp, { fractionDigits: 1, unknownText: "-" })}`;
+function formatHouseTempsLine(downstairsTemp: number | null, shedTemp: number | null): string {
+  const kitchen = formatTemperatureText(downstairsTemp, { fractionDigits: 0, unknownText: "-" });
+  const shed = formatTemperatureText(shedTemp, { fractionDigits: 0, unknownText: "-" });
+  return `temp: ${kitchen} (kitchen) // ${shed} (shed)`;
 }
 
 function sectionDivider(name: string): string {
   return `── ${name} ──`;
+}
+
+function sectionBreak(name: string): string[] {
+  return ["", sectionDivider(name)];
 }
 
 function formatDayWeatherLine(label: string, line: string): string {
@@ -186,8 +202,7 @@ function weatherSnapshotFromData(weather: BbcWeatherResponse, todayYmd: string):
 }
 
 type GasSnapshot = {
-  todayLine: string;
-  tomorrowLine: string;
+  line: string;
 };
 
 type HouseOctoSnapshot = {
@@ -215,40 +230,27 @@ function buildStatusLines(state: StatusDisplayState): string[] {
   const weather = state.weather;
 
   return [
-    sectionDivider("time"),
-    `time: ${formatTime(now)}`,
-    `date: ${formatDate(now)}`,
+    ...sectionBreak(datesSectionLabel(now)),
+    `time: ${formatTime(now)}, ${formatDate(now)}`,
     ...upcomingBdaySectionLines(state.bdayConfig, now),
-    sectionDivider("weather"),
+    ...sectionBreak("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
-    formatNextRainChanceLine(
-      "next rain horten 40%",
-      nextRainChance(weather.hourlyReports, 40, now),
+    formatNextRainChancesLine(
+      weather.hourlyReports,
+      now,
       todayYmd,
       ukTomorrowYmd(now),
     ),
-    formatNextRainChanceLine(
-      "next rain >70%",
-      nextRainChance(weather.hourlyReports, 70, now),
-      todayYmd,
-      ukTomorrowYmd(now),
-    ),
-    formatSunLine("sunrise", weather.sunrise, now, todayYmd),
-    formatSunLine("sunset", weather.sunset, now, todayYmd),
-    sectionDivider("solar"),
+    formatSunriseSunsetLine(weather.sunrise, weather.sunset, now, todayYmd),
+    ...sectionBreak("solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarNowLine(state.powerNow),
-    formatSolarHourAvgLine(state.powerHourAvg, now),
-    sectionDivider("house"),
-    formatWfhLine(state.wfh),
-    formatMoneyLine(now),
-    formatRoomTempLine("downstairs temp", state.downstairsTemp),
-    formatRoomTempLine("shed temp", state.shedTemp),
-    sectionDivider("power"),
-    state.houseOcto.gas.todayLine,
-    state.houseOcto.gas.tomorrowLine,
+    formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
+    ...sectionBreak(houseSectionLabel(now, state.wfh)),
+    formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
+    state.houseOcto.gas.line,
     ...state.houseOcto.electricityLines,
+    "",
     statusShortcutFooter(),
   ];
 }
@@ -311,8 +313,7 @@ async function loadTemps(): Promise<{
 
 function emptyGasSnapshot(): GasSnapshot {
   return {
-    todayLine: formatDayGasLine("today", []),
-    tomorrowLine: formatDayGasLine("tomorrow", []),
+    line: formatTodayTomorrowGasLine([], []),
   };
 }
 
@@ -321,8 +322,7 @@ function gasSnapshotFromRates(rates: {
   tomorrow: OctopusRate[];
 }): GasSnapshot {
   return {
-    todayLine: formatDayGasLine("today", rates.today),
-    tomorrowLine: formatDayGasLine("tomorrow", rates.tomorrow),
+    line: formatTodayTomorrowGasLine(rates.today, rates.tomorrow),
   };
 }
 
@@ -345,10 +345,10 @@ async function loadHouseOctoPrices(now: Date = new Date()): Promise<HouseOctoSna
     ]);
     return {
       gas: gasSnapshotFromRates(gasRates),
-      electricityLines: [
-        ...formatElectricityPeriodAvgLines(electricityRates.today),
-        ...formatElectricityPeriodAvgLines(electricityRates.tomorrow, "tomorrow"),
-      ],
+      electricityLines: formatElectricityPeriodAvgTable(
+        electricityRates.today,
+        electricityRates.tomorrow,
+      ),
     };
   } catch {
     return emptyHouseOctoSnapshot();

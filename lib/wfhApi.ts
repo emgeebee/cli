@@ -26,9 +26,25 @@ export async function fetchWfhStatus(): Promise<boolean | null> {
   }
 }
 
+const UK_TZ = "Europe/London";
+
 export function formatWfhLine(wfh: boolean | null): string {
   if (wfh == null) return "wfh: -";
   return `wfh: ${wfh ? "yes" : "no"}`;
+}
+
+export function houseSectionLabel(now: Date, wfh: boolean | null): string {
+  const weekday = now.toLocaleDateString("en-GB", {
+    weekday: "long",
+    timeZone: UK_TZ,
+  }).toLowerCase();
+  if (weekday === "saturday" || weekday === "sunday") {
+    return "house (weekend)";
+  }
+  if (wfh === true) {
+    return "house (WFH)";
+  }
+  return "house (office)";
 }
 
 export async function toggleWfhStatus(): Promise<boolean> {

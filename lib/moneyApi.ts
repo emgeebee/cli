@@ -24,6 +24,20 @@ export function moneyForToday(
   return { dayOfMonth, remaining: Math.max(0, remaining) };
 }
 
+export function moneyRemaining(now: Date = new Date()): number | null {
+  try {
+    return moneyForToday(resolveBudget(), now).remaining;
+  } catch {
+    return null;
+  }
+}
+
+export function datesSectionLabel(now: Date = new Date()): string {
+  const remaining = moneyRemaining(now);
+  if (remaining == null) return "dates (-)";
+  return `dates (${remaining})`;
+}
+
 export function formatMoneyLine(now: Date = new Date()): string {
   try {
     const { dayOfMonth, remaining } = moneyForToday(resolveBudget(), now);
