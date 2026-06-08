@@ -68,6 +68,7 @@ export type TariffDerivation = {
 
 export const OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 export const DAY_MS = 24 * 60 * 60 * 1000;
+const CACHE_MAX_AGE_DAYS = 2;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -365,6 +366,32 @@ export function gasRatesForDay(rates: OctopusRate[], dayYmd: string): OctopusRat
     .sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
 
+function cacheEntryAgeDays(dayYmd: string, now: Date): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return null;
+  const [tY, tM, tD] = dayKeyUK(now).split("-").map(Number);
+  const [y, m, d] = dayYmd.split("-").map(Number);
+  const todayUtc = Date.UTC(tY, tM - 1, tD);
+  const entryUtc = Date.UTC(y, m - 1, d);
+  if (Number.isNaN(entryUtc)) return null;
+  return Math.floor((todayUtc - entryUtc) / DAY_MS);
+}
+
+function pruneStaleDateKeyedCache<T extends Record<string, unknown>>(
+  cache: T,
+  now: Date = new Date(),
+): { cache: T; pruned: boolean } {
+  let pruned = false;
+  const next = { ...cache };
+  for (const dayKey of Object.keys(next)) {
+    const ageDays = cacheEntryAgeDays(dayKey, now);
+    if (ageDays != null && ageDays > CACHE_MAX_AGE_DAYS) {
+      delete next[dayKey];
+      pruned = true;
+    }
+  }
+  return { cache: next, pruned };
+}
+
 function normalizeCachedDayPrices(value: unknown): number[] | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return [value];
@@ -374,7 +401,7 @@ function normalizeCachedDayPrices(value: unknown): number[] | null {
   return prices.length > 0 ? prices : null;
 }
 
-export function readGasPriceCache(): GasPriceCache {
+export function readGasPriceCache(now: Date = new Date()): GasPriceCache {
   const config = readPhoneCliConfig();
   const octo = config.octo || {};
   const raw = octo.gas;
@@ -388,7 +415,11 @@ export function readGasPriceCache(): GasPriceCache {
       cache[dayKey] = prices;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveGasPriceCache(pruned);
+  }
+  return pruned;
 }
 
 function writeOctoConfigSection(section: string, value: unknown): void {
@@ -420,7 +451,7 @@ function syntheticRatesFromPrices(prices: number[]): OctopusRate[] {
 }
 
 async function ensureGasPricesCached(dayKeys: string[], now: Date): Promise<GasPriceCache> {
-  const cache = readGasPriceCache();
+  const cache = readGasPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
@@ -513,7 +544,7 @@ function normalizeCachedElectricityDay(value: unknown): CachedElectricityRate[] 
   return rates.length > 0 ? rates : null;
 }
 
-export function readElectricityPriceCache(): ElectricityPriceCache {
+export function readElectricityPriceCache(now: Date = new Date()): ElectricityPriceCache {
   const config = readPhoneCliConfig();
   const octo = config.octo || {};
   const raw = octo.electricity;
@@ -527,7 +558,11 @@ export function readElectricityPriceCache(): ElectricityPriceCache {
       cache[dayKey] = rates;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveElectricityPriceCache(pruned);
+  }
+  return pruned;
 }
 
 export function saveElectricityPriceCache(cache: ElectricityPriceCache): void {
@@ -567,7 +602,7 @@ export async function fetchElectricityRates(from: Date, to: Date): Promise<Octop
 }
 
 async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Promise<ElectricityPriceCache> {
-  const cache = readElectricityPriceCache();
+  const cache = readElectricityPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;

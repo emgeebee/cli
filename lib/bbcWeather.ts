@@ -1,4 +1,5 @@
 import { readPhoneCliConfig } from "../config";
+import { ukWallTimeToDate } from "./solarApi";
 import { formatTemperatureText } from "./temperatureColours";
 
 const ANSI_RESET = "\x1b[0m";
@@ -18,9 +19,21 @@ export type BbcWeatherDailyReport = {
   precipitationProbabilityInPercent?: number | null;
 };
 
+export type BbcWeatherHourlyReport = {
+  localDate?: string;
+  timeslot?: string;
+  precipitationProbabilityInPercent?: number | null;
+};
+
 export type BbcWeatherDailyForecast = {
   summary?: { report?: BbcWeatherDailyReport };
-  detailed?: { reports?: unknown[] };
+  detailed?: { reports?: BbcWeatherHourlyReport[] };
+};
+
+export type RainChance = {
+  localDate: string;
+  timeslot: string;
+  percent: number;
 };
 
 export type BbcWeatherResponse = {
@@ -78,6 +91,80 @@ export async function fetchBbcWeatherAggregated(location: string): Promise<BbcWe
     throw new Error(`Weather API request failed (${response.status})`);
   }
   return (await response.json()) as BbcWeatherResponse;
+}
+
+function parseTimeslotMinutes(timeslot: string): number | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
+  if (!match) return null;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function hourlySlotStart(localDate: string, timeslot: string): Date | null {
+  const slotMinutes = parseTimeslotMinutes(timeslot);
+  if (slotMinutes == null) return null;
+  const [year, month, day] = localDate.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const hours = Math.floor(slotMinutes / 60);
+  const minutes = slotMinutes % 60;
+  return ukWallTimeToDate(year, month, day, hours, minutes);
+}
+
+export function hourlyReportsFromWeather(data: BbcWeatherResponse): BbcWeatherHourlyReport[] {
+  return (data.forecasts || [])
+    .flatMap((forecast) => forecast.detailed?.reports || [])
+    .filter((report): report is BbcWeatherHourlyReport =>
+      Boolean(report?.localDate && report?.timeslot),
+    );
+}
+
+export function nextRainChance(
+  reports: BbcWeatherHourlyReport[],
+  thresholdPercent: number,
+  now: Date = new Date(),
+): RainChance | null {
+  const nowMs = now.getTime();
+  let best: (RainChance & { slotStartMs: number }) | null = null;
+
+  for (const report of reports) {
+    const percent = report.precipitationProbabilityInPercent;
+    if (percent == null || percent <= thresholdPercent) continue;
+    const localDate = report.localDate;
+    const timeslot = report.timeslot;
+    if (!localDate || !timeslot) continue;
+    const slotStart = hourlySlotStart(localDate, timeslot);
+    if (!slotStart) continue;
+    const slotStartMs = slotStart.getTime();
+    if (slotStartMs <= nowMs) continue;
+    if (!best || slotStartMs < best.slotStartMs) {
+      best = { localDate, timeslot, percent, slotStartMs };
+    }
+  }
+
+  if (!best) return null;
+  return { localDate: best.localDate, timeslot: best.timeslot, percent: best.percent };
+}
+
+function formatRainChanceDayLabel(localDate: string, todayYmd: string, tomorrowYmd: string): string {
+  if (localDate === todayYmd) return "today";
+  if (localDate === tomorrowYmd) return "tomorrow";
+  const date = new Date(`${localDate}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return localDate;
+  return date.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ });
+}
+
+export function formatNextRainChanceLine(
+  label: string,
+  chance: RainChance | null,
+  todayYmd: string,
+  tomorrowYmd: string,
+): string {
+  if (!chance) return `${label}: -`;
+  const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
+  const rain = formatRainPercent(chance.percent);
+  return `${label}: ${dayLabel} ${chance.timeslot} (${rain})`;
 }
 
 export function dailyReportsFromWeather(data: BbcWeatherResponse): BbcWeatherDailyReport[] {

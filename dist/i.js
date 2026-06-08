@@ -194,8 +194,6 @@ var require_lib = __commonJS({
 // i.ts
 var i_exports = {};
 module.exports = __toCommonJS(i_exports);
-var import_node_child_process = require("node:child_process");
-var import_node_path2 = require("node:path");
 
 // node_modules/.pnpm/@inquirer+core@11.2.1_@types+node@24.12.2/node_modules/@inquirer/core/dist/lib/key.js
 var keybindings = ["emacs", "vim"];
@@ -1982,34 +1980,59 @@ var dist_default5 = createPrompt((config, done) => {
   return `${lines}${cursorHide}`;
 });
 
-// i.ts
-var COMMANDS = [
-  { value: 1, cmd: "ball", name: "Football fixtures", description: "Football fixtures / PL table" },
-  { value: 2, cmd: "ball", name: "PL table", description: "Football fixtures / PL table", extraArgs: "pl" },
-  { value: 3, cmd: "ball", name: "Villa Fixtures", description: "Football fixtures / Aston Villa", extraArgs: "avfc" },
-  { value: 4, cmd: "cal", name: "cal", description: "Calendar", extraArgs: "" },
+// lib/commands.ts
+var import_node_child_process = require("node:child_process");
+var import_node_path2 = require("node:path");
+var LAUNCHER_COMMANDS = [
+  { value: 1, cmd: "ball", name: "Football fixtures", description: "Football fixtures" },
+  { value: 2, cmd: "ball", name: "PL table", description: "Premier League table", extraArgs: "pl" },
+  { value: 3, cmd: "ball", name: "Villa fixtures", description: "Aston Villa fixtures", extraArgs: "avfc" },
+  { value: 4, cmd: "cal", name: "cal", description: "Calendar" },
   { value: 5, cmd: "w", name: "w", description: "Weather" },
   { value: 6, cmd: "cric", name: "cric", description: "Cricket fixtures" },
-  { value: 7, cmd: "octo", name: "octo", description: "Octopus energy", extraArgs: "" },
-  { value: 8, cmd: "bday", name: "bday", description: "Birthday age table", extraArgs: "" },
+  { value: 7, cmd: "octo", name: "octo", description: "Octopus energy" },
+  { value: 8, cmd: "bday", name: "bday", description: "Birthday age table" },
   { value: 9, cmd: "money", name: "money", description: "Monthly countdown value" },
   { value: 10, cmd: "cmd", name: "cmd", description: "Home automation shortcuts" },
-  { value: 11, cmd: "fuel", name: "fuel", description: "UK fuel prices (near, station, list)" },
-  { value: 12, cmd: "r", name: "CHM", description: "UK rail boards (departures, arrivals, search)", extraArgs: "CHM" },
-  { value: 13, cmd: "temp", name: "temp", description: "House temperature history", extraArgs: "" },
-  { value: 14, cmd: "solar", name: "solar", description: "Solar yield and power history", extraArgs: "" },
-  { value: 15, cmd: "status", name: "status", description: "Clock, date, sunrise/sunset", extraArgs: "" }
+  { value: 11, cmd: "fuel", name: "fuel", description: "UK fuel prices" },
+  { value: 12, cmd: "r", name: "CHM", description: "UK rail boards", extraArgs: "CHM" },
+  { value: 13, cmd: "temp", name: "temp", description: "House temperature history" },
+  { value: 14, cmd: "solar", name: "solar", description: "Solar yield and power history" }
+];
+function launcherArgs(command) {
+  const raw = command.extraArgs?.trim();
+  return raw ? raw.split(/\s+/) : [];
+}
+function runLauncherCommand(command) {
+  const scriptPath = (0, import_node_path2.join)(__dirname, `${command.cmd}.js`);
+  const result = (0, import_node_child_process.spawnSync)(process.execPath, [scriptPath, ...launcherArgs(command)], {
+    stdio: "inherit"
+  });
+  return result.status ?? 1;
+}
+var STATUS_SHORTCUTS = [
+  { key: "s", label: "solar", cmd: "solar" },
+  { key: "w", label: "weather", cmd: "w" },
+  { key: "o", label: "octo", cmd: "octo" },
+  { key: "c", label: "cricket", cmd: "cric" },
+  { key: "f", label: "football", cmd: "ball" },
+  { key: "d", label: "calendar", cmd: "cal" },
+  { key: "b", label: "birthdays", cmd: "bday" }
+];
+var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
+  STATUS_SHORTCUTS.map((shortcut) => [shortcut.key, shortcut])
+);
+
+// i.ts
+var COMMANDS = [
+  ...LAUNCHER_COMMANDS,
+  { value: 15, cmd: "status", name: "status", description: "Clock, date, sunrise/sunset" }
 ];
 function usage() {
   console.log("Usage:");
   console.log("  i");
   console.log("");
   console.log("Interactive picker for phone_cli scripts.");
-}
-function runSubcommand(command, args) {
-  const scriptPath = (0, import_node_path2.join)(__dirname, `${command}.js`);
-  const result = (0, import_node_child_process.spawnSync)(process.execPath, [scriptPath, ...args], { stdio: "inherit" });
-  process.exit(result.status ?? 1);
 }
 async function main() {
   const args = process.argv.slice(2);
@@ -2031,12 +2054,18 @@ async function main() {
     }))
   });
   const selectedCommand = COMMANDS.find((cmd) => cmd.value === command);
+  if (!selectedCommand) {
+    throw new Error("Unknown command selection.");
+  }
   const extraArgsRaw = selectedCommand.extraArgs ? selectedCommand.extraArgs : await dist_default4({
     message: "Extra arguments (optional)",
     default: ""
   });
   const extraArgs = extraArgsRaw.trim().length > 0 ? extraArgsRaw.trim().split(/\s+/) : [];
-  runSubcommand(selectedCommand.cmd, extraArgs);
+  process.exit(runLauncherCommand({
+    ...selectedCommand,
+    extraArgs: extraArgs.length > 0 ? extraArgs.join(" ") : selectedCommand.extraArgs
+  }));
 }
 void main().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);

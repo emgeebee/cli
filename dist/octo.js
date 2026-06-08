@@ -48,6 +48,7 @@ function readPhoneCliConfig() {
 var import_node_fs2 = require("node:fs");
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
+var CACHE_MAX_AGE_DAYS = 2;
 var UK_TZ = "Europe/London";
 var ANSI_RESET = "\x1B[0m";
 var ANSI_GREEN = "\x1B[32m";
@@ -288,6 +289,27 @@ function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
 function gasRatesForDay(rates, dayYmd) {
   return rates.filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
+function cacheEntryAgeDays(dayYmd, now) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return null;
+  const [tY, tM, tD] = dayKeyUK(now).split("-").map(Number);
+  const [y, m, d] = dayYmd.split("-").map(Number);
+  const todayUtc = Date.UTC(tY, tM - 1, tD);
+  const entryUtc = Date.UTC(y, m - 1, d);
+  if (Number.isNaN(entryUtc)) return null;
+  return Math.floor((todayUtc - entryUtc) / DAY_MS);
+}
+function pruneStaleDateKeyedCache(cache, now = /* @__PURE__ */ new Date()) {
+  let pruned = false;
+  const next = { ...cache };
+  for (const dayKey of Object.keys(next)) {
+    const ageDays = cacheEntryAgeDays(dayKey, now);
+    if (ageDays != null && ageDays > CACHE_MAX_AGE_DAYS) {
+      delete next[dayKey];
+      pruned = true;
+    }
+  }
+  return { cache: next, pruned };
+}
 function normalizeCachedDayPrices(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return [value];
@@ -296,7 +318,7 @@ function normalizeCachedDayPrices(value) {
   const prices = value.filter((entry) => typeof entry === "number" && Number.isFinite(entry));
   return prices.length > 0 ? prices : null;
 }
-function readGasPriceCache() {
+function readGasPriceCache(now = /* @__PURE__ */ new Date()) {
   const config = readPhoneCliConfig();
   const octo = config.octo || {};
   const raw = octo.gas;
@@ -310,7 +332,11 @@ function readGasPriceCache() {
       cache[dayKey] = prices;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveGasPriceCache(pruned);
+  }
+  return pruned;
 }
 function writeOctoConfigSection(section, value) {
   const configPath = getConfigPath();
@@ -335,7 +361,7 @@ function syntheticRatesFromPrices(prices) {
   return prices.map((value) => ({ value_inc_vat: value }));
 }
 async function ensureGasPricesCached(dayKeys, now) {
-  const cache = readGasPriceCache();
+  const cache = readGasPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
@@ -395,7 +421,7 @@ function normalizeCachedElectricityDay(value) {
   }
   return rates.length > 0 ? rates : null;
 }
-function readElectricityPriceCache() {
+function readElectricityPriceCache(now = /* @__PURE__ */ new Date()) {
   const config = readPhoneCliConfig();
   const octo = config.octo || {};
   const raw = octo.electricity;
@@ -409,7 +435,11 @@ function readElectricityPriceCache() {
       cache[dayKey] = rates;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveElectricityPriceCache(pruned);
+  }
+  return pruned;
 }
 function saveElectricityPriceCache(cache) {
   writeOctoConfigSection("electricity", cache);
@@ -441,7 +471,7 @@ async function fetchElectricityRates(from, to) {
   return fetchAllOctopusResults(url, token);
 }
 async function ensureElectricityPricesCached(dayKeys, now) {
-  const cache = readElectricityPriceCache();
+  const cache = readElectricityPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
@@ -608,13 +638,18 @@ function aggregateDailyConsumedKwh(consumption, unitToKwhFactor = 1) {
   return totals;
 }
 function formatPence(value) {
-  return `${value.toFixed(2)}p`;
+  return `${Math.round(value)}p`;
 }
 function formatKwh(value) {
   return `${value.toFixed(2)}kWh`;
 }
 function formatPoundsFromPence(valuePence) {
   return `\xA3${(valuePence / 100).toFixed(2)}`;
+}
+function formatAverageAndTotalCost(averagePence, totalPence) {
+  const average = Math.round(averagePence);
+  const totalPounds = Math.round(totalPence / 100);
+  return `${average}p (\xA3${totalPounds})`;
 }
 function rankedColorByDay(dayKeys, totals, fuel) {
   const rankableDays = dayKeys.slice(0, Math.max(0, dayKeys.length - 2));
@@ -669,7 +704,7 @@ function monthLabel(monthKey) {
   const d = startOfMonthUtc(monthKey);
   return d.toLocaleDateString("en-GB", {
     month: "short",
-    year: "numeric",
+    year: "2-digit",
     timeZone: "Europe/London"
   });
 }
@@ -833,7 +868,7 @@ function printPast14DaysHorizontal(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh,
   const headers = [
     "Date",
     "\u26A1 cost",
-    "Gas cost",
+    "Gas",
     "Total cost",
     "\u26A1 kWh",
     "Gas kWh"
@@ -855,11 +890,13 @@ function printAverageMonthlySummary(months, cache, now) {
   const rows = months.map((month) => {
     const item = cache[month];
     if (!item) return [monthLabel(month), "-", "-", "-", "-", "-"];
+    const totalAverage = item.eCost + item.gCost;
+    const totalCost = totalAverage * item.days;
     return [
       monthLabel(month),
       formatPence(item.eCost),
       formatPence(item.gCost),
-      formatPence(item.eCost + item.gCost),
+      formatAverageAndTotalCost(totalAverage, totalCost),
       formatKwh(item.eKwh),
       formatKwh(item.gKwh)
     ];
@@ -869,7 +906,7 @@ function printAverageMonthlySummary(months, cache, now) {
     `Average daily totals by calendar month (inc VAT + consumed kWh)`
   );
   for (const line of makeAsciiTable(
-    ["Month", "\u26A1 cost", "Gas cost", "Total cost", "\u26A1 kWh", "Gas kWh"],
+    ["Month", "\u26A1 cost", "Gas", "Total cost", "\u26A1 kWh", "Gas kWh"],
     rows
   )) {
     console.log(line);
@@ -898,11 +935,13 @@ function printFinalMonthTotals(cache, now) {
     }
     const eTotal = rec.eCost * rec.days;
     const gTotal = rec.gCost * rec.days;
+    const totalAverage = rec.eCost + rec.gCost;
+    const totalCost = eTotal + gTotal;
     return [
       item.label,
       formatPoundsFromPence(eTotal),
       formatPoundsFromPence(gTotal),
-      formatPoundsFromPence(eTotal + gTotal)
+      formatAverageAndTotalCost(totalAverage, totalCost)
     ];
   });
   console.log("");

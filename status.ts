@@ -3,14 +3,18 @@
 import { getConfigPath } from "./config";
 import {
   fetchBbcWeatherAggregated,
+  formatNextRainChanceLine,
   formatTodayWeatherLine,
   formatWeatherLine,
+  hourlyReportsFromWeather,
+  nextRainChance,
   resolveDefaultLocation,
   sunriseSunsetForDate,
   todayWeatherReport,
   ukTodayYmd,
   ukTomorrowYmd,
   weatherReportForDate,
+  type BbcWeatherHourlyReport,
   type BbcWeatherResponse,
 } from "./lib/bbcWeather";
 import { ukWallTimeToDate } from "./lib/solarApi";
@@ -40,8 +44,22 @@ import {
   type OctopusRate,
 } from "./lib/octoApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
+import { readBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib/bdayApi";
+import { formatMoneyLine } from "./lib/moneyApi";
+import {
+  runStatusShortcut,
+  statusShortcutFooter,
+  statusShortcutForKey,
+  type StatusShortcut,
+} from "./lib/commands";
 import { fetchWfhStatus, formatWfhLine } from "./lib/wfhApi";
 import { enterFullscreen, leaveFullscreen, writeFullscreenLines } from "./lib/terminal";
+import {
+  enableRawTerminalInput,
+  prepareStdinForChildProcess,
+  waitForKeypress,
+  type TerminalKey,
+} from "./lib/terminalInput";
 
 const UK_TZ = "Europe/London";
 const TICK_MS = 1000;
@@ -54,7 +72,8 @@ function usage(): void {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Piped output prints once.");
+  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, q to quit.");
+  console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
   console.log("Solar power now and hourly average refresh every 10 minutes.");
@@ -151,6 +170,7 @@ function formatDayWeatherLine(label: string, line: string): string {
 type WeatherSnapshot = {
   weatherLine: string;
   tomorrowWeatherLine: string;
+  hourlyReports: BbcWeatherHourlyReport[];
   sunrise: string;
   sunset: string;
 };
@@ -161,6 +181,7 @@ function weatherSnapshotFromData(weather: BbcWeatherResponse, todayYmd: string):
   return {
     weatherLine: formatTodayWeatherLine(todayWeatherReport(weather, todayYmd)),
     tomorrowWeatherLine: formatWeatherLine(weatherReportForDate(weather, tomorrowYmd)),
+    hourlyReports: hourlyReportsFromWeather(weather),
     sunrise: todaySun.sunrise,
     sunset: todaySun.sunset,
   };
@@ -176,38 +197,62 @@ type HouseOctoSnapshot = {
   electricityLines: string[];
 };
 
-function buildDisplayLines(
-  now: Date,
-  todayYmd: string,
-  weather: WeatherSnapshot,
-  houseOcto: HouseOctoSnapshot,
-  wfh: boolean | null,
-  downstairsTemp: number | null,
-  shedTemp: number | null,
-  solarYield: number | null,
-  powerNow: number | null,
-  powerHourAvg: number | null,
-): string[] {
+type StatusDisplayState = {
+  now: Date;
+  todayYmd: string;
+  weather: WeatherSnapshot;
+  houseOcto: HouseOctoSnapshot;
+  bdayConfig: BdayConfig | null;
+  wfh: boolean | null;
+  downstairsTemp: number | null;
+  shedTemp: number | null;
+  solarYield: number | null;
+  powerNow: number | null;
+  powerHourAvg: number | null;
+};
+
+function buildStatusLines(state: StatusDisplayState): string[] {
+  const now = state.now;
+  const todayYmd = state.todayYmd;
+  const weather = state.weather;
+
   return [
     sectionDivider("time"),
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
+    ...upcomingBdaySectionLines(state.bdayConfig, now, sectionDivider),
     sectionDivider("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
+    formatNextRainChanceLine(
+      "next rain >40%",
+      nextRainChance(weather.hourlyReports, 40, now),
+      todayYmd,
+      ukTomorrowYmd(now),
+    ),
+    formatNextRainChanceLine(
+      "next rain >70%",
+      nextRainChance(weather.hourlyReports, 70, now),
+      todayYmd,
+      ukTomorrowYmd(now),
+    ),
     formatSunLine("sunrise", weather.sunrise, now, todayYmd),
     formatSunLine("sunset", weather.sunset, now, todayYmd),
     sectionDivider("solar"),
-    formatSolarYieldLine(solarYield),
-    formatSolarNowLine(powerNow),
-    formatSolarHourAvgLine(powerHourAvg, now),
+    formatSolarYieldLine(state.solarYield),
+    formatSolarNowLine(state.powerNow),
+    formatSolarHourAvgLine(state.powerHourAvg, now),
     sectionDivider("house"),
-    formatWfhLine(wfh),
-    houseOcto.gas.todayLine,
-    houseOcto.gas.tomorrowLine,
-    ...houseOcto.electricityLines,
-    formatRoomTempLine("downstairs temp", downstairsTemp),
-    formatRoomTempLine("shed temp", shedTemp),
+    formatWfhLine(state.wfh),
+    formatMoneyLine(now),
+    formatRoomTempLine("downstairs temp", state.downstairsTemp),
+    formatRoomTempLine("shed temp", state.shedTemp),
+    sectionDivider("power"),
+    state.houseOcto.gas.todayLine,
+    state.houseOcto.gas.tomorrowLine,
+    ...state.houseOcto.electricityLines,
+    "",
+    statusShortcutFooter(),
   ];
 }
 
@@ -319,6 +364,7 @@ async function loadHouseOctoPrices(now: Date = new Date()): Promise<HouseOctoSna
 async function printOnce(): Promise<void> {
   const now = new Date();
   const dayKey = ukTodayYmd(now);
+  const bdayConfig = readBdayConfig();
   const [weather, solar, wfh, temps, houseOcto] = await Promise.all([
     fetchBbcWeatherAggregated(resolveDefaultLocation()),
     loadSolarSnapshot(dayKey, now),
@@ -328,25 +374,40 @@ async function printOnce(): Promise<void> {
   ]);
   const weatherSnapshot = weatherSnapshotFromData(weather, dayKey);
   writeDisplay(
-    buildDisplayLines(
+    buildStatusLines({
       now,
-      dayKey,
-      weatherSnapshot,
+      todayYmd: dayKey,
+      weather: weatherSnapshot,
       houseOcto,
+      bdayConfig,
       wfh,
-      temps.downstairsTemp,
-      temps.shedTemp,
-      solar.yield,
-      solar.powerNow,
-      solar.powerHourAvg,
-    ),
+      downstairsTemp: temps.downstairsTemp,
+      shedTemp: temps.shedTemp,
+      solarYield: solar.yield,
+      powerNow: solar.powerNow,
+      powerHourAvg: solar.powerHourAvg,
+    }),
     false,
   );
+}
+
+function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | null {
+  if (key.type === "ctrl-c") {
+    return "quit";
+  }
+  if (key.type !== "char") {
+    return null;
+  }
+  if (key.char === "q") {
+    return "quit";
+  }
+  return statusShortcutForKey(key.char);
 }
 
 async function runLive(): Promise<void> {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
+  let bdayConfig = readBdayConfig();
   let weather = await fetchBbcWeatherAggregated(location);
   let weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
   let wfh: boolean | null = null;
@@ -361,6 +422,64 @@ async function runLive(): Promise<void> {
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
   let lastGasRefreshAt = 0;
+  let runningCommand = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let disableRawInput: (() => void) | undefined;
+
+  const displayState = (): StatusDisplayState => ({
+    now: new Date(),
+    todayYmd: trackedDate,
+    weather: weatherSnapshot,
+    houseOcto,
+    bdayConfig,
+    wfh,
+    downstairsTemp,
+    shedTemp,
+    solarYield,
+    powerNow,
+    powerHourAvg,
+  });
+
+  const render = (): void => {
+    writeDisplay(buildStatusLines(displayState()), true);
+  };
+
+  const stop = (): void => {
+    if (timer) clearInterval(timer);
+    disableRawInput?.();
+    leaveFullscreen();
+    process.exit(0);
+  };
+
+  const runShortcut = async (shortcut: StatusShortcut): Promise<void> => {
+    runningCommand = true;
+    if (timer) clearInterval(timer);
+    disableRawInput?.();
+    leaveFullscreen();
+    prepareStdinForChildProcess();
+    runStatusShortcut(shortcut);
+    await waitForKeypress();
+    enterFullscreen();
+    disableRawInput = enableRawTerminalInput(onKeys);
+    runningCommand = false;
+    render();
+    timer = setInterval(tick, TICK_MS);
+  };
+
+  const onKeys = (keys: TerminalKey[]): void => {
+    if (runningCommand) return;
+    for (const key of keys) {
+      const action = handleStatusKey(key);
+      if (action === "quit") {
+        stop();
+        return;
+      }
+      if (action) {
+        void runShortcut(action);
+        return;
+      }
+    }
+  };
 
   [wfh, { downstairsTemp, shedTemp }, houseOcto] = await Promise.all([
     fetchWfhStatus(),
@@ -373,43 +492,18 @@ async function runLive(): Promise<void> {
 
   try {
     const data = await fetchSolarData();
-    const startedAt = Date.now();
-    const started = new Date(startedAt);
+    const solarStartedAt = Date.now();
+    const started = new Date(solarStartedAt);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
-    lastSolarYieldRefreshAt = startedAt;
-    lastPowerRefreshAt = startedAt;
+    lastSolarYieldRefreshAt = solarStartedAt;
+    lastPowerRefreshAt = solarStartedAt;
     lastPowerHourStart = ukHourStartMs(started);
   } catch {
     // Non-fatal: solar lines show "-" until a fetch succeeds.
   }
 
-  const stop = (): void => {
-    clearInterval(timer);
-    leaveFullscreen();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
-
-  enterFullscreen();
-  writeDisplay(
-    buildDisplayLines(
-      new Date(),
-      trackedDate,
-      weatherSnapshot,
-      houseOcto,
-      wfh,
-      downstairsTemp,
-      shedTemp,
-      solarYield,
-      powerNow,
-      powerHourAvg,
-    ),
-    true,
-  );
-
-  const timer = setInterval(() => {
+  const tick = (): void => {
+    if (runningCommand) return;
     void (async () => {
       const now = new Date();
       const nowMs = now.getTime();
@@ -424,6 +518,7 @@ async function runLive(): Promise<void> {
 
       if (dayChanged) {
         trackedDate = today;
+        bdayConfig = readBdayConfig();
         [weather, wfh] = await Promise.all([
           fetchBbcWeatherAggregated(location),
           fetchWfhStatus(),
@@ -463,29 +558,24 @@ async function runLive(): Promise<void> {
         lastGasRefreshAt = nowMs;
       }
 
-      writeDisplay(
-        buildDisplayLines(
-          now,
-          trackedDate,
-          weatherSnapshot,
-          houseOcto,
-          wfh,
-          downstairsTemp,
-          shedTemp,
-          solarYield,
-          powerNow,
-          powerHourAvg,
-        ),
-        true,
-      );
+      render();
     })().catch((error: unknown) => {
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
+      disableRawInput?.();
       leaveFullscreen();
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
       process.exit(1);
     });
-  }, TICK_MS);
+  };
+
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+
+  enterFullscreen();
+  disableRawInput = enableRawTerminalInput(onKeys);
+  render();
+  timer = setInterval(tick, TICK_MS);
 }
 
 async function main(): Promise<void> {

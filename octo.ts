@@ -233,7 +233,7 @@ function aggregateDailyConsumedKwh(
 }
 
 function formatPence(value: number): string {
-  return `${value.toFixed(2)}p`;
+  return `${Math.round(value)}p`;
 }
 
 function formatKwh(value: number): string {
@@ -242,6 +242,12 @@ function formatKwh(value: number): string {
 
 function formatPoundsFromPence(valuePence: number): string {
   return `£${(valuePence / 100).toFixed(2)}`;
+}
+
+function formatAverageAndTotalCost(averagePence: number, totalPence: number): string {
+  const average = Math.round(averagePence);
+  const totalPounds = Math.round(totalPence / 100);
+  return `${average}p (£${totalPounds})`;
 }
 
 function rankedColorByDay(
@@ -314,7 +320,7 @@ function monthLabel(monthKey: string): string {
   const d = startOfMonthUtc(monthKey);
   return d.toLocaleDateString("en-GB", {
     month: "short",
-    year: "numeric",
+    year: "2-digit",
     timeZone: "Europe/London",
   });
 }
@@ -526,7 +532,7 @@ function printPast14DaysHorizontal(
   const headers = [
     "Date",
     "⚡ cost",
-    "Gas cost",
+    "Gas",
     "Total cost",
     "⚡ kWh",
     "Gas kWh",
@@ -563,11 +569,13 @@ function printAverageMonthlySummary(
   const rows = months.map((month) => {
     const item = cache[month];
     if (!item) return [monthLabel(month), "-", "-", "-", "-", "-"];
+    const totalAverage = item.eCost + item.gCost;
+    const totalCost = totalAverage * item.days;
     return [
       monthLabel(month),
       formatPence(item.eCost),
       formatPence(item.gCost),
-      formatPence(item.eCost + item.gCost),
+      formatAverageAndTotalCost(totalAverage, totalCost),
       formatKwh(item.eKwh),
       formatKwh(item.gKwh),
     ];
@@ -578,7 +586,7 @@ function printAverageMonthlySummary(
     `Average daily totals by calendar month (inc VAT + consumed kWh)`,
   );
   for (const line of makeAsciiTable(
-    ["Month", "⚡ cost", "Gas cost", "Total cost", "⚡ kWh", "Gas kWh"],
+    ["Month", "⚡ cost", "Gas", "Total cost", "⚡ kWh", "Gas kWh"],
     rows,
   )) {
     console.log(line);
@@ -610,11 +618,13 @@ function printFinalMonthTotals(cache: MonthlyAverageCache, now: Date): void {
     }
     const eTotal = rec.eCost * rec.days;
     const gTotal = rec.gCost * rec.days;
+    const totalAverage = rec.eCost + rec.gCost;
+    const totalCost = eTotal + gTotal;
     return [
       item.label,
       formatPoundsFromPence(eTotal),
       formatPoundsFromPence(gTotal),
-      formatPoundsFromPence(eTotal + gTotal),
+      formatAverageAndTotalCost(totalAverage, totalCost),
     ];
   });
 

@@ -43,20 +43,14 @@ function readPhoneCliConfig() {
   }
 }
 
-// money.ts
-var DEFAULT_START_AMOUNT = 744;
+// lib/moneyApi.ts
+var DEFAULT_BUDGET = 744;
 var DAILY_DEDUCTION = 24;
-function usage() {
-  console.log("Usage:");
-  console.log("  money");
-  console.log("");
-  console.log(`Optional config: ${getConfigPath()} -> { "money": { "budget": 744 } }`);
-}
 function resolveBudget() {
   const config = readPhoneCliConfig();
   const moneyConfig = config.money || {};
   const raw = moneyConfig.budget;
-  if (raw == null || raw === "") return DEFAULT_START_AMOUNT;
+  if (raw == null || raw === "") return DEFAULT_BUDGET;
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`Invalid money.budget in ${getConfigPath()}. Expected a non-negative number.`);
@@ -67,6 +61,14 @@ function moneyForToday(startAmount, now = /* @__PURE__ */ new Date()) {
   const dayOfMonth = now.getDate();
   const remaining = startAmount - DAILY_DEDUCTION * dayOfMonth;
   return { dayOfMonth, remaining: Math.max(0, remaining) };
+}
+
+// money.ts
+function usage() {
+  console.log("Usage:");
+  console.log("  money");
+  console.log("");
+  console.log(`Optional config: ${getConfigPath()} -> { "money": { "budget": 744 } }`);
 }
 async function main() {
   try {

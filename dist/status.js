@@ -47,125 +47,6 @@ function readPhoneCliConfig() {
   }
 }
 
-// lib/temperatureColours.ts
-var ANSI_RESET = "\x1B[0m";
-var ANSI_BLUE = "\x1B[34m";
-var ANSI_GREEN = "\x1B[32m";
-var ANSI_YELLOW = "\x1B[33m";
-var ANSI_ORANGE = "\x1B[38;5;208m";
-var ANSI_RED = "\x1B[31m";
-function shouldUseColor() {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-function colorize(value, color) {
-  if (!shouldUseColor()) return value;
-  return `${color}${value}${ANSI_RESET}`;
-}
-function colourTemperatureText(text, value, _scale = "max") {
-  if (value < 5) return colorize(text, ANSI_BLUE);
-  if (value <= 10) return colorize(text, ANSI_GREEN);
-  if (value <= 16) return colorize(text, ANSI_YELLOW);
-  if (value <= 23) return colorize(text, ANSI_ORANGE);
-  return colorize(text, ANSI_RED);
-}
-function formatTemperatureText(value, options) {
-  if (value == null) return options?.unknownText ?? "?";
-  const fractionDigits = options?.fractionDigits ?? 0;
-  const text = `${value.toFixed(fractionDigits)}C`;
-  return colourTemperatureText(text, value, options?.scale ?? "max");
-}
-
-// lib/bbcWeather.ts
-var ANSI_RESET2 = "\x1B[0m";
-var ANSI_GREEN2 = "\x1B[32m";
-var ANSI_YELLOW2 = "\x1B[33m";
-var ANSI_ORANGE2 = "\x1B[38;5;208m";
-var ANSI_RED2 = "\x1B[31m";
-var BBC_WEATHER_AGGREGATED_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
-var DEFAULT_WEATHER_LOCATION = "cm2";
-var UK_TZ = "Europe/London";
-function sanitizeWeatherLocation(input) {
-  return String(input || "").trim().toLowerCase().replace(/\s+/g, "");
-}
-function resolveDefaultLocation() {
-  const config2 = readPhoneCliConfig();
-  const configured = String(config2.defaultLocation ?? "").trim();
-  if (configured) {
-    return sanitizeWeatherLocation(configured);
-  }
-  return DEFAULT_WEATHER_LOCATION;
-}
-function ukTodayYmd(now = /* @__PURE__ */ new Date()) {
-  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ });
-}
-function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
-  const [year, month, day] = ukTodayYmd(now).split("-").map(Number);
-  const date5 = new Date(Date.UTC(year, month - 1, day + 1));
-  return date5.toISOString().slice(0, 10);
-}
-async function fetchBbcWeatherAggregated(location) {
-  const postcode = sanitizeWeatherLocation(location);
-  const url2 = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
-  const response = await fetch(url2, {
-    method: "GET",
-    headers: {
-      Accept: "*/*",
-      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-      Priority: "u=1, i",
-      Referer: "https://www.bbc.co.uk/"
-    }
-  });
-  if (!response.ok) {
-    throw new Error(`Weather API request failed (${response.status})`);
-  }
-  return await response.json();
-}
-function dailyReportsFromWeather(data) {
-  return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
-}
-function weatherReportForDate(data, dayYmd) {
-  const reports = dailyReportsFromWeather(data);
-  return reports.find((report) => report.localDate === dayYmd) || null;
-}
-function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
-  return weatherReportForDate(data, todayYmd) || dailyReportsFromWeather(data)[0] || null;
-}
-function sunriseSunsetForDate(data, dayYmd) {
-  const report = weatherReportForDate(data, dayYmd);
-  return {
-    sunrise: report?.sunrise || "-",
-    sunset: report?.sunset || "-"
-  };
-}
-function shouldUseColor2() {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-function colorize2(text, color) {
-  if (!shouldUseColor2()) return text;
-  return `${color}${text}${ANSI_RESET2}`;
-}
-function formatRainPercent(value) {
-  if (value == null) return "?%";
-  const text = `${value}%`;
-  if (value > 80) return colorize2(text, ANSI_RED2);
-  if (value >= 50) return colorize2(text, ANSI_ORANGE2);
-  if (value >= 25) return colorize2(text, ANSI_YELLOW2);
-  return colorize2(text, ANSI_GREEN2);
-}
-function formatWeatherLine(report) {
-  if (!report) return "-";
-  const summary = (report.weatherTypeText || report.enhancedWeatherDescription || "Unknown").trim() || "Unknown";
-  const max = formatTemperatureText(report.maxTempC, { scale: "max" });
-  const min = formatTemperatureText(report.minTempC, { scale: "min" });
-  const rain = formatRainPercent(report.precipitationProbabilityInPercent);
-  return `${summary}, max ${max}, min ${min}, rain ${rain}`;
-}
-function formatTodayWeatherLine(report) {
-  return formatWeatherLine(report);
-}
-
 // node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -14682,11 +14563,11 @@ config(en_default());
 
 // lib/solarApi.ts
 var SOLAR_API_URL = "http://api.emgeebee.buzz:1880/api/solar";
-var ANSI_RESET3 = "\x1B[0m";
-var ANSI_GREEN3 = "\x1B[32m";
-var ANSI_YELLOW3 = "\x1B[33m";
-var ANSI_ORANGE3 = "\x1B[38;5;208m";
-var ANSI_RED3 = "\x1B[31m";
+var ANSI_RESET = "\x1B[0m";
+var ANSI_GREEN = "\x1B[32m";
+var ANSI_YELLOW = "\x1B[33m";
+var ANSI_ORANGE = "\x1B[38;5;208m";
+var ANSI_RED = "\x1B[31m";
 var numericField = external_exports.preprocess((value) => {
   if (typeof value === "string") {
     const parsed = Number(value);
@@ -14716,44 +14597,44 @@ function todayYieldKwh(data, dayKey) {
   const value = data.yield[dayKey];
   return value != null && Number.isFinite(value) ? value : null;
 }
-function shouldUseColor3() {
+function shouldUseColor() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize3(text, color) {
-  if (!shouldUseColor3()) return text;
-  return `${color}${text}${ANSI_RESET3}`;
+function colorize(text, color) {
+  if (!shouldUseColor()) return text;
+  return `${color}${text}${ANSI_RESET}`;
 }
 function colorForYield(kwh) {
-  if (kwh > 4) return ANSI_GREEN3;
-  if (kwh > 2.5) return ANSI_YELLOW3;
-  if (kwh > 1.5) return ANSI_ORANGE3;
-  return ANSI_RED3;
+  if (kwh > 4) return ANSI_GREEN;
+  if (kwh > 2.5) return ANSI_YELLOW;
+  if (kwh > 1.5) return ANSI_ORANGE;
+  return ANSI_RED;
 }
 function formatKwh(value) {
   return `${value.toFixed(1)} kWh`;
 }
 function formatColoredKwh(value) {
-  return colorize3(formatKwh(value), colorForYield(value));
+  return colorize(formatKwh(value), colorForYield(value));
 }
-var UK_TZ2 = "Europe/London";
+var UK_TZ = "Europe/London";
 function colorForPower(watts) {
-  if (watts > 400) return ANSI_GREEN3;
-  if (watts > 200) return ANSI_YELLOW3;
-  if (watts > 100) return ANSI_ORANGE3;
-  return ANSI_RED3;
+  if (watts > 400) return ANSI_GREEN;
+  if (watts > 200) return ANSI_YELLOW;
+  if (watts > 100) return ANSI_ORANGE;
+  return ANSI_RED;
 }
 function formatWattsPrecise(value) {
   if (value >= 1e3) return `${(value / 1e3).toFixed(1)}kW`;
   return `${value.toFixed(1)}W`;
 }
 function formatColoredWattsPrecise(value) {
-  return colorize3(formatWattsPrecise(value), colorForPower(value));
+  return colorize(formatWattsPrecise(value), colorForPower(value));
 }
 function ukWallTimeToDate(year, month, day, hour, minute) {
   let ts = Date.UTC(year, month - 1, day, hour, minute);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: UK_TZ2,
+      timeZone: UK_TZ,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -14794,7 +14675,7 @@ function powerNowWatts(data) {
 }
 function ukHourStartMs(date5) {
   const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: UK_TZ2,
+    timeZone: UK_TZ,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -14812,7 +14693,7 @@ function formatUkHourLabel(ms) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: UK_TZ2
+    timeZone: UK_TZ
   });
 }
 function currentHourPowerAvgWatts(data, now = /* @__PURE__ */ new Date()) {
@@ -14824,6 +14705,180 @@ function currentHourPowerAvgWatts(data, now = /* @__PURE__ */ new Date()) {
     }
   }
   return null;
+}
+
+// lib/temperatureColours.ts
+var ANSI_RESET2 = "\x1B[0m";
+var ANSI_BLUE = "\x1B[34m";
+var ANSI_GREEN2 = "\x1B[32m";
+var ANSI_YELLOW2 = "\x1B[33m";
+var ANSI_ORANGE2 = "\x1B[38;5;208m";
+var ANSI_RED2 = "\x1B[31m";
+function shouldUseColor2() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize2(value, color) {
+  if (!shouldUseColor2()) return value;
+  return `${color}${value}${ANSI_RESET2}`;
+}
+function colourTemperatureText(text, value, _scale = "max") {
+  if (value < 5) return colorize2(text, ANSI_BLUE);
+  if (value <= 10) return colorize2(text, ANSI_GREEN2);
+  if (value <= 16) return colorize2(text, ANSI_YELLOW2);
+  if (value <= 23) return colorize2(text, ANSI_ORANGE2);
+  return colorize2(text, ANSI_RED2);
+}
+function formatTemperatureText(value, options) {
+  if (value == null) return options?.unknownText ?? "?";
+  const fractionDigits = options?.fractionDigits ?? 0;
+  const text = `${value.toFixed(fractionDigits)}C`;
+  return colourTemperatureText(text, value, options?.scale ?? "max");
+}
+
+// lib/bbcWeather.ts
+var ANSI_RESET3 = "\x1B[0m";
+var ANSI_GREEN3 = "\x1B[32m";
+var ANSI_YELLOW3 = "\x1B[33m";
+var ANSI_ORANGE3 = "\x1B[38;5;208m";
+var ANSI_RED3 = "\x1B[31m";
+var BBC_WEATHER_AGGREGATED_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
+var DEFAULT_WEATHER_LOCATION = "cm2";
+var UK_TZ2 = "Europe/London";
+function sanitizeWeatherLocation(input) {
+  return String(input || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+function resolveDefaultLocation() {
+  const config2 = readPhoneCliConfig();
+  const configured = String(config2.defaultLocation ?? "").trim();
+  if (configured) {
+    return sanitizeWeatherLocation(configured);
+  }
+  return DEFAULT_WEATHER_LOCATION;
+}
+function ukTodayYmd(now = /* @__PURE__ */ new Date()) {
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ2 });
+}
+function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
+  const [year, month, day] = ukTodayYmd(now).split("-").map(Number);
+  const date5 = new Date(Date.UTC(year, month - 1, day + 1));
+  return date5.toISOString().slice(0, 10);
+}
+async function fetchBbcWeatherAggregated(location) {
+  const postcode = sanitizeWeatherLocation(location);
+  const url2 = `${BBC_WEATHER_AGGREGATED_BASE_URL}/${encodeURIComponent(postcode)}`;
+  const response = await fetch(url2, {
+    method: "GET",
+    headers: {
+      Accept: "*/*",
+      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Priority: "u=1, i",
+      Referer: "https://www.bbc.co.uk/"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Weather API request failed (${response.status})`);
+  }
+  return await response.json();
+}
+function parseTimeslotMinutes(timeslot) {
+  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
+  if (!match) return null;
+  const hours = Number.parseInt(match[1], 10);
+  const minutes = Number.parseInt(match[2], 10);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+function hourlySlotStart(localDate, timeslot) {
+  const slotMinutes = parseTimeslotMinutes(timeslot);
+  if (slotMinutes == null) return null;
+  const [year, month, day] = localDate.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const hours = Math.floor(slotMinutes / 60);
+  const minutes = slotMinutes % 60;
+  return ukWallTimeToDate(year, month, day, hours, minutes);
+}
+function hourlyReportsFromWeather(data) {
+  return (data.forecasts || []).flatMap((forecast) => forecast.detailed?.reports || []).filter(
+    (report) => Boolean(report?.localDate && report?.timeslot)
+  );
+}
+function nextRainChance(reports, thresholdPercent, now = /* @__PURE__ */ new Date()) {
+  const nowMs = now.getTime();
+  let best = null;
+  for (const report of reports) {
+    const percent = report.precipitationProbabilityInPercent;
+    if (percent == null || percent <= thresholdPercent) continue;
+    const localDate = report.localDate;
+    const timeslot = report.timeslot;
+    if (!localDate || !timeslot) continue;
+    const slotStart = hourlySlotStart(localDate, timeslot);
+    if (!slotStart) continue;
+    const slotStartMs = slotStart.getTime();
+    if (slotStartMs <= nowMs) continue;
+    if (!best || slotStartMs < best.slotStartMs) {
+      best = { localDate, timeslot, percent, slotStartMs };
+    }
+  }
+  if (!best) return null;
+  return { localDate: best.localDate, timeslot: best.timeslot, percent: best.percent };
+}
+function formatRainChanceDayLabel(localDate, todayYmd, tomorrowYmd) {
+  if (localDate === todayYmd) return "today";
+  if (localDate === tomorrowYmd) return "tomorrow";
+  const date5 = /* @__PURE__ */ new Date(`${localDate}T12:00:00Z`);
+  if (Number.isNaN(date5.getTime())) return localDate;
+  return date5.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ2 });
+}
+function formatNextRainChanceLine(label, chance, todayYmd, tomorrowYmd) {
+  if (!chance) return `${label}: -`;
+  const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
+  const rain = formatRainPercent(chance.percent);
+  return `${label}: ${dayLabel} ${chance.timeslot} (${rain})`;
+}
+function dailyReportsFromWeather(data) {
+  return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
+}
+function weatherReportForDate(data, dayYmd) {
+  const reports = dailyReportsFromWeather(data);
+  return reports.find((report) => report.localDate === dayYmd) || null;
+}
+function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
+  return weatherReportForDate(data, todayYmd) || dailyReportsFromWeather(data)[0] || null;
+}
+function sunriseSunsetForDate(data, dayYmd) {
+  const report = weatherReportForDate(data, dayYmd);
+  return {
+    sunrise: report?.sunrise || "-",
+    sunset: report?.sunset || "-"
+  };
+}
+function shouldUseColor3() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize3(text, color) {
+  if (!shouldUseColor3()) return text;
+  return `${color}${text}${ANSI_RESET3}`;
+}
+function formatRainPercent(value) {
+  if (value == null) return "?%";
+  const text = `${value}%`;
+  if (value > 80) return colorize3(text, ANSI_RED3);
+  if (value >= 50) return colorize3(text, ANSI_ORANGE3);
+  if (value >= 25) return colorize3(text, ANSI_YELLOW3);
+  return colorize3(text, ANSI_GREEN3);
+}
+function formatWeatherLine(report) {
+  if (!report) return "-";
+  const summary = (report.weatherTypeText || report.enhancedWeatherDescription || "Unknown").trim() || "Unknown";
+  const max = formatTemperatureText(report.maxTempC, { scale: "max" });
+  const min = formatTemperatureText(report.minTempC, { scale: "min" });
+  const rain = formatRainPercent(report.precipitationProbabilityInPercent);
+  return `${summary}, max ${max}, min ${min}, rain ${rain}`;
+}
+function formatTodayWeatherLine(report) {
+  return formatWeatherLine(report);
 }
 
 // lib/tempApi.ts
@@ -14881,6 +14936,7 @@ var ELECTRICITY_PERIODS = [
 ];
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
+var CACHE_MAX_AGE_DAYS = 2;
 var UK_TZ3 = "Europe/London";
 var ANSI_RESET4 = "\x1B[0m";
 var ANSI_GREEN4 = "\x1B[32m";
@@ -15073,6 +15129,27 @@ function ukTomorrowYmd2(now = /* @__PURE__ */ new Date()) {
 function gasRatesForDay(rates, dayYmd) {
   return rates.filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
+function cacheEntryAgeDays(dayYmd, now) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return null;
+  const [tY, tM, tD] = dayKeyUK(now).split("-").map(Number);
+  const [y, m, d] = dayYmd.split("-").map(Number);
+  const todayUtc = Date.UTC(tY, tM - 1, tD);
+  const entryUtc = Date.UTC(y, m - 1, d);
+  if (Number.isNaN(entryUtc)) return null;
+  return Math.floor((todayUtc - entryUtc) / DAY_MS);
+}
+function pruneStaleDateKeyedCache(cache, now = /* @__PURE__ */ new Date()) {
+  let pruned = false;
+  const next = { ...cache };
+  for (const dayKey of Object.keys(next)) {
+    const ageDays = cacheEntryAgeDays(dayKey, now);
+    if (ageDays != null && ageDays > CACHE_MAX_AGE_DAYS) {
+      delete next[dayKey];
+      pruned = true;
+    }
+  }
+  return { cache: next, pruned };
+}
 function normalizeCachedDayPrices(value) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return [value];
@@ -15081,7 +15158,7 @@ function normalizeCachedDayPrices(value) {
   const prices = value.filter((entry) => typeof entry === "number" && Number.isFinite(entry));
   return prices.length > 0 ? prices : null;
 }
-function readGasPriceCache() {
+function readGasPriceCache(now = /* @__PURE__ */ new Date()) {
   const config2 = readPhoneCliConfig();
   const octo = config2.octo || {};
   const raw = octo.gas;
@@ -15095,7 +15172,11 @@ function readGasPriceCache() {
       cache[dayKey] = prices;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveGasPriceCache(pruned);
+  }
+  return pruned;
 }
 function writeOctoConfigSection(section, value) {
   const configPath = getConfigPath();
@@ -15120,7 +15201,7 @@ function syntheticRatesFromPrices(prices) {
   return prices.map((value) => ({ value_inc_vat: value }));
 }
 async function ensureGasPricesCached(dayKeys, now) {
-  const cache = readGasPriceCache();
+  const cache = readGasPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
@@ -15188,7 +15269,7 @@ function normalizeCachedElectricityDay(value) {
   }
   return rates.length > 0 ? rates : null;
 }
-function readElectricityPriceCache() {
+function readElectricityPriceCache(now = /* @__PURE__ */ new Date()) {
   const config2 = readPhoneCliConfig();
   const octo = config2.octo || {};
   const raw = octo.electricity;
@@ -15202,7 +15283,11 @@ function readElectricityPriceCache() {
       cache[dayKey] = rates;
     }
   }
-  return cache;
+  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  if (didPrune) {
+    saveElectricityPriceCache(pruned);
+  }
+  return pruned;
 }
 function saveElectricityPriceCache(cache) {
   writeOctoConfigSection("electricity", cache);
@@ -15234,7 +15319,7 @@ async function fetchElectricityRates(from, to) {
   return fetchAllOctopusResults(url2, token);
 }
 async function ensureElectricityPricesCached(dayKeys, now) {
-  const cache = readElectricityPriceCache();
+  const cache = readElectricityPriceCache(now);
   const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
@@ -15312,6 +15397,162 @@ function formatElectricityPeriodAvgLines(rates, dayLabel) {
   );
 }
 
+// lib/bdayApi.ts
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var UK_TZ4 = "Europe/London";
+function readBdayConfig() {
+  const config2 = readPhoneCliConfig();
+  const bday = config2.bday;
+  if (!bday || typeof bday !== "object" || Array.isArray(bday)) {
+    return null;
+  }
+  return bday;
+}
+function ukTodayYmd2(now = /* @__PURE__ */ new Date()) {
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ4 });
+}
+function isLeapYear(year) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+function birthdayYmdInYear(month, day, year) {
+  if (month === 2 && day === 29 && !isLeapYear(year)) {
+    return `${year}-02-28`;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function ymdToUtcMs(ymd) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+function nextBirthdayYmd(bdYmd, now = /* @__PURE__ */ new Date()) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bdYmd)) return null;
+  const [, month, day] = bdYmd.split("-").map(Number);
+  const todayYmd = ukTodayYmd2(now);
+  const year = Number(todayYmd.slice(0, 4));
+  let candidate = birthdayYmdInYear(month, day, year);
+  if (candidate < todayYmd) {
+    candidate = birthdayYmdInYear(month, day, year + 1);
+  }
+  return candidate;
+}
+function nextUpcomingBirthdays(config2, now = /* @__PURE__ */ new Date(), limit = 3) {
+  if (!config2) return [];
+  const todayYmd = ukTodayYmd2(now);
+  const upcoming = [];
+  for (const [name, person] of Object.entries(config2)) {
+    const bdYmd = String(person?.bd || "").trim();
+    if (!bdYmd) continue;
+    const nextYmd = nextBirthdayYmd(bdYmd, now);
+    if (!nextYmd) continue;
+    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS2);
+    const birthYear = Number(bdYmd.slice(0, 4));
+    const nextYear = Number(nextYmd.slice(0, 4));
+    upcoming.push({
+      name,
+      bdYmd,
+      nextYmd,
+      daysUntil,
+      age: nextYear - birthYear
+    });
+  }
+  return upcoming.sort((a, b) => a.daysUntil - b.daysUntil || a.name.localeCompare(b.name)).slice(0, limit);
+}
+function formatBdayDate(ymd) {
+  const date5 = /* @__PURE__ */ new Date(`${ymd}T12:00:00Z`);
+  return date5.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: UK_TZ4
+  });
+}
+function formatDaysUntil(daysUntil) {
+  if (daysUntil === 0) return "today";
+  if (daysUntil === 1) return "in 1 day";
+  return `in ${daysUntil} days`;
+}
+function formatUpcomingBdayLine(entry) {
+  if (entry.daysUntil === 0) {
+    return `${entry.name}: today (turns ${entry.age})`;
+  }
+  return `${entry.name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
+}
+function upcomingBdaySectionLines(config2, now, sectionDivider2, limit = 3) {
+  const lines = nextUpcomingBirthdays(config2, now, limit).map(formatUpcomingBdayLine);
+  if (lines.length === 0) return [];
+  return [sectionDivider2("bday"), ...lines];
+}
+
+// lib/moneyApi.ts
+var DEFAULT_BUDGET = 744;
+var DAILY_DEDUCTION = 24;
+function resolveBudget() {
+  const config2 = readPhoneCliConfig();
+  const moneyConfig = config2.money || {};
+  const raw = moneyConfig.budget;
+  if (raw == null || raw === "") return DEFAULT_BUDGET;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`Invalid money.budget in ${getConfigPath()}. Expected a non-negative number.`);
+  }
+  return value;
+}
+function moneyForToday(startAmount, now = /* @__PURE__ */ new Date()) {
+  const dayOfMonth = now.getDate();
+  const remaining = startAmount - DAILY_DEDUCTION * dayOfMonth;
+  return { dayOfMonth, remaining: Math.max(0, remaining) };
+}
+function formatMoneyLine(now = /* @__PURE__ */ new Date()) {
+  try {
+    const { dayOfMonth, remaining } = moneyForToday(resolveBudget(), now);
+    return `money: Day ${dayOfMonth}: ${remaining}`;
+  } catch {
+    return "money: -";
+  }
+}
+
+// lib/commands.ts
+var import_node_child_process = require("node:child_process");
+var import_node_path2 = require("node:path");
+function launcherArgs(command) {
+  const raw = command.extraArgs?.trim();
+  return raw ? raw.split(/\s+/) : [];
+}
+function runLauncherCommand(command) {
+  const scriptPath = (0, import_node_path2.join)(__dirname, `${command.cmd}.js`);
+  const result = (0, import_node_child_process.spawnSync)(process.execPath, [scriptPath, ...launcherArgs(command)], {
+    stdio: "inherit"
+  });
+  return result.status ?? 1;
+}
+var STATUS_SHORTCUTS = [
+  { key: "s", label: "solar", cmd: "solar" },
+  { key: "w", label: "weather", cmd: "w" },
+  { key: "o", label: "octo", cmd: "octo" },
+  { key: "c", label: "cricket", cmd: "cric" },
+  { key: "f", label: "football", cmd: "ball" },
+  { key: "d", label: "calendar", cmd: "cal" },
+  { key: "b", label: "birthdays", cmd: "bday" }
+];
+var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
+  STATUS_SHORTCUTS.map((shortcut) => [shortcut.key, shortcut])
+);
+function statusShortcutForKey(key) {
+  return STATUS_SHORTCUT_BY_KEY[key] ?? null;
+}
+function statusShortcutFooter() {
+  const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
+  return `${shortcuts}  q:quit`;
+}
+function runStatusShortcut(shortcut) {
+  return runLauncherCommand({
+    value: 0,
+    cmd: shortcut.cmd,
+    name: shortcut.label,
+    description: shortcut.label,
+    extraArgs: shortcut.extraArgs
+  });
+}
+
 // lib/wfhApi.ts
 var WFH_API_URL = "http://emgeebee.buzz:1880/api/wfh";
 var WfhResponseSchema = external_exports.object({
@@ -15366,8 +15607,93 @@ function writeFullscreenLines(lines) {
   process.stdout.write(ANSI_ERASE_TO_END);
 }
 
+// lib/terminalInput.ts
+function parseTerminalInputChunk(data, buffer) {
+  let pending = buffer + data;
+  const keys = [];
+  while (pending.length > 0) {
+    if (pending[0] === "") {
+      keys.push({ type: "ctrl-c" });
+      pending = pending.slice(1);
+      continue;
+    }
+    if (pending[0] === "\r" || pending[0] === "\n") {
+      keys.push({ type: "enter" });
+      pending = pending.slice(1);
+      continue;
+    }
+    if (pending[0] === "\x1B") {
+      if (pending.startsWith("\x1B[A") || pending.startsWith("\x1BOA")) {
+        keys.push({ type: "up" });
+        pending = pending.slice(pending.startsWith("\x1B[A") ? 3 : 4);
+        continue;
+      }
+      if (pending.startsWith("\x1B[B") || pending.startsWith("\x1BOB")) {
+        keys.push({ type: "down" });
+        pending = pending.slice(pending.startsWith("\x1B[B") ? 3 : 4);
+        continue;
+      }
+      if (pending.length < 3) {
+        break;
+      }
+      keys.push({ type: "escape" });
+      pending = pending.slice(1);
+      continue;
+    }
+    keys.push({ type: "char", char: pending[0] });
+    pending = pending.slice(1);
+  }
+  return { keys, buffer: pending };
+}
+function enableRawTerminalInput(onKeys) {
+  if (!process.stdin.isTTY) {
+    return () => {
+    };
+  }
+  const stdin = process.stdin;
+  let buffer = "";
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf8");
+  const handler = (data) => {
+    const parsed = parseTerminalInputChunk(data, buffer);
+    buffer = parsed.buffer;
+    if (parsed.keys.length > 0) {
+      onKeys(parsed.keys);
+    }
+  };
+  stdin.on("data", handler);
+  return () => {
+    stdin.removeListener("data", handler);
+    stdin.setRawMode(false);
+    stdin.resume();
+  };
+}
+function prepareStdinForChildProcess() {
+  if (!process.stdin.isTTY) return;
+  process.stdin.setRawMode(false);
+  process.stdin.resume();
+}
+function waitForKeypress(prompt = "Press any key to return to status...") {
+  return new Promise((resolve) => {
+    if (!process.stdin.isTTY) {
+      resolve();
+      return;
+    }
+    prepareStdinForChildProcess();
+    process.stdout.write(`
+${prompt}`);
+    const onData = () => {
+      process.stdin.removeListener("data", onData);
+      process.stdout.write("\n");
+      resolve();
+    };
+    process.stdin.once("data", onData);
+  });
+}
+
 // status.ts
-var UK_TZ4 = "Europe/London";
+var UK_TZ5 = "Europe/London";
 var TICK_MS = 1e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
 var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
@@ -15377,7 +15703,8 @@ function usage() {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Piped output prints once.");
+  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, q to quit.");
+  console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
   console.log("Solar power now and hourly average refresh every 10 minutes.");
@@ -15390,7 +15717,7 @@ function formatTime(now) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: UK_TZ4
+    timeZone: UK_TZ5
   });
 }
 function formatDate(now) {
@@ -15399,7 +15726,7 @@ function formatDate(now) {
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: UK_TZ4
+    timeZone: UK_TZ5
   });
 }
 function parseClockMinutes(value) {
@@ -15462,31 +15789,52 @@ function weatherSnapshotFromData(weather, todayYmd) {
   return {
     weatherLine: formatTodayWeatherLine(todayWeatherReport(weather, todayYmd)),
     tomorrowWeatherLine: formatWeatherLine(weatherReportForDate(weather, tomorrowYmd)),
+    hourlyReports: hourlyReportsFromWeather(weather),
     sunrise: todaySun.sunrise,
     sunset: todaySun.sunset
   };
 }
-function buildDisplayLines(now, todayYmd, weather, houseOcto, wfh, downstairsTemp, shedTemp, solarYield, powerNow, powerHourAvg) {
+function buildStatusLines(state) {
+  const now = state.now;
+  const todayYmd = state.todayYmd;
+  const weather = state.weather;
   return [
     sectionDivider("time"),
     `time: ${formatTime(now)}`,
     `date: ${formatDate(now)}`,
+    ...upcomingBdaySectionLines(state.bdayConfig, now, sectionDivider),
     sectionDivider("weather"),
     formatDayWeatherLine("today", weather.weatherLine),
     formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
+    formatNextRainChanceLine(
+      "next rain >40%",
+      nextRainChance(weather.hourlyReports, 40, now),
+      todayYmd,
+      ukTomorrowYmd(now)
+    ),
+    formatNextRainChanceLine(
+      "next rain >70%",
+      nextRainChance(weather.hourlyReports, 70, now),
+      todayYmd,
+      ukTomorrowYmd(now)
+    ),
     formatSunLine("sunrise", weather.sunrise, now, todayYmd),
     formatSunLine("sunset", weather.sunset, now, todayYmd),
     sectionDivider("solar"),
-    formatSolarYieldLine(solarYield),
-    formatSolarNowLine(powerNow),
-    formatSolarHourAvgLine(powerHourAvg, now),
+    formatSolarYieldLine(state.solarYield),
+    formatSolarNowLine(state.powerNow),
+    formatSolarHourAvgLine(state.powerHourAvg, now),
     sectionDivider("house"),
-    formatWfhLine(wfh),
-    houseOcto.gas.todayLine,
-    houseOcto.gas.tomorrowLine,
-    ...houseOcto.electricityLines,
-    formatRoomTempLine("downstairs temp", downstairsTemp),
-    formatRoomTempLine("shed temp", shedTemp)
+    formatWfhLine(state.wfh),
+    formatMoneyLine(now),
+    formatRoomTempLine("downstairs temp", state.downstairsTemp),
+    formatRoomTempLine("shed temp", state.shedTemp),
+    sectionDivider("power"),
+    state.houseOcto.gas.todayLine,
+    state.houseOcto.gas.tomorrowLine,
+    ...state.houseOcto.electricityLines,
+    "",
+    statusShortcutFooter()
   ];
 }
 function solarSnapshotFromData(data, dayKey, now) {
@@ -15570,6 +15918,7 @@ async function loadHouseOctoPrices(now = /* @__PURE__ */ new Date()) {
 async function printOnce() {
   const now = /* @__PURE__ */ new Date();
   const dayKey = ukTodayYmd(now);
+  const bdayConfig = readBdayConfig();
   const [weather, solar, wfh, temps, houseOcto] = await Promise.all([
     fetchBbcWeatherAggregated(resolveDefaultLocation()),
     loadSolarSnapshot(dayKey, now),
@@ -15579,24 +15928,38 @@ async function printOnce() {
   ]);
   const weatherSnapshot = weatherSnapshotFromData(weather, dayKey);
   writeDisplay(
-    buildDisplayLines(
+    buildStatusLines({
       now,
-      dayKey,
-      weatherSnapshot,
+      todayYmd: dayKey,
+      weather: weatherSnapshot,
       houseOcto,
+      bdayConfig,
       wfh,
-      temps.downstairsTemp,
-      temps.shedTemp,
-      solar.yield,
-      solar.powerNow,
-      solar.powerHourAvg
-    ),
+      downstairsTemp: temps.downstairsTemp,
+      shedTemp: temps.shedTemp,
+      solarYield: solar.yield,
+      powerNow: solar.powerNow,
+      powerHourAvg: solar.powerHourAvg
+    }),
     false
   );
+}
+function handleStatusKey(key) {
+  if (key.type === "ctrl-c") {
+    return "quit";
+  }
+  if (key.type !== "char") {
+    return null;
+  }
+  if (key.char === "q") {
+    return "quit";
+  }
+  return statusShortcutForKey(key.char);
 }
 async function runLive() {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
+  let bdayConfig = readBdayConfig();
   let weather = await fetchBbcWeatherAggregated(location);
   let weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
   let wfh = null;
@@ -15611,6 +15974,59 @@ async function runLive() {
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
   let lastGasRefreshAt = 0;
+  let runningCommand = false;
+  let timer;
+  let disableRawInput;
+  const displayState = () => ({
+    now: /* @__PURE__ */ new Date(),
+    todayYmd: trackedDate,
+    weather: weatherSnapshot,
+    houseOcto,
+    bdayConfig,
+    wfh,
+    downstairsTemp,
+    shedTemp,
+    solarYield,
+    powerNow,
+    powerHourAvg
+  });
+  const render = () => {
+    writeDisplay(buildStatusLines(displayState()), true);
+  };
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    disableRawInput?.();
+    leaveFullscreen();
+    process.exit(0);
+  };
+  const runShortcut = async (shortcut) => {
+    runningCommand = true;
+    if (timer) clearInterval(timer);
+    disableRawInput?.();
+    leaveFullscreen();
+    prepareStdinForChildProcess();
+    runStatusShortcut(shortcut);
+    await waitForKeypress();
+    enterFullscreen();
+    disableRawInput = enableRawTerminalInput(onKeys);
+    runningCommand = false;
+    render();
+    timer = setInterval(tick, TICK_MS);
+  };
+  const onKeys = (keys) => {
+    if (runningCommand) return;
+    for (const key of keys) {
+      const action = handleStatusKey(key);
+      if (action === "quit") {
+        stop();
+        return;
+      }
+      if (action) {
+        void runShortcut(action);
+        return;
+      }
+    }
+  };
   [wfh, { downstairsTemp, shedTemp }, houseOcto] = await Promise.all([
     fetchWfhStatus(),
     loadTemps(),
@@ -15621,38 +16037,16 @@ async function runLive() {
   lastGasRefreshAt = startedAt;
   try {
     const data = await fetchSolarData();
-    const startedAt2 = Date.now();
-    const started = new Date(startedAt2);
+    const solarStartedAt = Date.now();
+    const started = new Date(solarStartedAt);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
-    lastSolarYieldRefreshAt = startedAt2;
-    lastPowerRefreshAt = startedAt2;
+    lastSolarYieldRefreshAt = solarStartedAt;
+    lastPowerRefreshAt = solarStartedAt;
     lastPowerHourStart = ukHourStartMs(started);
   } catch {
   }
-  const stop = () => {
-    clearInterval(timer);
-    leaveFullscreen();
-    process.exit(0);
-  };
-  process.on("SIGINT", stop);
-  process.on("SIGTERM", stop);
-  enterFullscreen();
-  writeDisplay(
-    buildDisplayLines(
-      /* @__PURE__ */ new Date(),
-      trackedDate,
-      weatherSnapshot,
-      houseOcto,
-      wfh,
-      downstairsTemp,
-      shedTemp,
-      solarYield,
-      powerNow,
-      powerHourAvg
-    ),
-    true
-  );
-  const timer = setInterval(() => {
+  const tick = () => {
+    if (runningCommand) return;
     void (async () => {
       const now = /* @__PURE__ */ new Date();
       const nowMs = now.getTime();
@@ -15665,6 +16059,7 @@ async function runLive() {
       const needGasRefresh = dayChanged || nowMs - lastGasRefreshAt >= GAS_REFRESH_MS;
       if (dayChanged) {
         trackedDate = today;
+        bdayConfig = readBdayConfig();
         [weather, wfh] = await Promise.all([
           fetchBbcWeatherAggregated(location),
           fetchWfhStatus()
@@ -15698,29 +16093,22 @@ async function runLive() {
         houseOcto = await loadHouseOctoPrices(now);
         lastGasRefreshAt = nowMs;
       }
-      writeDisplay(
-        buildDisplayLines(
-          now,
-          trackedDate,
-          weatherSnapshot,
-          houseOcto,
-          wfh,
-          downstairsTemp,
-          shedTemp,
-          solarYield,
-          powerNow,
-          powerHourAvg
-        ),
-        true
-      );
+      render();
     })().catch((error51) => {
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
+      disableRawInput?.();
       leaveFullscreen();
       const message = error51 instanceof Error ? error51.message : String(error51);
       console.error(message);
       process.exit(1);
     });
-  }, TICK_MS);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  enterFullscreen();
+  disableRawInput = enableRawTerminalInput(onKeys);
+  render();
+  timer = setInterval(tick, TICK_MS);
 }
 async function main() {
   const args = process.argv.slice(2);
