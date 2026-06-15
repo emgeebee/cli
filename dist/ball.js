@@ -83,9 +83,12 @@ var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
   "englishleagueone",
   "eflcup",
   "uefachampionsleague",
-  "uefaeuropaleague"
+  "uefaeuropaleague",
+  "worldcup",
+  "fifaworldcup"
 ]);
 var COMPETITION_ORDER = [
+  "FIFA World Cup",
   "Premier League",
   "FA Cup",
   "League Cup",

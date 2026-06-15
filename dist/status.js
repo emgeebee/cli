@@ -15857,7 +15857,9 @@ var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
   "englishleagueone",
   "eflcup",
   "uefachampionsleague",
-  "uefaeuropaleague"
+  "uefaeuropaleague",
+  "worldcup",
+  "fifaworldcup"
 ]);
 var BBC_BASE_URL = "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
 var ANSI_RESET4 = "\x1B[0m";

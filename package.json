@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.14.0",
+  "version": "3.14.1",
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {
@@ -62,5 +62,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emgeebee/cli.git"
+  },
   "packageManager": "pnpm@10.33.0"
 }

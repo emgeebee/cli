@@ -125,6 +125,8 @@ const COMPETITION_ALLOWLIST = new Set([
   "eflcup",
   "uefachampionsleague",
   "uefaeuropaleague",
+  "worldcup",
+  "fifaworldcup",
 ]);
 
 const BBC_BASE_URL =

@@ -152,8 +152,11 @@ const COMPETITION_ALLOWLIST = new Set([
   "eflcup",
   "uefachampionsleague",
   "uefaeuropaleague",
+  "worldcup",
+  "fifaworldcup",
 ]);
 const COMPETITION_ORDER = [
+  "FIFA World Cup",
   "Premier League",
   "FA Cup",
   "League Cup",
