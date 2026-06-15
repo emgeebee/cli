@@ -3,20 +3,9 @@
 import { getConfigPath } from "./config";
 import {
   fetchBbcWeatherAggregated,
-  formatNextRainChancesLine,
-  formatTodayWeatherLine,
-  formatWeatherLine,
-  hourlyReportsFromWeather,
   resolveDefaultLocation,
-  sunriseSunsetForDate,
-  todayWeatherReport,
   ukTodayYmd,
-  ukTomorrowYmd,
-  weatherReportForDate,
-  type BbcWeatherHourlyReport,
-  type BbcWeatherResponse,
 } from "./lib/bbcWeather";
-import { ukWallTimeToDate } from "./lib/solarApi";
 import {
   currentHourPowerAvgWatts,
   fetchSolarData,
@@ -42,15 +31,31 @@ import {
 } from "./lib/octoApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
 import { readBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib/bdayApi";
+import {
+  buildStatusCalendarLines,
+  loadStatusCalendarData,
+  statusCalendarInnerWidth,
+  type StatusCalendarData,
+} from "./lib/calApi";
+import { loadFootballStatusLines } from "./lib/ballApi";
+import { loadCricketStatusLines } from "./lib/cricApi";
 import { datesSectionLabel } from "./lib/moneyApi";
 import {
   runStatusShortcut,
   statusShortcutFooter,
+  statusShortcutFooterWidth,
   statusShortcutForKey,
   type StatusShortcut,
 } from "./lib/commands";
 import { fetchWfhStatus, houseSectionLabel } from "./lib/wfhApi";
-import { enterFullscreen, leaveFullscreen, writeFullscreenLines } from "./lib/terminal";
+import { buildFullWeatherLines, type WeatherResponse } from "./lib/wApi";
+import {
+  enterFullscreen,
+  leaveFullscreen,
+  maxCalendarContentLines,
+  type FullscreenPanelLines,
+  writeFullscreenLines,
+} from "./lib/terminal";
 import {
   enableRawTerminalInput,
   prepareStdinForChildProcess,
@@ -98,56 +103,6 @@ function formatDate(now: Date): string {
   });
 }
 
-function parseClockMinutes(value: string): number | null {
-  if (!value || value === "-") return null;
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-  if (!match) return null;
-  const hours = Number.parseInt(match[1], 10);
-  const minutes = Number.parseInt(match[2], 10);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-
-function formatDurationMinutes(totalMinutes: number): string {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
-  if (hours > 0) return `${hours}h`;
-  return `${minutes}m`;
-}
-
-function sunEventTime(clock: string, dayYmd: string): Date | null {
-  const eventMinutes = parseClockMinutes(clock);
-  if (eventMinutes == null) return null;
-  const [year, month, day] = dayYmd.split("-").map(Number);
-  const hours = Math.floor(eventMinutes / 60);
-  const minutes = eventMinutes % 60;
-  return ukWallTimeToDate(year, month, day, hours, minutes);
-}
-
-function formatSunRelative(clock: string, now: Date, dayYmd: string): string {
-  const event = sunEventTime(clock, dayYmd);
-  if (!event) return "";
-
-  const diffMinutes = Math.round((now.getTime() - event.getTime()) / 60_000);
-  if (diffMinutes === 0) return " (now)";
-  if (diffMinutes > 0) return ` (${formatDurationMinutes(diffMinutes)} ago)`;
-  return ` (in ${formatDurationMinutes(-diffMinutes)})`;
-}
-
-function formatSunPart(label: string, clock: string, now: Date, dayYmd: string): string {
-  return `${label} ${clock}${formatSunRelative(clock, now, dayYmd)}`;
-}
-
-function formatSunriseSunsetLine(
-  sunrise: string,
-  sunset: string,
-  now: Date,
-  dayYmd: string,
-): string {
-  return `${formatSunPart("sunrise", sunrise, now, dayYmd)} // ${formatSunPart("sunset", sunset, now, dayYmd)}`;
-}
-
 function formatSolarYieldLine(solarYield: number | null): string {
   return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
@@ -177,30 +132,6 @@ function sectionBreak(name: string): string[] {
   return ["", sectionDivider(name)];
 }
 
-function formatDayWeatherLine(label: string, line: string): string {
-  return line === "-" ? `${label}: -` : `${label}: ${line}`;
-}
-
-type WeatherSnapshot = {
-  weatherLine: string;
-  tomorrowWeatherLine: string;
-  hourlyReports: BbcWeatherHourlyReport[];
-  sunrise: string;
-  sunset: string;
-};
-
-function weatherSnapshotFromData(weather: BbcWeatherResponse, todayYmd: string): WeatherSnapshot {
-  const tomorrowYmd = ukTomorrowYmd(new Date(`${todayYmd}T12:00:00Z`));
-  const todaySun = sunriseSunsetForDate(weather, todayYmd);
-  return {
-    weatherLine: formatTodayWeatherLine(todayWeatherReport(weather, todayYmd)),
-    tomorrowWeatherLine: formatWeatherLine(weatherReportForDate(weather, tomorrowYmd)),
-    hourlyReports: hourlyReportsFromWeather(weather),
-    sunrise: todaySun.sunrise,
-    sunset: todaySun.sunset,
-  };
-}
-
 type GasSnapshot = {
   line: string;
 };
@@ -213,7 +144,6 @@ type HouseOctoSnapshot = {
 type StatusDisplayState = {
   now: Date;
   todayYmd: string;
-  weather: WeatherSnapshot;
   houseOcto: HouseOctoSnapshot;
   bdayConfig: BdayConfig | null;
   wfh: boolean | null;
@@ -226,23 +156,11 @@ type StatusDisplayState = {
 
 function buildStatusLines(state: StatusDisplayState): string[] {
   const now = state.now;
-  const todayYmd = state.todayYmd;
-  const weather = state.weather;
 
   return [
     ...sectionBreak(datesSectionLabel(now)),
     `time: ${formatTime(now)}, ${formatDate(now)}`,
     ...upcomingBdaySectionLines(state.bdayConfig, now),
-    ...sectionBreak("weather"),
-    formatDayWeatherLine("today", weather.weatherLine),
-    formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
-    formatNextRainChancesLine(
-      weather.hourlyReports,
-      now,
-      todayYmd,
-      ukTomorrowYmd(now),
-    ),
-    formatSunriseSunsetLine(weather.sunrise, weather.sunset, now, todayYmd),
     ...sectionBreak("solar"),
     formatSolarYieldLine(state.solarYield),
     formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
@@ -253,6 +171,15 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     "",
     statusShortcutFooter(),
   ];
+}
+
+function buildSportsPanelLines(title: string, lines: string[]): string[] {
+  return ["", sectionDivider(title), ...lines];
+}
+
+async function loadFullWeatherLines(location: string): Promise<string[]> {
+  const data = (await fetchBbcWeatherAggregated(location)) as WeatherResponse;
+  return buildFullWeatherLines(data, location);
 }
 
 function solarSnapshotFromData(data: SolarResponse, dayKey: string, now: Date): {
@@ -267,13 +194,32 @@ function solarSnapshotFromData(data: SolarResponse, dayKey: string, now: Date): 
   };
 }
 
-function writeDisplay(lines: string[], fullscreen: boolean): void {
+function writeDisplay(
+  statusLines: string[],
+  fullscreen: boolean,
+  panels: FullscreenPanelLines = {},
+): void {
   if (fullscreen) {
-    writeFullscreenLines(lines);
+    writeFullscreenLines(statusLines, statusShortcutFooterWidth(), panels);
     return;
   }
-  for (const line of lines) {
+  for (const line of statusLines) {
     console.log(line);
+  }
+  if (panels.weatherLines) {
+    for (const line of panels.weatherLines) {
+      console.log(line);
+    }
+  }
+  if (panels.cricLines) {
+    for (const line of panels.cricLines) {
+      console.log(line);
+    }
+  }
+  if (panels.footyLines) {
+    for (const line of panels.footyLines) {
+      console.log(line);
+    }
   }
 }
 
@@ -355,23 +301,34 @@ async function loadHouseOctoPrices(now: Date = new Date()): Promise<HouseOctoSna
   }
 }
 
+async function loadSportsLines(ymd: string): Promise<{ cricLines: string[]; footyLines: string[] }> {
+  const [cricResult, footyResult] = await Promise.allSettled([
+    loadCricketStatusLines(ymd),
+    loadFootballStatusLines(ymd),
+  ]);
+  return {
+    cricLines: cricResult.status === "fulfilled" ? cricResult.value : ["-"],
+    footyLines: footyResult.status === "fulfilled" ? footyResult.value : ["-"],
+  };
+}
+
 async function printOnce(): Promise<void> {
   const now = new Date();
   const dayKey = ukTodayYmd(now);
   const bdayConfig = readBdayConfig();
-  const [weather, solar, wfh, temps, houseOcto] = await Promise.all([
-    fetchBbcWeatherAggregated(resolveDefaultLocation()),
+  const location = resolveDefaultLocation();
+  const [weatherLines, solar, wfh, temps, houseOcto, sports] = await Promise.all([
+    loadFullWeatherLines(location),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
     loadTemps(),
     loadHouseOctoPrices(now),
+    loadSportsLines(dayKey),
   ]);
-  const weatherSnapshot = weatherSnapshotFromData(weather, dayKey);
   writeDisplay(
     buildStatusLines({
       now,
       todayYmd: dayKey,
-      weather: weatherSnapshot,
       houseOcto,
       bdayConfig,
       wfh,
@@ -382,6 +339,11 @@ async function printOnce(): Promise<void> {
       powerHourAvg: solar.powerHourAvg,
     }),
     false,
+    {
+      weatherLines,
+      cricLines: buildSportsPanelLines("cric", sports.cricLines),
+      footyLines: buildSportsPanelLines("footy", sports.footyLines),
+    },
   );
 }
 
@@ -402,8 +364,7 @@ async function runLive(): Promise<void> {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
   let bdayConfig = readBdayConfig();
-  let weather = await fetchBbcWeatherAggregated(location);
-  let weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
+  let fullWeatherLines: string[] = [];
   let wfh: boolean | null = null;
   let houseOcto = emptyHouseOctoSnapshot();
   let downstairsTemp: number | null = null;
@@ -416,6 +377,9 @@ async function runLive(): Promise<void> {
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
   let lastGasRefreshAt = 0;
+  let calendarData: StatusCalendarData | null = null;
+  let cricLines: string[] = ["-"];
+  let footyLines: string[] = ["-"];
   let runningCommand = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
@@ -423,7 +387,6 @@ async function runLive(): Promise<void> {
   const displayState = (): StatusDisplayState => ({
     now: new Date(),
     todayYmd: trackedDate,
-    weather: weatherSnapshot,
     houseOcto,
     bdayConfig,
     wfh,
@@ -435,7 +398,38 @@ async function runLive(): Promise<void> {
   });
 
   const render = (): void => {
-    writeDisplay(buildStatusLines(displayState()), true);
+    const state = displayState();
+    const boxWidth = statusShortcutFooterWidth();
+    const calendarWidth = statusCalendarInnerWidth();
+    const statusLines = buildStatusLines(state);
+    const calendarLines = calendarData
+      ? buildStatusCalendarLines(
+          calendarData.months,
+          state.now,
+          calendarData.colors,
+          maxCalendarContentLines(statusLines.length, true),
+          calendarWidth,
+        )
+      : null;
+    writeDisplay(statusLines, true, {
+      calendarLines,
+      calendarInnerWidth: calendarWidth,
+      weatherLines: fullWeatherLines.length > 0 ? fullWeatherLines : null,
+      cricLines: buildSportsPanelLines("cric", cricLines),
+      footyLines: buildSportsPanelLines("footy", footyLines),
+    });
+  };
+
+  const refreshWeather = async (): Promise<void> => {
+    fullWeatherLines = await loadFullWeatherLines(location);
+  };
+
+  const refreshCalendar = async (now: Date): Promise<void> => {
+    calendarData = await loadStatusCalendarData(now);
+  };
+
+  const refreshSports = async (ymd: string): Promise<void> => {
+    ({ cricLines, footyLines } = await loadSportsLines(ymd));
   };
 
   const stop = (): void => {
@@ -475,11 +469,19 @@ async function runLive(): Promise<void> {
     }
   };
 
-  [wfh, { downstairsTemp, shedTemp }, houseOcto] = await Promise.all([
-    fetchWfhStatus(),
-    loadTemps(),
-    loadHouseOctoPrices(),
-  ]);
+  [wfh, { downstairsTemp, shedTemp }, houseOcto, calendarData, { cricLines, footyLines }] =
+    await Promise.all([
+      fetchWfhStatus(),
+      loadTemps(),
+      loadHouseOctoPrices(),
+      loadStatusCalendarData(),
+      loadSportsLines(trackedDate),
+    ]);
+  try {
+    await refreshWeather();
+  } catch {
+    fullWeatherLines = ["weather unavailable"];
+  }
   const startedAt = Date.now();
   lastTempRefreshAt = startedAt;
   lastGasRefreshAt = startedAt;
@@ -513,11 +515,14 @@ async function runLive(): Promise<void> {
       if (dayChanged) {
         trackedDate = today;
         bdayConfig = readBdayConfig();
-        [weather, wfh] = await Promise.all([
-          fetchBbcWeatherAggregated(location),
+        [, wfh] = await Promise.all([
+          refreshWeather().catch(() => {
+            fullWeatherLines = ["weather unavailable"];
+          }),
           fetchWfhStatus(),
+          refreshCalendar(now),
+          refreshSports(today),
         ]);
-        weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
       }
 
       if (needYieldRefresh || needPowerRefresh) {

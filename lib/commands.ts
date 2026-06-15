@@ -69,6 +69,10 @@ export function statusShortcutFooter(): string {
   return `${shortcuts}  q:quit`;
 }
 
+export function statusShortcutFooterWidth(): number {
+  return statusShortcutFooter().length;
+}
+
 export function runStatusShortcut(shortcut: StatusShortcut): number {
   return runLauncherCommand({
     value: 0,

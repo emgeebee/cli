@@ -43,7 +43,7 @@ function readPhoneCliConfig() {
   }
 }
 
-// cal.ts
+// lib/calApi.ts
 var MONTH_NAMES = [
   "January",
   "February",
@@ -59,6 +59,8 @@ var MONTH_NAMES = [
   "December"
 ];
 var DAY_HEADERS = "Mo Tu We Th Fr Sa Su";
+var HOLIDAYS_URL = "https://1q1v3hm1n2.execute-api.us-west-2.amazonaws.com/prod/holidays";
+var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 var RESET = "\x1B[0m";
 var BOLD = "\x1B[1m";
 var REVERSE = "\x1B[7m";
@@ -66,50 +68,20 @@ var BLUE = "\x1B[94m";
 var YELLOW = "\x1B[93m";
 var GREY = "\x1B[90m";
 var RED = "\x1B[91m";
-var HOLIDAYS_URL = "https://1q1v3hm1n2.execute-api.us-west-2.amazonaws.com/prod/holidays";
-var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 function shouldStyleHighlight() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function defaultYearWindowFrom(now) {
-  return [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((offset) => {
-    const t = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-    return { year: t.getFullYear(), month: t.getMonth() };
-  });
-}
-function parseArgs() {
-  const rest = process.argv.slice(2).filter((a) => a !== "" && a !== "-");
-  if (rest.length === 0) {
-    return { months: defaultYearWindowFrom(/* @__PURE__ */ new Date()) };
-  }
-  if (rest.length < 2) {
-    console.error("Usage: node cal.js [month] [year]");
-    console.error("  month: 1-12, year: e.g. 2026");
-    process.exit(1);
-  }
-  const month = Number.parseInt(rest[0], 10) - 1;
-  const year = Number.parseInt(rest[1], 10);
-  if (Number.isNaN(month) || month < 0 || month > 11) {
-    console.error("Month must be 1-12.");
-    process.exit(1);
-  }
-  if (Number.isNaN(year) || year < 1 || year > 9999) {
-    console.error("Year must be a valid number (1-9999).");
-    process.exit(1);
-  }
-  return { months: [{ year, month }] };
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 function daysInMonth(year, month) {
   return new Date(year, month + 1, 0).getDate();
 }
-function firstDayOfMonth(year, month) {
-  return sundayFirstToMondayFirst(new Date(year, month, 1).getDay());
-}
 function sundayFirstToMondayFirst(day) {
   return (day + 6) % 7;
 }
-function asRecord(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+function firstDayOfMonth(year, month) {
+  return sundayFirstToMondayFirst(new Date(year, month, 1).getDay());
 }
 function formatIsoDate(year, month, day) {
   return `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -184,15 +156,14 @@ function padRightVisible(value, width) {
 function colorLabel(label, color) {
   return applyStyles(label, [color]);
 }
-function printLegend() {
+function buildCalendarLegendLine() {
   const parts = [
-    `${colorLabel("\u25A0", RED)} Birthday`,
-    `${colorLabel("\u25A0", YELLOW)} Bank holiday`,
-    `${colorLabel("\u25A0", BLUE)} Holiday`,
-    `${colorLabel("\u25A0", GREY)} Weekend`
+    `${colorLabel("\u25A0", RED)} bday`,
+    `${colorLabel("\u25A0", YELLOW)} bank`,
+    `${colorLabel("\u25A0", BLUE)} hol`,
+    `${colorLabel("\u25A0", GREY)} w/e`
   ];
-  console.log(`Key: ${parts.join("  ")}`);
-  console.log("");
+  return `Key: ${parts.join("  ")}`;
 }
 function cellText(year, month, day, mondayFirstWeekdayIndex, highlightDay, colors) {
   if (day == null) {
@@ -210,9 +181,36 @@ function cellText(year, month, day, mondayFirstWeekdayIndex, highlightDay, color
 function padLine(year, month, cells, highlightDay, colors) {
   return cells.map((n, idx) => cellText(year, month, n, idx, highlightDay, colors)).join(" ");
 }
+var STATUS_CALENDAR_GUTTER = "  ";
+function columnWidthsForRow(innerWidth, columns, gutter) {
+  if (innerWidth === void 0) {
+    return columns.map((col) => Math.max(0, ...col.map(visibleLength)));
+  }
+  const gutterTotal = (columns.length - 1) * gutter.length;
+  const available = innerWidth - gutterTotal;
+  const base = Math.floor(available / columns.length);
+  const remainder = available - base * columns.length;
+  return Array.from({ length: columns.length }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+function joinMonthRow(columns, innerWidth, gutter = STATUS_CALENDAR_GUTTER) {
+  if (columns.length === 0) return [];
+  const colWidths = columnWidthsForRow(innerWidth, columns, gutter);
+  const rows = Math.max(...columns.map((col) => col.length));
+  const lines = [];
+  for (let row = 0; row < rows; row += 1) {
+    const parts = columns.map(
+      (col, index) => padRightVisible(col[row] ?? "", colWidths[index])
+    );
+    lines.push(parts.join(gutter));
+  }
+  return lines;
+}
+function joinMonthColumns(left, right, innerWidth, gutter = "   ") {
+  return joinMonthRow([left, right], innerWidth, gutter);
+}
 function buildCalendarLines(year, month, today, colors) {
   const highlightDay = today.getFullYear() === year && today.getMonth() === month ? today.getDate() : null;
-  const title = `    ${MONTH_NAMES[month]} ${year}    `;
+  const title = `${MONTH_NAMES[month]} ${year}`;
   const lastDay = daysInMonth(year, month);
   const startPad = firstDayOfMonth(year, month);
   const lines = [title, DAY_HEADERS];
@@ -235,6 +233,12 @@ function buildCalendarLines(year, month, today, colors) {
   }
   return lines;
 }
+function defaultYearWindowFrom(now) {
+  return [-2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((offset) => {
+    const t = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    return { year: t.getFullYear(), month: t.getMonth() };
+  });
+}
 function resolveCalConfig() {
   const config = readPhoneCliConfig();
   const token = asRecord(config.cal)?.token;
@@ -254,8 +258,7 @@ function resolveCalConfig() {
     }
     return { token: token.trim(), birthdayMonthDays };
   }
-  console.error(`Missing cal token at ${getConfigPath()} (expected config.cal.token).`);
-  process.exit(1);
+  throw new Error("Missing cal token (expected config.cal.token).");
 }
 async function fetchCalendarColors(token, birthdayMonthDays) {
   const headers = {
@@ -290,28 +293,53 @@ async function fetchCalendarColors(token, birthdayMonthDays) {
   }
   return { birthdayMonthDays, holidayDays, bankHolidayDays };
 }
+
+// cal.ts
+function parseArgs() {
+  const rest = process.argv.slice(2).filter((a) => a !== "" && a !== "-");
+  if (rest.length === 0) {
+    return { months: defaultYearWindowFrom(/* @__PURE__ */ new Date()) };
+  }
+  if (rest.length < 2) {
+    console.error("Usage: node cal.js [month] [year]");
+    console.error("  month: 1-12, year: e.g. 2026");
+    process.exit(1);
+  }
+  const month = Number.parseInt(rest[0], 10) - 1;
+  const year = Number.parseInt(rest[1], 10);
+  if (Number.isNaN(month) || month < 0 || month > 11) {
+    console.error("Month must be 1-12.");
+    process.exit(1);
+  }
+  if (Number.isNaN(year) || year < 1 || year > 9999) {
+    console.error("Year must be a valid number (1-9999).");
+    process.exit(1);
+  }
+  return { months: [{ year, month }] };
+}
 async function main() {
-  const { token, birthdayMonthDays } = resolveCalConfig();
+  let token;
+  let birthdayMonthDays;
+  try {
+    ({ token, birthdayMonthDays } = resolveCalConfig());
+  } catch {
+    console.error(`Missing cal token at ${getConfigPath()} (expected config.cal.token).`);
+    process.exit(1);
+  }
   const { months } = parseArgs();
   const today = /* @__PURE__ */ new Date();
   const colors = await fetchCalendarColors(token, birthdayMonthDays);
-  printLegend();
+  console.log(buildCalendarLegendLine());
+  console.log("");
   const allMonthLines = months.map(
     ({ year, month }) => buildCalendarLines(year, month, today, colors)
   );
-  const gutter = "   ";
   for (let i = 0; i < allMonthLines.length; i += 2) {
     if (i > 0) {
       console.log();
     }
-    const left = allMonthLines[i];
-    const right = allMonthLines[i + 1] ?? [];
-    const leftWidth = Math.max(...left.map(visibleLength));
-    const rows = Math.max(left.length, right.length);
-    for (let r = 0; r < rows; r++) {
-      const leftLine = padRightVisible(left[r] ?? "", leftWidth);
-      const rightLine = right[r] ?? "";
-      console.log(rightLine ? `${leftLine}${gutter}${rightLine}` : leftLine);
+    for (const line of joinMonthColumns(allMonthLines[i], allMonthLines[i + 1] ?? [])) {
+      console.log(line);
     }
   }
 }

@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -15,7 +20,118 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// node_modules/.pnpm/ansi-regex@5.0.1/node_modules/ansi-regex/index.js
+var require_ansi_regex = __commonJS({
+  "node_modules/.pnpm/ansi-regex@5.0.1/node_modules/ansi-regex/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = ({ onlyFirst = false } = {}) => {
+      const pattern = [
+        "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d\\/#&.:=?%@~_]*)*)?\\u0007)",
+        "(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))"
+      ].join("|");
+      return new RegExp(pattern, onlyFirst ? void 0 : "g");
+    };
+  }
+});
+
+// node_modules/.pnpm/strip-ansi@6.0.1/node_modules/strip-ansi/index.js
+var require_strip_ansi = __commonJS({
+  "node_modules/.pnpm/strip-ansi@6.0.1/node_modules/strip-ansi/index.js"(exports2, module2) {
+    "use strict";
+    var ansiRegex = require_ansi_regex();
+    module2.exports = (string4) => typeof string4 === "string" ? string4.replace(ansiRegex(), "") : string4;
+  }
+});
+
+// node_modules/.pnpm/is-fullwidth-code-point@3.0.0/node_modules/is-fullwidth-code-point/index.js
+var require_is_fullwidth_code_point = __commonJS({
+  "node_modules/.pnpm/is-fullwidth-code-point@3.0.0/node_modules/is-fullwidth-code-point/index.js"(exports2, module2) {
+    "use strict";
+    var isFullwidthCodePoint = (codePoint) => {
+      if (Number.isNaN(codePoint)) {
+        return false;
+      }
+      if (codePoint >= 4352 && (codePoint <= 4447 || // Hangul Jamo
+      codePoint === 9001 || // LEFT-POINTING ANGLE BRACKET
+      codePoint === 9002 || // RIGHT-POINTING ANGLE BRACKET
+      // CJK Radicals Supplement .. Enclosed CJK Letters and Months
+      11904 <= codePoint && codePoint <= 12871 && codePoint !== 12351 || // Enclosed CJK Letters and Months .. CJK Unified Ideographs Extension A
+      12880 <= codePoint && codePoint <= 19903 || // CJK Unified Ideographs .. Yi Radicals
+      19968 <= codePoint && codePoint <= 42182 || // Hangul Jamo Extended-A
+      43360 <= codePoint && codePoint <= 43388 || // Hangul Syllables
+      44032 <= codePoint && codePoint <= 55203 || // CJK Compatibility Ideographs
+      63744 <= codePoint && codePoint <= 64255 || // Vertical Forms
+      65040 <= codePoint && codePoint <= 65049 || // CJK Compatibility Forms .. Small Form Variants
+      65072 <= codePoint && codePoint <= 65131 || // Halfwidth and Fullwidth Forms
+      65281 <= codePoint && codePoint <= 65376 || 65504 <= codePoint && codePoint <= 65510 || // Kana Supplement
+      110592 <= codePoint && codePoint <= 110593 || // Enclosed Ideographic Supplement
+      127488 <= codePoint && codePoint <= 127569 || // CJK Unified Ideographs Extension B .. Tertiary Ideographic Plane
+      131072 <= codePoint && codePoint <= 262141)) {
+        return true;
+      }
+      return false;
+    };
+    module2.exports = isFullwidthCodePoint;
+    module2.exports.default = isFullwidthCodePoint;
+  }
+});
+
+// node_modules/.pnpm/emoji-regex@8.0.0/node_modules/emoji-regex/index.js
+var require_emoji_regex = __commonJS({
+  "node_modules/.pnpm/emoji-regex@8.0.0/node_modules/emoji-regex/index.js"(exports2, module2) {
+    "use strict";
+    module2.exports = function() {
+      return /\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62(?:\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67|\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74|\uDB40\uDC77\uDB40\uDC6C\uDB40\uDC73)\uDB40\uDC7F|\uD83D\uDC68(?:\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68\uD83C\uDFFB|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFE])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D)?\uD83D\uDC68|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D[\uDC68\uDC69])\u200D(?:\uD83D[\uDC66\uDC67])|[\u2695\u2696\u2708]\uFE0F|\uD83D[\uDC66\uDC67]|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|(?:\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708])\uFE0F|\uD83C\uDFFB\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C[\uDFFB-\uDFFF])|(?:\uD83E\uDDD1\uD83C\uDFFB\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)\uD83C\uDFFB|\uD83E\uDDD1(?:\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1)|(?:\uD83E\uDDD1\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFF\u200D\uD83E\uDD1D\u200D(?:\uD83D[\uDC68\uDC69]))(?:\uD83C[\uDFFB-\uDFFE])|(?:\uD83E\uDDD1\uD83C\uDFFC\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB\uDFFC])|\uD83D\uDC69(?:\uD83C\uDFFE\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB-\uDFFD\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFC\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFD-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFB\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFC-\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFD\u200D(?:\uD83E\uDD1D\u200D\uD83D\uDC68(?:\uD83C[\uDFFB\uDFFC\uDFFE\uDFFF])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\u200D(?:\u2764\uFE0F\u200D(?:\uD83D\uDC8B\u200D(?:\uD83D[\uDC68\uDC69])|\uD83D[\uDC68\uDC69])|\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD])|\uD83C\uDFFF\u200D(?:\uD83C[\uDF3E\uDF73\uDF93\uDFA4\uDFA8\uDFEB\uDFED]|\uD83D[\uDCBB\uDCBC\uDD27\uDD2C\uDE80\uDE92]|\uD83E[\uDDAF-\uDDB3\uDDBC\uDDBD]))|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67]))|(?:\uD83E\uDDD1\uD83C\uDFFD\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1|\uD83D\uDC69\uD83C\uDFFE\u200D\uD83E\uDD1D\u200D\uD83D\uDC69)(?:\uD83C[\uDFFB-\uDFFD])|\uD83D\uDC69\u200D\uD83D\uDC66\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC69\u200D(?:\uD83D[\uDC66\uDC67])|(?:\uD83D\uDC41\uFE0F\u200D\uD83D\uDDE8|\uD83D\uDC69(?:\uD83C\uDFFF\u200D[\u2695\u2696\u2708]|\uD83C\uDFFE\u200D[\u2695\u2696\u2708]|\uD83C\uDFFC\u200D[\u2695\u2696\u2708]|\uD83C\uDFFB\u200D[\u2695\u2696\u2708]|\uD83C\uDFFD\u200D[\u2695\u2696\u2708]|\u200D[\u2695\u2696\u2708])|(?:(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)\uFE0F|\uD83D\uDC6F|\uD83E[\uDD3C\uDDDE\uDDDF])\u200D[\u2640\u2642]|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:(?:\uD83C[\uDFFB-\uDFFF])\u200D[\u2640\u2642]|\u200D[\u2640\u2642])|\uD83C\uDFF4\u200D\u2620)\uFE0F|\uD83D\uDC69\u200D\uD83D\uDC67\u200D(?:\uD83D[\uDC66\uDC67])|\uD83C\uDFF3\uFE0F\u200D\uD83C\uDF08|\uD83D\uDC15\u200D\uD83E\uDDBA|\uD83D\uDC69\u200D\uD83D\uDC66|\uD83D\uDC69\u200D\uD83D\uDC67|\uD83C\uDDFD\uD83C\uDDF0|\uD83C\uDDF4\uD83C\uDDF2|\uD83C\uDDF6\uD83C\uDDE6|[#\*0-9]\uFE0F\u20E3|\uD83C\uDDE7(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEF\uDDF1-\uDDF4\uDDF6-\uDDF9\uDDFB\uDDFC\uDDFE\uDDFF])|\uD83C\uDDF9(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDED\uDDEF-\uDDF4\uDDF7\uDDF9\uDDFB\uDDFC\uDDFF])|\uD83C\uDDEA(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDED\uDDF7-\uDDFA])|\uD83E\uDDD1(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF7(?:\uD83C[\uDDEA\uDDF4\uDDF8\uDDFA\uDDFC])|\uD83D\uDC69(?:\uD83C[\uDFFB-\uDFFF])|\uD83C\uDDF2(?:\uD83C[\uDDE6\uDDE8-\uDDED\uDDF0-\uDDFF])|\uD83C\uDDE6(?:\uD83C[\uDDE8-\uDDEC\uDDEE\uDDF1\uDDF2\uDDF4\uDDF6-\uDDFA\uDDFC\uDDFD\uDDFF])|\uD83C\uDDF0(?:\uD83C[\uDDEA\uDDEC-\uDDEE\uDDF2\uDDF3\uDDF5\uDDF7\uDDFC\uDDFE\uDDFF])|\uD83C\uDDED(?:\uD83C[\uDDF0\uDDF2\uDDF3\uDDF7\uDDF9\uDDFA])|\uD83C\uDDE9(?:\uD83C[\uDDEA\uDDEC\uDDEF\uDDF0\uDDF2\uDDF4\uDDFF])|\uD83C\uDDFE(?:\uD83C[\uDDEA\uDDF9])|\uD83C\uDDEC(?:\uD83C[\uDDE6\uDDE7\uDDE9-\uDDEE\uDDF1-\uDDF3\uDDF5-\uDDFA\uDDFC\uDDFE])|\uD83C\uDDF8(?:\uD83C[\uDDE6-\uDDEA\uDDEC-\uDDF4\uDDF7-\uDDF9\uDDFB\uDDFD-\uDDFF])|\uD83C\uDDEB(?:\uD83C[\uDDEE-\uDDF0\uDDF2\uDDF4\uDDF7])|\uD83C\uDDF5(?:\uD83C[\uDDE6\uDDEA-\uDDED\uDDF0-\uDDF3\uDDF7-\uDDF9\uDDFC\uDDFE])|\uD83C\uDDFB(?:\uD83C[\uDDE6\uDDE8\uDDEA\uDDEC\uDDEE\uDDF3\uDDFA])|\uD83C\uDDF3(?:\uD83C[\uDDE6\uDDE8\uDDEA-\uDDEC\uDDEE\uDDF1\uDDF4\uDDF5\uDDF7\uDDFA\uDDFF])|\uD83C\uDDE8(?:\uD83C[\uDDE6\uDDE8\uDDE9\uDDEB-\uDDEE\uDDF0-\uDDF5\uDDF7\uDDFA-\uDDFF])|\uD83C\uDDF1(?:\uD83C[\uDDE6-\uDDE8\uDDEE\uDDF0\uDDF7-\uDDFB\uDDFE])|\uD83C\uDDFF(?:\uD83C[\uDDE6\uDDF2\uDDFC])|\uD83C\uDDFC(?:\uD83C[\uDDEB\uDDF8])|\uD83C\uDDFA(?:\uD83C[\uDDE6\uDDEC\uDDF2\uDDF3\uDDF8\uDDFE\uDDFF])|\uD83C\uDDEE(?:\uD83C[\uDDE8-\uDDEA\uDDF1-\uDDF4\uDDF6-\uDDF9])|\uD83C\uDDEF(?:\uD83C[\uDDEA\uDDF2\uDDF4\uDDF5])|(?:\uD83C[\uDFC3\uDFC4\uDFCA]|\uD83D[\uDC6E\uDC71\uDC73\uDC77\uDC81\uDC82\uDC86\uDC87\uDE45-\uDE47\uDE4B\uDE4D\uDE4E\uDEA3\uDEB4-\uDEB6]|\uD83E[\uDD26\uDD37-\uDD39\uDD3D\uDD3E\uDDB8\uDDB9\uDDCD-\uDDCF\uDDD6-\uDDDD])(?:\uD83C[\uDFFB-\uDFFF])|(?:\u26F9|\uD83C[\uDFCB\uDFCC]|\uD83D\uDD75)(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u261D\u270A-\u270D]|\uD83C[\uDF85\uDFC2\uDFC7]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66\uDC67\uDC6B-\uDC6D\uDC70\uDC72\uDC74-\uDC76\uDC78\uDC7C\uDC83\uDC85\uDCAA\uDD74\uDD7A\uDD90\uDD95\uDD96\uDE4C\uDE4F\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1C\uDD1E\uDD1F\uDD30-\uDD36\uDDB5\uDDB6\uDDBB\uDDD2-\uDDD5])(?:\uD83C[\uDFFB-\uDFFF])|(?:[\u231A\u231B\u23E9-\u23EC\u23F0\u23F3\u25FD\u25FE\u2614\u2615\u2648-\u2653\u267F\u2693\u26A1\u26AA\u26AB\u26BD\u26BE\u26C4\u26C5\u26CE\u26D4\u26EA\u26F2\u26F3\u26F5\u26FA\u26FD\u2705\u270A\u270B\u2728\u274C\u274E\u2753-\u2755\u2757\u2795-\u2797\u27B0\u27BF\u2B1B\u2B1C\u2B50\u2B55]|\uD83C[\uDC04\uDCCF\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE1A\uDE2F\uDE32-\uDE36\uDE38-\uDE3A\uDE50\uDE51\uDF00-\uDF20\uDF2D-\uDF35\uDF37-\uDF7C\uDF7E-\uDF93\uDFA0-\uDFCA\uDFCF-\uDFD3\uDFE0-\uDFF0\uDFF4\uDFF8-\uDFFF]|\uD83D[\uDC00-\uDC3E\uDC40\uDC42-\uDCFC\uDCFF-\uDD3D\uDD4B-\uDD4E\uDD50-\uDD67\uDD7A\uDD95\uDD96\uDDA4\uDDFB-\uDE4F\uDE80-\uDEC5\uDECC\uDED0-\uDED2\uDED5\uDEEB\uDEEC\uDEF4-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])|(?:[#\*0-9\xA9\xAE\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9\u21AA\u231A\u231B\u2328\u23CF\u23E9-\u23F3\u23F8-\u23FA\u24C2\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u2604\u260E\u2611\u2614\u2615\u2618\u261D\u2620\u2622\u2623\u2626\u262A\u262E\u262F\u2638-\u263A\u2640\u2642\u2648-\u2653\u265F\u2660\u2663\u2665\u2666\u2668\u267B\u267E\u267F\u2692-\u2697\u2699\u269B\u269C\u26A0\u26A1\u26AA\u26AB\u26B0\u26B1\u26BD\u26BE\u26C4\u26C5\u26C8\u26CE\u26CF\u26D1\u26D3\u26D4\u26E9\u26EA\u26F0-\u26F5\u26F7-\u26FA\u26FD\u2702\u2705\u2708-\u270D\u270F\u2712\u2714\u2716\u271D\u2721\u2728\u2733\u2734\u2744\u2747\u274C\u274E\u2753-\u2755\u2757\u2763\u2764\u2795-\u2797\u27A1\u27B0\u27BF\u2934\u2935\u2B05-\u2B07\u2B1B\u2B1C\u2B50\u2B55\u3030\u303D\u3297\u3299]|\uD83C[\uDC04\uDCCF\uDD70\uDD71\uDD7E\uDD7F\uDD8E\uDD91-\uDD9A\uDDE6-\uDDFF\uDE01\uDE02\uDE1A\uDE2F\uDE32-\uDE3A\uDE50\uDE51\uDF00-\uDF21\uDF24-\uDF93\uDF96\uDF97\uDF99-\uDF9B\uDF9E-\uDFF0\uDFF3-\uDFF5\uDFF7-\uDFFF]|\uD83D[\uDC00-\uDCFD\uDCFF-\uDD3D\uDD49-\uDD4E\uDD50-\uDD67\uDD6F\uDD70\uDD73-\uDD7A\uDD87\uDD8A-\uDD8D\uDD90\uDD95\uDD96\uDDA4\uDDA5\uDDA8\uDDB1\uDDB2\uDDBC\uDDC2-\uDDC4\uDDD1-\uDDD3\uDDDC-\uDDDE\uDDE1\uDDE3\uDDE8\uDDEF\uDDF3\uDDFA-\uDE4F\uDE80-\uDEC5\uDECB-\uDED2\uDED5\uDEE0-\uDEE5\uDEE9\uDEEB\uDEEC\uDEF0\uDEF3-\uDEFA\uDFE0-\uDFEB]|\uD83E[\uDD0D-\uDD3A\uDD3C-\uDD45\uDD47-\uDD71\uDD73-\uDD76\uDD7A-\uDDA2\uDDA5-\uDDAA\uDDAE-\uDDCA\uDDCD-\uDDFF\uDE70-\uDE73\uDE78-\uDE7A\uDE80-\uDE82\uDE90-\uDE95])\uFE0F|(?:[\u261D\u26F9\u270A-\u270D]|\uD83C[\uDF85\uDFC2-\uDFC4\uDFC7\uDFCA-\uDFCC]|\uD83D[\uDC42\uDC43\uDC46-\uDC50\uDC66-\uDC78\uDC7C\uDC81-\uDC83\uDC85-\uDC87\uDC8F\uDC91\uDCAA\uDD74\uDD75\uDD7A\uDD90\uDD95\uDD96\uDE45-\uDE47\uDE4B-\uDE4F\uDEA3\uDEB4-\uDEB6\uDEC0\uDECC]|\uD83E[\uDD0F\uDD18-\uDD1F\uDD26\uDD30-\uDD39\uDD3C-\uDD3E\uDDB5\uDDB6\uDDB8\uDDB9\uDDBB\uDDCD-\uDDCF\uDDD1-\uDDDD])/g;
+    };
+  }
+});
+
+// node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js
+var require_string_width = __commonJS({
+  "node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js"(exports2, module2) {
+    "use strict";
+    var stripAnsi2 = require_strip_ansi();
+    var isFullwidthCodePoint = require_is_fullwidth_code_point();
+    var emojiRegex = require_emoji_regex();
+    var stringWidth3 = (string4) => {
+      if (typeof string4 !== "string" || string4.length === 0) {
+        return 0;
+      }
+      string4 = stripAnsi2(string4);
+      if (string4.length === 0) {
+        return 0;
+      }
+      string4 = string4.replace(emojiRegex(), "  ");
+      let width = 0;
+      for (let i = 0; i < string4.length; i++) {
+        const code = string4.codePointAt(i);
+        if (code <= 31 || code >= 127 && code <= 159) {
+          continue;
+        }
+        if (code >= 768 && code <= 879) {
+          continue;
+        }
+        if (code > 65535) {
+          i++;
+        }
+        width += isFullwidthCodePoint(code) ? 2 : 1;
+      }
+      return width;
+    };
+    module2.exports = stringWidth3;
+    module2.exports.default = stringWidth3;
+  }
+});
 
 // status.ts
 var status_exports = {};
@@ -14736,11 +14852,6 @@ function formatTemperatureText(value, options) {
 }
 
 // lib/bbcWeather.ts
-var ANSI_RESET3 = "\x1B[0m";
-var ANSI_GREEN3 = "\x1B[32m";
-var ANSI_YELLOW3 = "\x1B[33m";
-var ANSI_ORANGE3 = "\x1B[38;5;208m";
-var ANSI_RED3 = "\x1B[31m";
 var BBC_WEATHER_AGGREGATED_BASE_URL = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/aggregated";
 var DEFAULT_WEATHER_LOCATION = "cm2";
 var UK_TZ2 = "Europe/London";
@@ -14757,11 +14868,6 @@ function resolveDefaultLocation() {
 }
 function ukTodayYmd(now = /* @__PURE__ */ new Date()) {
   return now.toLocaleDateString("en-CA", { timeZone: UK_TZ2 });
-}
-function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
-  const [year, month, day] = ukTodayYmd(now).split("-").map(Number);
-  const date5 = new Date(Date.UTC(year, month - 1, day + 1));
-  return date5.toISOString().slice(0, 10);
 }
 async function fetchBbcWeatherAggregated(location) {
   const postcode = sanitizeWeatherLocation(location);
@@ -14781,133 +14887,6 @@ async function fetchBbcWeatherAggregated(location) {
     throw new Error(`Weather API request failed (${response.status})`);
   }
   return await response.json();
-}
-function parseTimeslotMinutes(timeslot) {
-  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
-  if (!match) return null;
-  const hours = Number.parseInt(match[1], 10);
-  const minutes = Number.parseInt(match[2], 10);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-function hourlySlotStart(localDate, timeslot) {
-  const slotMinutes = parseTimeslotMinutes(timeslot);
-  if (slotMinutes == null) return null;
-  const [year, month, day] = localDate.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  const hours = Math.floor(slotMinutes / 60);
-  const minutes = slotMinutes % 60;
-  return ukWallTimeToDate(year, month, day, hours, minutes);
-}
-function hourlyReportsFromWeather(data) {
-  return (data.forecasts || []).flatMap((forecast) => forecast.detailed?.reports || []).filter(
-    (report) => Boolean(report?.localDate && report?.timeslot)
-  );
-}
-function nextRainChance(reports, thresholdPercent, now = /* @__PURE__ */ new Date()) {
-  const nowMs = now.getTime();
-  let best = null;
-  for (const report of reports) {
-    const percent = report.precipitationProbabilityInPercent;
-    if (percent == null || percent <= thresholdPercent) continue;
-    const localDate = report.localDate;
-    const timeslot = report.timeslot;
-    if (!localDate || !timeslot) continue;
-    const slotStart = hourlySlotStart(localDate, timeslot);
-    if (!slotStart) continue;
-    const slotStartMs = slotStart.getTime();
-    if (slotStartMs <= nowMs) continue;
-    if (!best || slotStartMs < best.slotStartMs) {
-      best = { localDate, timeslot, percent, slotStartMs };
-    }
-  }
-  if (!best) return null;
-  return { localDate: best.localDate, timeslot: best.timeslot, percent: best.percent };
-}
-function formatRainChanceDayLabel(localDate, todayYmd, tomorrowYmd) {
-  if (localDate === todayYmd) return "today";
-  if (localDate === tomorrowYmd) return "tomorrow";
-  const date5 = /* @__PURE__ */ new Date(`${localDate}T12:00:00Z`);
-  if (Number.isNaN(date5.getTime())) return localDate;
-  return date5.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ2 });
-}
-function formatRainChanceTime(timeslot) {
-  const match = /^(\d{2}):(\d{2})$/.exec(timeslot.trim());
-  if (!match) return timeslot;
-  const hours = Number.parseInt(match[1], 10);
-  const minutes = Number.parseInt(match[2], 10);
-  if (minutes !== 0) return timeslot;
-  const hour12 = hours % 12 || 12;
-  const suffix = hours < 12 ? "am" : "pm";
-  return `${hour12}${suffix}`;
-}
-function formatRainChancePart(thresholdPercent, chance, todayYmd, tomorrowYmd) {
-  if (!chance) return `>${thresholdPercent}% -`;
-  const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
-  const time3 = formatRainChanceTime(chance.timeslot);
-  const rain = formatRainPercent(chance.percent);
-  return `>${thresholdPercent}% ${dayLabel} ${time3} (${rain})`;
-}
-function formatNextRainChancesLine(reports, now, todayYmd, tomorrowYmd) {
-  const part40 = formatRainChancePart(
-    40,
-    nextRainChance(reports, 40, now),
-    todayYmd,
-    tomorrowYmd
-  );
-  const part70 = formatRainChancePart(
-    70,
-    nextRainChance(reports, 70, now),
-    todayYmd,
-    tomorrowYmd
-  );
-  if (part40.endsWith("-") && part70.endsWith("-")) {
-    return "next rain: -";
-  }
-  return `next rain: ${part40} // ${part70}`;
-}
-function dailyReportsFromWeather(data) {
-  return (data.forecasts || []).map((forecast) => forecast.summary?.report).filter((report) => Boolean(report));
-}
-function weatherReportForDate(data, dayYmd) {
-  const reports = dailyReportsFromWeather(data);
-  return reports.find((report) => report.localDate === dayYmd) || null;
-}
-function todayWeatherReport(data, todayYmd = ukTodayYmd()) {
-  return weatherReportForDate(data, todayYmd) || dailyReportsFromWeather(data)[0] || null;
-}
-function sunriseSunsetForDate(data, dayYmd) {
-  const report = weatherReportForDate(data, dayYmd);
-  return {
-    sunrise: report?.sunrise || "-",
-    sunset: report?.sunset || "-"
-  };
-}
-function shouldUseColor3() {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-function colorize3(text, color) {
-  if (!shouldUseColor3()) return text;
-  return `${color}${text}${ANSI_RESET3}`;
-}
-function formatRainPercent(value) {
-  if (value == null) return "?%";
-  const text = `${value}%`;
-  if (value > 80) return colorize3(text, ANSI_RED3);
-  if (value >= 50) return colorize3(text, ANSI_ORANGE3);
-  if (value >= 25) return colorize3(text, ANSI_YELLOW3);
-  return colorize3(text, ANSI_GREEN3);
-}
-function formatWeatherLine(report) {
-  if (!report) return "-";
-  const summary = (report.weatherTypeText || report.enhancedWeatherDescription || "Unknown").trim() || "Unknown";
-  const max = formatTemperatureText(report.maxTempC, { scale: "max" });
-  const min = formatTemperatureText(report.minTempC, { scale: "min" });
-  const rain = formatRainPercent(report.precipitationProbabilityInPercent);
-  return `${summary}, max ${max}, min ${min}, rain ${rain}`;
-}
-function formatTodayWeatherLine(report) {
-  return formatWeatherLine(report);
 }
 
 // lib/tempApi.ts
@@ -14967,11 +14946,11 @@ var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var CACHE_MAX_AGE_DAYS = 2;
 var UK_TZ3 = "Europe/London";
-var ANSI_RESET4 = "\x1B[0m";
-var ANSI_GREEN4 = "\x1B[32m";
-var ANSI_YELLOW4 = "\x1B[33m";
-var ANSI_ORANGE4 = "\x1B[38;5;208m";
-var ANSI_RED4 = "\x1B[31m";
+var ANSI_RESET3 = "\x1B[0m";
+var ANSI_GREEN3 = "\x1B[32m";
+var ANSI_YELLOW3 = "\x1B[33m";
+var ANSI_ORANGE3 = "\x1B[38;5;208m";
+var ANSI_RED3 = "\x1B[31m";
 var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 function resolveOctoCredentials() {
   const parseGasFactor = (value) => {
@@ -15129,29 +15108,29 @@ function ratesUrlWithWindow(baseUrl, from, to) {
   url2.searchParams.set("period_to", toIsoNoMs(to));
   return url2.toString();
 }
-function shouldUseColor4() {
+function shouldUseColor3() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize4(text, color) {
-  if (!shouldUseColor4()) return text;
-  return `${color}${text}${ANSI_RESET4}`;
+function colorize3(text, color) {
+  if (!shouldUseColor3()) return text;
+  return `${color}${text}${ANSI_RESET3}`;
 }
 function colorForRate(rateIncVat, fuel) {
   if (fuel === "electricity") {
-    if (rateIncVat <= 5) return ANSI_GREEN4;
-    if (rateIncVat <= 12) return ANSI_YELLOW4;
-    if (rateIncVat < 20) return ANSI_ORANGE4;
-    return ANSI_RED4;
+    if (rateIncVat <= 5) return ANSI_GREEN3;
+    if (rateIncVat <= 12) return ANSI_YELLOW3;
+    if (rateIncVat < 20) return ANSI_ORANGE3;
+    return ANSI_RED3;
   }
-  if (rateIncVat < 4) return ANSI_GREEN4;
-  if (rateIncVat <= 5) return ANSI_YELLOW4;
-  if (rateIncVat < 6) return ANSI_ORANGE4;
-  return ANSI_RED4;
+  if (rateIncVat < 4) return ANSI_GREEN3;
+  if (rateIncVat <= 5) return ANSI_YELLOW3;
+  if (rateIncVat < 6) return ANSI_ORANGE3;
+  return ANSI_RED3;
 }
 function dayKeyUK(date5) {
   return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
 }
-function ukTomorrowYmd2(now = /* @__PURE__ */ new Date()) {
+function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
   const [year, month, day] = dayKeyUK(now).split("-").map(Number);
   const date5 = new Date(Date.UTC(year, month - 1, day + 1));
   return date5.toISOString().slice(0, 10);
@@ -15262,7 +15241,7 @@ async function fetchGasRates(from, to) {
 }
 async function loadTodayTomorrowGasRates(now = /* @__PURE__ */ new Date()) {
   const todayYmd = dayKeyUK(now);
-  const tomorrowYmd = ukTomorrowYmd2(now);
+  const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureGasPricesCached([todayYmd, tomorrowYmd], now);
   return {
     today: syntheticRatesFromPrices(cache[todayYmd] ?? []),
@@ -15273,7 +15252,7 @@ function formatGasPrice(rate) {
   const inc = rate.value_inc_vat;
   if (inc == null) return "?";
   const text = `${inc.toFixed(4)}p`;
-  return colorize4(text, colorForRate(inc, "gas"));
+  return colorize3(text, colorForRate(inc, "gas"));
 }
 function formatGasPrices(rates) {
   if (rates.length === 0) return "-";
@@ -15375,7 +15354,7 @@ async function ensureElectricityPricesCached(dayKeys, now) {
 }
 async function loadTodayTomorrowElectricityRates(now = /* @__PURE__ */ new Date()) {
   const todayYmd = dayKeyUK(now);
-  const tomorrowYmd = ukTomorrowYmd2(now);
+  const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
   return {
     today: cachedElectricityToRates(cache[todayYmd] ?? []),
@@ -15417,7 +15396,7 @@ function averageElectricityByPeriod(rates) {
 }
 function formatElectricityPrice(pence) {
   const text = `${pence.toFixed(2)}p`;
-  return colorize4(text, colorForRate(pence, "electricity"));
+  return colorize3(text, colorForRate(pence, "electricity"));
 }
 function formatElectricityPeriodLabel(label) {
   return label.replace(/\s+/g, "");
@@ -15547,6 +15526,697 @@ function upcomingBdaySectionLines(config2, now, limit = 3) {
   return nextUpcomingBirthdays(config2, now, limit).map(formatUpcomingBdayLine);
 }
 
+// lib/calApi.ts
+var MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
+];
+var DAY_HEADERS = "Mo Tu We Th Fr Sa Su";
+var HOLIDAYS_URL = "https://1q1v3hm1n2.execute-api.us-west-2.amazonaws.com/prod/holidays";
+var ANSI_REGEX2 = /\x1b\[[0-9;]*m/g;
+var RESET = "\x1B[0m";
+var BOLD = "\x1B[1m";
+var REVERSE = "\x1B[7m";
+var BLUE = "\x1B[94m";
+var YELLOW = "\x1B[93m";
+var GREY = "\x1B[90m";
+var RED = "\x1B[91m";
+function shouldStyleHighlight() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function daysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+function sundayFirstToMondayFirst(day) {
+  return (day + 6) % 7;
+}
+function firstDayOfMonth(year, month) {
+  return sundayFirstToMondayFirst(new Date(year, month, 1).getDay());
+}
+function formatIsoDate(year, month, day) {
+  return `${String(year).padStart(4, "0")}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function formatMonthDay(month, day) {
+  return `${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function parseIsoBirthDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const d = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) {
+    return null;
+  }
+  return d;
+}
+function parseShortDate(shortDate) {
+  const m = /^(\d{2})-(\d{2})-(\d{2})$/.exec(shortDate.trim());
+  if (!m) return null;
+  const year = 2e3 + Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10) - 1;
+  const day = Number.parseInt(m[3], 10);
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) {
+    return null;
+  }
+  return d;
+}
+function dateRangeInclusive(start, end) {
+  const from = start <= end ? start : end;
+  const to = start <= end ? end : start;
+  const result = [];
+  const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const endTime = new Date(to.getFullYear(), to.getMonth(), to.getDate()).getTime();
+  while (cursor.getTime() <= endTime) {
+    result.push(new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate()));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
+function colorForDay(year, month, day, mondayFirstWeekdayIndex, colors) {
+  const iso = formatIsoDate(year, month, day);
+  const monthDay = formatMonthDay(month, day);
+  if (colors.birthdayMonthDays.has(monthDay)) {
+    return RED;
+  }
+  if (colors.bankHolidayDays.has(iso)) {
+    return YELLOW;
+  }
+  if (colors.holidayDays.has(iso)) {
+    return BLUE;
+  }
+  if (mondayFirstWeekdayIndex >= 5) {
+    return GREY;
+  }
+  return "";
+}
+function applyStyles(text, parts) {
+  if (!shouldStyleHighlight() || parts.length === 0) {
+    return text;
+  }
+  return `${parts.join("")}${text}${RESET}`;
+}
+function visibleLength(value) {
+  return value.replace(ANSI_REGEX2, "").length;
+}
+function padRightVisible(value, width) {
+  const diff = width - visibleLength(value);
+  return diff > 0 ? `${value}${" ".repeat(diff)}` : value;
+}
+function colorLabel(label, color) {
+  return applyStyles(label, [color]);
+}
+function buildCalendarLegendLine() {
+  const parts = [
+    `${colorLabel("\u25A0", RED)} bday`,
+    `${colorLabel("\u25A0", YELLOW)} bank`,
+    `${colorLabel("\u25A0", BLUE)} hol`,
+    `${colorLabel("\u25A0", GREY)} w/e`
+  ];
+  return `Key: ${parts.join("  ")}`;
+}
+function cellText(year, month, day, mondayFirstWeekdayIndex, highlightDay, colors) {
+  if (day == null) {
+    return "  ";
+  }
+  const text = String(day).padStart(2, " ");
+  const color = colorForDay(year, month, day, mondayFirstWeekdayIndex, colors);
+  const styleParts = [];
+  if (color) styleParts.push(color);
+  if (highlightDay != null && day === highlightDay) {
+    styleParts.push(REVERSE, BOLD);
+  }
+  return applyStyles(text, styleParts);
+}
+function padLine(year, month, cells, highlightDay, colors) {
+  return cells.map((n, idx) => cellText(year, month, n, idx, highlightDay, colors)).join(" ");
+}
+var STATUS_CALENDAR_COLUMNS = 3;
+var STATUS_CALENDAR_MONTH_WIDTH = 20;
+var STATUS_CALENDAR_GUTTER = "  ";
+function statusCalendarInnerWidth() {
+  return STATUS_CALENDAR_COLUMNS * STATUS_CALENDAR_MONTH_WIDTH + (STATUS_CALENDAR_COLUMNS - 1) * STATUS_CALENDAR_GUTTER.length;
+}
+function columnWidthsForRow(innerWidth, columns, gutter) {
+  if (innerWidth === void 0) {
+    return columns.map((col) => Math.max(0, ...col.map(visibleLength)));
+  }
+  const gutterTotal = (columns.length - 1) * gutter.length;
+  const available = innerWidth - gutterTotal;
+  const base = Math.floor(available / columns.length);
+  const remainder = available - base * columns.length;
+  return Array.from({ length: columns.length }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+function joinMonthRow(columns, innerWidth, gutter = STATUS_CALENDAR_GUTTER) {
+  if (columns.length === 0) return [];
+  const colWidths = columnWidthsForRow(innerWidth, columns, gutter);
+  const rows = Math.max(...columns.map((col) => col.length));
+  const lines = [];
+  for (let row = 0; row < rows; row += 1) {
+    const parts = columns.map(
+      (col, index) => padRightVisible(col[row] ?? "", colWidths[index])
+    );
+    lines.push(parts.join(gutter));
+  }
+  return lines;
+}
+function buildStatusCalendarLines(months, today, colors, maxContentLines, innerWidth) {
+  const calendarWidth = innerWidth ?? statusCalendarInnerWidth();
+  const legend = buildCalendarLegendLine();
+  const lines = [padRightVisible(legend, calendarWidth)];
+  for (let i = 0; i < months.length; i += STATUS_CALENDAR_COLUMNS) {
+    const rowMonths = months.slice(i, i + STATUS_CALENDAR_COLUMNS).map(
+      ({ year, month }) => buildCalendarLines(year, month, today, colors)
+    );
+    const rowLines = joinMonthRow(rowMonths, calendarWidth, STATUS_CALENDAR_GUTTER);
+    const separator = lines.length > 1 ? 1 : 0;
+    if (maxContentLines !== void 0 && lines.length + separator + rowLines.length > maxContentLines) {
+      break;
+    }
+    if (separator > 0) {
+      lines.push("");
+    }
+    lines.push(...rowLines);
+  }
+  return lines;
+}
+function buildCalendarLines(year, month, today, colors) {
+  const highlightDay = today.getFullYear() === year && today.getMonth() === month ? today.getDate() : null;
+  const title = `${MONTH_NAMES[month]} ${year}`;
+  const lastDay = daysInMonth(year, month);
+  const startPad = firstDayOfMonth(year, month);
+  const lines = [title, DAY_HEADERS];
+  let row = [];
+  for (let i = 0; i < startPad; i++) {
+    row.push(null);
+  }
+  for (let d = 1; d <= lastDay; d++) {
+    row.push(d);
+    if (row.length === 7) {
+      lines.push(padLine(year, month, row, highlightDay, colors));
+      row = [];
+    }
+  }
+  if (row.length > 0) {
+    while (row.length < 7) {
+      row.push(null);
+    }
+    lines.push(padLine(year, month, row, highlightDay, colors));
+  }
+  return lines;
+}
+function statusYearWindowFrom(now = /* @__PURE__ */ new Date()) {
+  const priorFutureEnd = 10;
+  const offsets = [-3, -2, -1];
+  for (let month = 0; month <= priorFutureEnd || (offsets.length - 3) % STATUS_CALENDAR_COLUMNS !== 0; month += 1) {
+    offsets.push(month);
+  }
+  return offsets.map((offset) => {
+    const t = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    return { year: t.getFullYear(), month: t.getMonth() };
+  });
+}
+function resolveCalConfig() {
+  const config2 = readPhoneCliConfig();
+  const token = asRecord(config2.cal)?.token;
+  if (typeof token === "string" && token.trim() !== "") {
+    const birthdayMonthDays = /* @__PURE__ */ new Set();
+    const bdaySection = asRecord(config2.bday);
+    if (bdaySection) {
+      for (const person of Object.values(bdaySection)) {
+        const raw = String(person?.bd || "").trim();
+        if (!raw) continue;
+        const parsed = parseIsoBirthDate(raw);
+        if (!parsed) continue;
+        birthdayMonthDays.add(
+          formatMonthDay(parsed.getUTCMonth(), parsed.getUTCDate())
+        );
+      }
+    }
+    return { token: token.trim(), birthdayMonthDays };
+  }
+  throw new Error("Missing cal token (expected config.cal.token).");
+}
+function readOptionalCalConfig() {
+  try {
+    return resolveCalConfig();
+  } catch {
+    return null;
+  }
+}
+async function fetchCalendarColors(token, birthdayMonthDays) {
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${token}`,
+    "x-api-key": token
+  };
+  const response = await fetch(HOLIDAYS_URL, { headers });
+  if (!response.ok) {
+    throw new Error(`Holiday request failed (${response.status})`);
+  }
+  const payload = await response.json();
+  const holidayDays = /* @__PURE__ */ new Set();
+  const bankHolidayDays = /* @__PURE__ */ new Set();
+  const text = asRecord(payload.text);
+  const holidays = Array.isArray(text?.holidays) ? text.holidays : [];
+  for (const item of holidays) {
+    if (!item?.start || !item?.end) continue;
+    const start = parseShortDate(item.start);
+    const end = parseShortDate(item.end);
+    if (!start || !end) continue;
+    for (const day of dateRangeInclusive(start, end)) {
+      holidayDays.add(formatIsoDate(day.getFullYear(), day.getMonth(), day.getDate()));
+    }
+  }
+  const bankHolidays = Array.isArray(text?.bankHolidays) ? text.bankHolidays : [];
+  for (const item of bankHolidays) {
+    if (!item?.start) continue;
+    const parsed = parseShortDate(item.start);
+    if (!parsed) continue;
+    bankHolidayDays.add(formatIsoDate(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+  }
+  return { birthdayMonthDays, holidayDays, bankHolidayDays };
+}
+async function loadStatusCalendarData(now = /* @__PURE__ */ new Date()) {
+  const calConfig = readOptionalCalConfig();
+  if (!calConfig) return null;
+  try {
+    const colors = await fetchCalendarColors(calConfig.token, calConfig.birthdayMonthDays);
+    return { months: statusYearWindowFrom(now), colors };
+  } catch {
+    return null;
+  }
+}
+
+// bbc.ts
+function toYmd(date5) {
+  return date5.toISOString().slice(0, 10);
+}
+async function fetchBbcJson(url2, refDate, sport) {
+  const response = await fetch(url2, {
+    headers: {
+      Accept: "application/json",
+      "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      Priority: "u=1, i",
+      Referer: `https://www.bbc.co.uk/sport/${sport}/scores-fixtures/${refDate}`
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`API request failed (${response.status})`);
+  }
+  return await response.json();
+}
+
+// lib/ballApi.ts
+var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
+  "premierleague",
+  "championship",
+  "leagueone",
+  "facup",
+  "leaguecup",
+  "championsleague",
+  "europaleague",
+  "scottishpremiership",
+  "englishpremierleague",
+  "englishchampionship",
+  "englishleagueone",
+  "eflcup",
+  "uefachampionsleague",
+  "uefaeuropaleague"
+]);
+var BBC_BASE_URL = "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
+var ANSI_RESET4 = "\x1B[0m";
+var ANSI_DARK_GREEN = "\x1B[32m";
+var ANSI_DARK_RED = "\x1B[31m";
+var ANSI_BRIGHT_GREEN = "\x1B[92m";
+var ANSI_BRIGHT_RED = "\x1B[91m";
+var ANSI_BG_CLARET = "\x1B[48;5;88m";
+var ANSI_VILLA_BLUE = "\x1B[38;5;39m";
+var ANSI_BLUE2 = "\x1B[94m";
+var urlForDaysGames = (today, end, start) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent("urn:bbc:sportsdata:football:tournament-collection:collated")}`;
+function normalizeText(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+function urnSlug(urn) {
+  if (!urn) return "";
+  const parts = String(urn).split(":");
+  return parts[parts.length - 1] || "";
+}
+function shouldUseColor4() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function isAstonVillaName(name) {
+  const n = normalizeText(name);
+  return n === "astonvilla" || n === "avfc" || n === "avl";
+}
+function highlightAstonVilla(name) {
+  if (!shouldUseColor4() || !isAstonVillaName(name)) return name;
+  return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET4}`;
+}
+function teamLabel(team) {
+  const base = team?.name?.shortName || team?.shortName || team?.name?.abbreviation || team?.name?.fullName || team?.fullName || team?.key || "unknown-team";
+  return highlightAstonVilla(base);
+}
+function competitionLabel(event) {
+  return event?.tournament?.disambiguatedName || event?.tournament?.name || event?.eventGroupingLabel || "Other";
+}
+function competitionAllowed(event) {
+  const candidates = [
+    event?.tournament?.disambiguatedName,
+    event?.tournament?.name,
+    urnSlug(event?.tournament?.urn)
+  ].filter(Boolean).map(normalizeText);
+  return candidates.some((candidate) => COMPETITION_ALLOWLIST.has(candidate));
+}
+function eventTime(event) {
+  const dateValue = event.startTime || event.startDateTime;
+  if (!dateValue) return "??:?? UK";
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return "??:?? UK";
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZoneName: "short"
+  }).formatToParts(d);
+  const hh = parts.find((p) => p.type === "hour")?.value || "??";
+  const mm = parts.find((p) => p.type === "minute")?.value || "??";
+  const tz = parts.find((p) => p.type === "timeZoneName")?.value || "UK";
+  return `${hh}:${mm} ${tz}`;
+}
+function teamScore(team, event) {
+  const direct = team?.scores?.score ?? team?.runningScores?.score ?? team?.score ?? null;
+  if (direct != null) return String(direct);
+  const participant = (event.participants || []).find((p) => {
+    return p.alignment === (team === event.homeTeam ? "home" : "away");
+  });
+  const participantScore = participant?.score ?? participant?.runningScore ?? null;
+  return participantScore != null ? String(participantScore) : null;
+}
+function isResultState(event) {
+  const status = String(event.status || "").toLowerCase();
+  return Boolean(status) && status !== "preevent";
+}
+function isFinishedState(event) {
+  const status = String(event.status || "").toLowerCase();
+  if (status === "postevent") return true;
+  const note = String(event.eventStatusNote || "").toLowerCase();
+  return note === "ft" || note.includes("full time") || note.includes("final") || note.includes("aet") || note.includes("pens");
+}
+function scoreNumber(score) {
+  if (score == null) return null;
+  const parsed = Number.parseInt(String(score), 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+function colorTeamName(name, role, isLive) {
+  if (isAstonVillaName(name)) return highlightAstonVilla(name);
+  if (!shouldUseColor4()) return name;
+  if (role === "win") return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET4}`;
+  if (role === "loss") return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET4}`;
+  return name;
+}
+function fixtureLine(event) {
+  const home = teamLabel(event.homeTeam);
+  const away = teamLabel(event.awayTeam);
+  const statusLabel = event.eventStatusNote || event.statusText || "scheduled";
+  const competitionTag = competitionLabel(event);
+  const homeScore = teamScore(event.homeTeam, event);
+  const awayScore = teamScore(event.awayTeam, event);
+  const hasScore = homeScore != null && awayScore != null;
+  const isLive = isResultState(event) && !isFinishedState(event);
+  const time3 = eventTime(event);
+  const isScheduled = normalizeText(statusLabel) === "scheduled";
+  const liveStatusLabel = shouldUseColor4() && isLive ? `${ANSI_BLUE2}${statusLabel}${ANSI_RESET4}` : statusLabel;
+  const suffix = `(${competitionTag}) ${isScheduled ? "" : `(${liveStatusLabel})`}`.trim();
+  if (isResultState(event) && hasScore) {
+    const homeN = scoreNumber(homeScore);
+    const awayN = scoreNumber(awayScore);
+    let homeDisplay = home;
+    let awayDisplay = away;
+    if (homeN != null && awayN != null && homeN !== awayN) {
+      homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
+      awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+    }
+    return `${time3} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay} ${suffix}`.trim();
+  }
+  return `${time3} ${home} vs ${away} ${suffix}`.trim();
+}
+function normalizeEvent(raw) {
+  const home = raw.homeTeam || raw.home;
+  const away = raw.awayTeam || raw.away;
+  return {
+    ...raw,
+    startTime: raw.startTime || raw.startDateTime || "",
+    eventStatusNote: raw.eventStatusNote || raw.statusComment?.value || raw.periodLabel?.value || raw.status || raw.statusText || "",
+    homeTeam: {
+      ...home,
+      key: home?.key || home?.id || home?.urn || "",
+      name: {
+        abbreviation: home?.name?.abbreviation || home?.name?.shortName || home?.shortName || home?.fullName || "",
+        shortName: home?.name?.shortName || home?.shortName || "",
+        fullName: home?.name?.fullName || home?.fullName || ""
+      },
+      urn: home?.urn || ""
+    },
+    awayTeam: {
+      ...away,
+      key: away?.key || away?.id || away?.urn || "",
+      name: {
+        abbreviation: away?.name?.abbreviation || away?.name?.shortName || away?.shortName || away?.fullName,
+        shortName: away?.name?.shortName || away?.shortName || "",
+        fullName: away?.name?.fullName || away?.fullName || ""
+      },
+      urn: away?.urn || ""
+    },
+    participants: raw.participants || []
+  };
+}
+function flattenEvents(matchData) {
+  const events = [];
+  for (const tournament of matchData || []) {
+    const dateMap = tournament.tournamentDatesWithEvents || {};
+    for (const slotList of Object.values(dateMap)) {
+      for (const slot of slotList || []) {
+        for (const event of slot.events || []) {
+          events.push(normalizeEvent(event));
+        }
+      }
+    }
+  }
+  events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  return events;
+}
+function flattenEventsFromContainer(root) {
+  const events = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) stack.push(item);
+      continue;
+    }
+    if (!node || typeof node !== "object") continue;
+    const n = node;
+    if ((n.home || n.homeTeam) && (n.away || n.awayTeam) && (n.startTime || n.startDateTime)) {
+      events.push(normalizeEvent(n));
+    }
+    for (const value of Object.values(n)) {
+      if (value && typeof value === "object") {
+        stack.push(value);
+      }
+    }
+  }
+  events.sort(
+    (a, b) => new Date(a.startTime || a.startDateTime).getTime() - new Date(b.startTime || b.startDateTime).getTime()
+  );
+  return events;
+}
+async function fetchMatchData(url2, dayYmd) {
+  const refDate = dayYmd || toYmd(/* @__PURE__ */ new Date());
+  const data = await fetchBbcJson(url2, refDate, "football");
+  const batchShape = data?.payload?.[0]?.body?.matchData;
+  if (batchShape) return flattenEvents(batchShape);
+  return flattenEventsFromContainer(data);
+}
+async function fetchTodayFootballFixtures(ymd) {
+  const today = toYmd(/* @__PURE__ */ new Date());
+  const url2 = urlForDaysGames(today, ymd, ymd);
+  return (await fetchMatchData(url2, ymd)).filter(competitionAllowed);
+}
+function footballStatusSectionLines(events) {
+  if (events.length === 0) return ["none today"];
+  return [...events].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()).map((event) => fixtureLine(event));
+}
+async function loadFootballStatusLines(ymd) {
+  const events = await fetchTodayFootballFixtures(ymd);
+  return footballStatusSectionLines(events);
+}
+
+// lib/cricApi.ts
+var CRICKET_BASE_URL = "https://web-cdn.api.bbci.co.uk/wc-poll-data/container/sport-data-scores-fixtures";
+var CRICKET_URN = "urn:bbc:sportsdata:cricket:tournament-collection:collated";
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
+function teamLabel2(team) {
+  return team?.shortName || team?.name || "TBC";
+}
+function asInningsList(team) {
+  const innings = team?.innings;
+  if (!innings) return [];
+  return Array.isArray(innings) ? innings : [innings];
+}
+function inningsScore(innings) {
+  if (innings.runs == null) return "";
+  const wickets = innings.wickets == null ? "-" : String(innings.wickets);
+  const overs = innings.overs ? ` (${innings.overs})` : "";
+  const declared = innings.isDeclared ? "d" : "";
+  return `${innings.runs}/${wickets}${declared}${overs}`;
+}
+function inningsLine(team, innings, index) {
+  const label = teamLabel2(team);
+  const suffix = index > 0 ? ` (Inns ${index + 1})` : "";
+  if (!innings) return `${label}${suffix}: -`;
+  const score = inningsScore(innings);
+  return `${label}${suffix}: ${score || "-"}`;
+}
+function inningsOrder(innings) {
+  const maybe = innings.inningsNumber ?? innings.innings_number ?? innings.number;
+  if (maybe == null) return null;
+  const parsed = Number(maybe);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+function inningsStartTime(innings) {
+  const raw = innings.startDateTime || innings.start_date_time;
+  if (!raw) return null;
+  const ts = new Date(raw).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+function orderedInningsLines(homeTeam, awayTeam) {
+  const entries = [
+    ...asInningsList(homeTeam).map((innings, idx) => ({ team: homeTeam, innings, localIndex: idx })),
+    ...asInningsList(awayTeam).map((innings, idx) => ({ team: awayTeam, innings, localIndex: idx }))
+  ];
+  if (entries.length === 0) {
+    return ["  -"];
+  }
+  entries.sort((a, b) => {
+    const orderA = inningsOrder(a.innings);
+    const orderB = inningsOrder(b.innings);
+    if (orderA != null && orderB != null && orderA !== orderB) return orderA - orderB;
+    if (orderA != null && orderB == null) return -1;
+    if (orderA == null && orderB != null) return 1;
+    const startA = inningsStartTime(a.innings);
+    const startB = inningsStartTime(b.innings);
+    if (startA != null && startB != null && startA !== startB) return startA - startB;
+    if (startA != null && startB == null) return -1;
+    if (startA == null && startB != null) return 1;
+    if (a.localIndex !== b.localIndex) return a.localIndex - b.localIndex;
+    return teamLabel2(a.team).localeCompare(teamLabel2(b.team));
+  });
+  return entries.map((entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex)}`);
+}
+function normalizeText2(value) {
+  return String(value || "").toLowerCase();
+}
+function competitionLabel2(secondary, event) {
+  return secondary.displayLabel || event.tournamentName || event.eventGroupingLabel || "Other";
+}
+function isAllowedCompetition(label) {
+  const text = normalizeText2(label);
+  if (!text) return false;
+  if (text.includes("women")) return false;
+  const isCountyChampionship = text.includes("county championship");
+  const isEnglishLeagueOrCup = (text.includes("league") || text.includes("cup")) && (text.includes("england") || text.includes("english") || text.includes("county") || text.includes("vitality blast") || text.includes("one-day cup") || text.includes("one day cup") || text.includes("the hundred"));
+  const isTest = text.includes("test");
+  const isMensInternational = text.includes("international") || text.includes("odi") || text.includes("t20i") || text.includes("world cup") || text.includes("champions trophy") || text.includes("ashes");
+  return isCountyChampionship || isEnglishLeagueOrCup || isTest || isMensInternational;
+}
+function multiDayLabel(event, selectedYmd) {
+  const start = event.matchDateSummary?.startDate;
+  const end = event.matchDateSummary?.endDate;
+  if (!start || !end || start === end) return "";
+  const startDate = /* @__PURE__ */ new Date(`${start}T00:00:00Z`);
+  const endDate = /* @__PURE__ */ new Date(`${end}T00:00:00Z`);
+  const selectedDate = /* @__PURE__ */ new Date(`${selectedYmd}T00:00:00Z`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || Number.isNaN(selectedDate.getTime())) {
+    return "";
+  }
+  if (selectedDate < startDate || selectedDate > endDate) return "";
+  const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS3) + 1;
+  return `Day ${dayNumber}`;
+}
+function fixtureHeaderLine(event, ymd) {
+  const homeTeam = event.participants?.homeTeam;
+  const awayTeam = event.participants?.awayTeam;
+  const dayLabel = multiDayLabel(event, ymd);
+  return [
+    event.startTime || "??:??",
+    `${teamLabel2(homeTeam)} vs ${teamLabel2(awayTeam)}`,
+    event.groundShortName || "-",
+    dayLabel || "-",
+    event.matchSummary?.resultString || "-"
+  ].join(" | ");
+}
+function cricketStatusSectionLines(data, ymd) {
+  const lines = [];
+  let matchCount = 0;
+  for (const group of data.eventGroups || []) {
+    for (const secondary of group.secondaryGroups || []) {
+      const events = [...secondary.events || []].sort((a, b) => {
+        const aTime = new Date(a.startDateTime || "").getTime();
+        const bTime = new Date(b.startDateTime || "").getTime();
+        return aTime - bTime;
+      });
+      const allowedEvents = events.filter(
+        (event) => isAllowedCompetition(competitionLabel2(secondary, event))
+      );
+      if (allowedEvents.length === 0) continue;
+      if (lines.length > 0) {
+        lines.push("");
+      }
+      lines.push(secondary.displayLabel || "Other");
+      for (const event of allowedEvents) {
+        matchCount += 1;
+        const homeTeam = event.participants?.homeTeam;
+        const awayTeam = event.participants?.awayTeam;
+        lines.push(fixtureHeaderLine(event, ymd));
+        lines.push(...orderedInningsLines(homeTeam, awayTeam));
+        lines.push("");
+      }
+    }
+  }
+  if (matchCount === 0) {
+    return ["none today"];
+  }
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+async function fetchTodayCricket(ymd) {
+  const url2 = `${CRICKET_BASE_URL}?selectedEndDate=${ymd}&selectedStartDate=${ymd}&todayDate=${ymd}&urn=${encodeURIComponent(CRICKET_URN)}`;
+  return fetchBbcJson(url2, ymd, "cricket");
+}
+async function loadCricketStatusLines(ymd) {
+  const data = await fetchTodayCricket(ymd);
+  return cricketStatusSectionLines(data, ymd);
+}
+
 // lib/moneyApi.ts
 var DEFAULT_BUDGET = 744;
 var DAILY_DEDUCTION = 24;
@@ -15612,6 +16282,9 @@ function statusShortcutFooter() {
   const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
   return `${shortcuts}  q:quit`;
 }
+function statusShortcutFooterWidth() {
+  return statusShortcutFooter().length;
+}
 function runStatusShortcut(shortcut) {
   return runLauncherCommand({
     value: 0,
@@ -15661,7 +16334,335 @@ function houseSectionLabel(now, wfh) {
   return "house (office)";
 }
 
+// lib/wApi.ts
+var import_strip_ansi = __toESM(require_strip_ansi());
+var import_string_width = __toESM(require_string_width());
+var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
+var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
+var ANSI_RESET5 = "\x1B[0m";
+var ANSI_GREEN4 = "\x1B[32m";
+var ANSI_YELLOW4 = "\x1B[33m";
+var ANSI_ORANGE4 = "\x1B[38;5;208m";
+var ANSI_RED4 = "\x1B[31m";
+var HEAVY_RAIN_WORDING = /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
+var LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
+function visibleLength2(value) {
+  return (0, import_string_width.default)((0, import_strip_ansi.default)(value));
+}
+function emojiTerminalDisplayWidth(value) {
+  return visibleLength2((0, import_strip_ansi.default)(value).replace(/\uFE0F/g, ""));
+}
+function asRecord2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function resolveMoonRapidApiKey() {
+  const config2 = readPhoneCliConfig();
+  const ballConfig = asRecord2(config2.ball);
+  return String(ballConfig?.rapidApiKey || "").trim();
+}
+function toMoonDate(localDate) {
+  if (!localDate) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+  if (!m) return "";
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+async function fetchMoonPhase(localDate) {
+  const apiKey = resolveMoonRapidApiKey();
+  if (!apiKey) {
+    return "moon api key not set";
+  }
+  const moonDate = toMoonDate(localDate);
+  if (!moonDate) {
+    return "-";
+  }
+  const response = await fetch(`${MOON_API_URL}?date=${encodeURIComponent(moonDate)}`, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "x-rapidapi-host": MOON_API_HOST,
+      "x-rapidapi-key": apiKey
+    }
+  });
+  if (!response.ok) {
+    return "no api calls for moon data left";
+  }
+  const payload = await response.json();
+  const phase = payload.data?.phase ? String(payload.data.phase).trim() : "";
+  const emoji3 = payload.data?.phaseEmoji ? String(payload.data.phaseEmoji).trim() : "";
+  if (!phase && !emoji3) {
+    return "-";
+  }
+  return `${emoji3} ${phase}`.trim();
+}
+function formatWeatherDisplay(weatherTypeText, enhancedWeatherDescription) {
+  const description = (weatherTypeText || enhancedWeatherDescription || "Unknown").trim() || "Unknown";
+  const lower = description.toLowerCase();
+  if (/\b(snow|sleet|hail|blizzard|ice pellets|freezing rain|wintry|wintry showers)\b/.test(lower)) {
+    return { icon: "\u2744", description };
+  }
+  if (HEAVY_RAIN_WORDING.test(lower)) {
+    return { icon: "\u26C8\u26C8", description };
+  }
+  if (LIGHT_RAIN_WORDING.test(lower) || /\b(thundery|thunderstorm|thunder|lightning)\b/.test(lower)) {
+    return { icon: "\u26C8", description };
+  }
+  if (/\b(light cloud|thin cloud|partly cloudy|partly sunny|sunny intervals|medium cloud|bright intervals)\b/.test(
+    lower
+  )) {
+    return { icon: "\u26C5", description };
+  }
+  if (/\bsunny\b/.test(lower) && !/\bnot\s+sunny\b/.test(lower)) {
+    return { icon: "\u2600", description };
+  }
+  if (/\b(overcast|heavy cloud|thick cloud|grey cloud|gray cloud|cloudy)\b/.test(lower)) {
+    return { icon: "\u2601", description };
+  }
+  if (/\bclear\s+sky\b/.test(lower)) {
+    return { icon: "\u263E", description };
+  }
+  return { icon: "", description };
+}
+function shouldUseColor5() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize4(value, color) {
+  if (!shouldUseColor5()) return value;
+  return `${color}${value}${ANSI_RESET5}`;
+}
+function formatMaxTemp(value) {
+  return formatTemperatureText(value, { scale: "max" });
+}
+function formatMinTemp(value) {
+  return formatTemperatureText(value, { scale: "min" });
+}
+function formatRain(value) {
+  if (value == null) return "?%";
+  const text = `${value}%`;
+  const colored = value > 80 ? colorize4(text, ANSI_RED4) : value >= 50 ? colorize4(text, ANSI_ORANGE4) : value >= 25 ? colorize4(text, ANSI_YELLOW4) : colorize4(text, ANSI_GREEN4);
+  return colored;
+}
+function formatWindSpeed(value) {
+  if (value == null) return "?mph";
+  const text = `${value}mph`;
+  if (value > 40) return colorize4(text, ANSI_RED4);
+  if (value >= 20) return colorize4(text, ANSI_ORANGE4);
+  if (value >= 10) return colorize4(text, ANSI_YELLOW4);
+  return colorize4(text, ANSI_GREEN4);
+}
+function formatDisplayDate(localDate) {
+  if (!localDate) return "unknown-date";
+  const d = /* @__PURE__ */ new Date(`${localDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return localDate;
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "short" });
+  const day = d.toLocaleDateString("en-GB", { day: "2-digit" });
+  const month = d.toLocaleDateString("en-GB", { month: "2-digit" });
+  return `${weekday} ${day}/${month}`;
+}
+function formatDayCells(report) {
+  const date5 = formatDisplayDate(report.localDate);
+  const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
+  const hi = formatMaxTemp(report.maxTempC);
+  const lo = formatMinTemp(report.minTempC);
+  const rain = formatRain(report.precipitationProbabilityInPercent);
+  const windSpeed = formatWindSpeed(report.windSpeedMph);
+  const windDir = report.windDirectionAbbreviation || "?";
+  return [date5, wx.icon, wx.description, lo, hi, rain, `${windSpeed} ${windDir}`];
+}
+function formatHourlyTemp(value) {
+  if (value == null) return "?";
+  return formatMaxTemp(value);
+}
+function formatHourlyCells(report) {
+  const time3 = report.timeslot || "??:??";
+  const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
+  const temp = formatHourlyTemp(report.temperatureC);
+  const rain = formatRain(report.precipitationProbabilityInPercent);
+  const windSpeed = formatWindSpeed(report.windSpeedMph);
+  const windDir = report.windDirectionAbbreviation || "?";
+  return [time3, wx.icon, wx.description, temp, rain, `${windSpeed} ${windDir}`];
+}
+function parseClockMinutes(value) {
+  if (!value) return null;
+  const m = /^(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const hh = Number.parseInt(m[1], 10);
+  const mm = Number.parseInt(m[2], 10);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+function formatDayLength(sunrise, sunset) {
+  const start = parseClockMinutes(sunrise);
+  const end = parseClockMinutes(sunset);
+  if (start == null || end == null || end < start) {
+    return "-";
+  }
+  const total = end - start;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  return `${hours}h ${String(mins).padStart(2, "0")}m`;
+}
+function formatPollen(report) {
+  if (!report) return "-";
+  const index = report.pollenIndex;
+  const text = report.pollenIndexText ? String(report.pollenIndexText).trim() : "";
+  if (index == null && !text) return "-";
+  if (index == null) return text;
+  if (!text) return String(index);
+  return `${index} (${text})`;
+}
+function cellWidthForTable(colIdx, value, colWidthFns) {
+  const fn = colWidthFns?.[colIdx];
+  if (fn) return fn(value);
+  return visibleLength2(value);
+}
+function makeAsciiTable2(headers, rows, forcedWidths, colWidthFns) {
+  const padCell = (value, colIdx, width) => {
+    const vw = cellWidthForTable(colIdx, value, colWidthFns);
+    const padCount = width - vw;
+    return padCount > 0 ? `${value}${" ".repeat(padCount)}` : value;
+  };
+  const widths = headers.map((header, colIdx) => {
+    let max = Math.max(cellWidthForTable(colIdx, header, colWidthFns), forcedWidths?.[colIdx] || 0);
+    for (const row of rows) {
+      const cell = row[colIdx] || "";
+      const len = cellWidthForTable(colIdx, cell, colWidthFns);
+      if (len > max) max = len;
+    }
+    return max;
+  });
+  const border = `+${widths.map((w) => "-".repeat(w + 2)).join("+")}+`;
+  const renderRow = (cells) => `| ${cells.map((cell, i) => padCell(cell || "", i, widths[i])).join(" | ")} |`;
+  const lines = [border, renderRow(headers), border];
+  for (const row of rows) {
+    lines.push(renderRow(row));
+  }
+  lines.push(border);
+  return lines;
+}
+async function buildFullWeatherLines(data, requestedPostcode) {
+  const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
+  const lastUpdated = data.lastUpdated || "unknown";
+  const reports = (data.forecasts || []).map((f) => f.summary?.report).filter((r) => Boolean(r));
+  const lines = [
+    `Weather for ${location}`,
+    `Last updated: ${lastUpdated}`,
+    ""
+  ];
+  if (reports.length === 0) {
+    lines.push("No daily forecast data available.");
+    return lines;
+  }
+  const forecastColWidthFns = { 1: emojiTerminalDisplayWidth };
+  const todayExtrasColWidthFns = { 4: emojiTerminalDisplayWidth };
+  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
+  const dayRows = reports.map((report) => formatDayCells(report));
+  const hourlyReports = (data.forecasts || []).flatMap((f) => f.detailed?.reports || []).filter((r) => Boolean(r && r.localDate && r.timeslot));
+  const todayDate = reports[0]?.localDate || "";
+  const tomorrowDate = reports[1]?.localDate || "";
+  const rowsForDate = (date5) => {
+    if (!date5) return [];
+    return hourlyReports.filter((r) => r.localDate === date5).sort((a, b) => (a.timeslot || "").localeCompare(b.timeslot || "")).map((report) => formatHourlyCells(report));
+  };
+  const todayHourlyRows = rowsForDate(todayDate);
+  const tomorrowHourlyRows = rowsForDate(tomorrowDate);
+  const allHourlyRows = [...tomorrowHourlyRows, ...todayHourlyRows];
+  const minTempColWidth = Math.max(
+    visibleLength2("Min"),
+    ...dayRows.map((r) => visibleLength2(r[3] || ""))
+  );
+  const maxTempColWidth = Math.max(
+    visibleLength2("Max"),
+    ...dayRows.map((r) => visibleLength2(r[4] || ""))
+  );
+  const tempWidth = Math.max(
+    visibleLength2("Temp"),
+    minTempColWidth,
+    maxTempColWidth,
+    ...allHourlyRows.map((r) => visibleLength2(r[3] || ""))
+  );
+  const sharedWidths = {
+    dateOrTime: Math.max(
+      visibleLength2("Date"),
+      visibleLength2("Time"),
+      ...dayRows.map((r) => visibleLength2(r[0] || "")),
+      ...allHourlyRows.map((r) => visibleLength2(r[0] || ""))
+    ),
+    icon: Math.max(
+      emojiTerminalDisplayWidth("Ic"),
+      ...dayRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+      ...allHourlyRows.map((r) => emojiTerminalDisplayWidth(r[1] || ""))
+    ),
+    weather: Math.max(
+      visibleLength2("Weather"),
+      ...dayRows.map((r) => visibleLength2(r[2] || "")),
+      ...allHourlyRows.map((r) => visibleLength2(r[2] || ""))
+    ),
+    rain: Math.max(
+      visibleLength2("Rain"),
+      ...dayRows.map((r) => visibleLength2(r[5] || "")),
+      ...allHourlyRows.map((r) => visibleLength2(r[4] || ""))
+    ),
+    wind: Math.max(
+      visibleLength2("Wind"),
+      ...dayRows.map((r) => visibleLength2(r[6] || "")),
+      ...allHourlyRows.map((r) => visibleLength2(r[5] || ""))
+    )
+  };
+  const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
+  const hourlyWidths = [
+    sharedWidths.dateOrTime,
+    sharedWidths.icon,
+    sharedWidths.weather,
+    tempWidth,
+    sharedWidths.rain,
+    sharedWidths.wind
+  ];
+  const appendHourlySection = (date5, rows) => {
+    if (!date5 || rows.length === 0) return;
+    lines.push(`Hourly forecast for ${formatDisplayDate(date5)}`);
+    lines.push(...makeAsciiTable2(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
+    lines.push("");
+  };
+  appendHourlySection(tomorrowDate, tomorrowHourlyRows);
+  appendHourlySection(todayDate, todayHourlyRows);
+  if (todayDate) {
+    const moon = await fetchMoonPhase(todayDate);
+    const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
+    const extrasRows = [[
+      formatPollen(todayReport),
+      todayReport?.sunrise || "-",
+      todayReport?.sunset || "-",
+      formatDayLength(todayReport?.sunrise, todayReport?.sunset),
+      moon
+    ]];
+    lines.push(`Today extras (${formatDisplayDate(todayDate)})`);
+    lines.push(
+      ...makeAsciiTable2(
+        ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
+        extrasRows,
+        void 0,
+        todayExtrasColWidthFns
+      )
+    );
+    lines.push("");
+  }
+  lines.push("Daily forecast");
+  const dayWidths = [
+    sharedWidths.dateOrTime,
+    sharedWidths.icon,
+    sharedWidths.weather,
+    tempWidth,
+    tempWidth,
+    sharedWidths.rain,
+    sharedWidths.wind
+  ];
+  lines.push(...makeAsciiTable2(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
+  return lines;
+}
+
 // lib/terminal.ts
+var import_string_width2 = __toESM(require_string_width());
 var ANSI_ENTER_ALTERNATE_SCREEN = "\x1B[?1049h";
 var ANSI_LEAVE_ALTERNATE_SCREEN = "\x1B[?1049l";
 var ANSI_CLEAR_SCREEN = "\x1B[2J";
@@ -15669,6 +16670,144 @@ var ANSI_HOME = "\x1B[H";
 var ANSI_ERASE_TO_END = "\x1B[J";
 var ANSI_HIDE_CURSOR = "\x1B[?25l";
 var ANSI_SHOW_CURSOR = "\x1B[?25h";
+var ANSI_REGEX3 = /\x1b\[[0-9;]*m/g;
+function visibleLength3(value) {
+  return (0, import_string_width2.default)(value.replace(ANSI_REGEX3, ""));
+}
+function truncateToWidth(line, maxWidth) {
+  const plain = line.replace(ANSI_REGEX3, "");
+  if ((0, import_string_width2.default)(plain) <= maxWidth) return line;
+  let result = "";
+  let width = 0;
+  try {
+    const segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" });
+    for (const { segment } of segmenter.segment(plain)) {
+      const segmentWidth = (0, import_string_width2.default)(segment);
+      if (width + segmentWidth > maxWidth) break;
+      result += segment;
+      width += segmentWidth;
+    }
+    return result;
+  } catch {
+    return plain.slice(0, maxWidth);
+  }
+}
+function boxOuterWidth(innerWidth) {
+  return innerWidth + 4;
+}
+var WIDE_LAYOUT_GAP = 3;
+function maxCalendarContentLines(statusContentLineCount, useFullHeight = false) {
+  const terminalRows = process.stdout.rows ?? 24;
+  if (useFullHeight) {
+    const statusBoxRows2 = statusContentLineCount + 2;
+    return Math.max(0, terminalRows - statusBoxRows2 - 2);
+  }
+  const statusBoxRows = statusContentLineCount + 2;
+  return Math.max(0, terminalRows - statusBoxRows);
+}
+function layoutWidth(outerWidths, gap = WIDE_LAYOUT_GAP) {
+  if (outerWidths.length === 0) return 0;
+  return outerWidths.reduce((sum, width) => sum + width, 0) + gap * (outerWidths.length - 1);
+}
+function isSportsWideTerminal(leftOuter, weatherInner, sportsInner) {
+  const columns = process.stdout.columns ?? 80;
+  const needed = layoutWidth([
+    leftOuter,
+    boxOuterWidth(weatherInner),
+    boxOuterWidth(sportsInner)
+  ]);
+  return columns >= needed;
+}
+function isWeatherWideTerminal(leftOuter, weatherInner) {
+  const columns = process.stdout.columns ?? 80;
+  return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
+}
+function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullHeight = false) {
+  const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
+  if (calendarLines.length <= maxCalendarContent) {
+    return calendarLines;
+  }
+  if (maxCalendarContent <= 1) {
+    return calendarLines.slice(0, maxCalendarContent);
+  }
+  const sections = [];
+  let index = 1;
+  while (index < calendarLines.length && calendarLines[index] === "") {
+    index += 1;
+  }
+  while (index < calendarLines.length) {
+    const section = [];
+    while (index < calendarLines.length && calendarLines[index] !== "") {
+      section.push(calendarLines[index]);
+      index += 1;
+    }
+    if (section.length > 0) {
+      sections.push(section);
+    }
+    while (index < calendarLines.length && calendarLines[index] === "") {
+      index += 1;
+    }
+  }
+  const fitted = [calendarLines[0]];
+  for (const section of sections) {
+    if (fitted.length > 0) {
+      if (fitted.length + 1 > maxCalendarContent) break;
+      fitted.push("");
+    }
+    if (fitted.length + section.length > maxCalendarContent) break;
+    fitted.push(...section);
+  }
+  return fitted;
+}
+function padVisible(line, width) {
+  const len = visibleLength3(line);
+  return len >= width ? line : `${line}${" ".repeat(width - len)}`;
+}
+function boxLines(lines, innerWidth) {
+  if (lines.length === 0 || innerWidth <= 0) return lines;
+  const top = `\u250C${"\u2500".repeat(innerWidth + 2)}\u2510`;
+  const bottom = `\u2514${"\u2500".repeat(innerWidth + 2)}\u2518`;
+  const body = lines.map((line) => {
+    const fitted = truncateToWidth(line, innerWidth);
+    const padding = innerWidth - visibleLength3(fitted);
+    return `\u2502 ${fitted}${" ".repeat(padding)} \u2502`;
+  });
+  return [top, ...body, bottom];
+}
+function joinBoxedColumnsVariable(boxes, outerWidths, gap = 3) {
+  const gapStr = " ".repeat(gap);
+  const maxHeight = Math.max(...boxes.map((box) => box.length), 0);
+  const rows = [];
+  for (let i = 0; i < maxHeight; i += 1) {
+    rows.push(
+      boxes.map((box, boxIdx) => {
+        const outerWidth = outerWidths[boxIdx] ?? 0;
+        const line = box[i];
+        if (!line) return " ".repeat(outerWidth);
+        return padVisible(truncateToWidth(line, outerWidth), outerWidth);
+      }).join(gapStr)
+    );
+  }
+  return rows;
+}
+function stackBoxesVertically(boxes) {
+  const rows = [];
+  for (const box of boxes) {
+    rows.push(...box);
+  }
+  return rows;
+}
+function weatherBoxInnerWidth(weatherLines, statusInnerWidth, leftOuter, includeSportsColumn, sportsInnerWidth) {
+  const columns = process.stdout.columns ?? 80;
+  const contentWidth = weatherLines.reduce(
+    (max, line) => Math.max(max, visibleLength3(line)),
+    0
+  );
+  const sportsOuter = includeSportsColumn ? WIDE_LAYOUT_GAP + boxOuterWidth(sportsInnerWidth) : 0;
+  const availableOuter = columns - leftOuter - WIDE_LAYOUT_GAP - sportsOuter;
+  const maxInner = Math.max(statusInnerWidth, availableOuter - 4);
+  return Math.min(Math.max(contentWidth, statusInnerWidth), maxInner);
+}
 function enterFullscreen() {
   if (!process.stdout.isTTY) return;
   process.stdout.write(`${ANSI_ENTER_ALTERNATE_SCREEN}${ANSI_CLEAR_SCREEN}${ANSI_HOME}${ANSI_HIDE_CURSOR}`);
@@ -15677,13 +16816,66 @@ function leaveFullscreen() {
   if (!process.stdout.isTTY) return;
   process.stdout.write(`${ANSI_SHOW_CURSOR}${ANSI_LEAVE_ALTERNATE_SCREEN}`);
 }
-function writeFullscreenLines(lines) {
+function writeFullscreenScreen(lines) {
+  const terminalRows = process.stdout.rows ?? 24;
+  const clipped = lines.slice(0, terminalRows);
   process.stdout.write(ANSI_HOME);
-  for (const line of lines) {
+  for (const line of clipped) {
     process.stdout.write(`\x1B[2K${line}
 `);
   }
   process.stdout.write(ANSI_ERASE_TO_END);
+}
+function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
+  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines } = panels;
+  const calInner = calendarInnerWidth ?? innerWidth;
+  const statusBox = boxLines(statusLines, innerWidth);
+  const leftStack = [statusBox];
+  if (calendarLines && calendarLines.length > 0) {
+    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+    if (calendarContent.length > 0) {
+      leftStack.push(boxLines(calendarContent, calInner));
+    }
+  }
+  const leftOuter = Math.max(boxOuterWidth(innerWidth), boxOuterWidth(calInner));
+  const leftColumn = stackBoxesVertically(leftStack);
+  const hasWeather = Boolean(weatherLines && weatherLines.length > 0);
+  const hasSports = Boolean(
+    cricLines && cricLines.length > 0 || footyLines && footyLines.length > 0
+  );
+  if (!hasWeather) {
+    writeFullscreenScreen(leftColumn);
+    return;
+  }
+  const weatherInner = weatherBoxInnerWidth(
+    weatherLines,
+    innerWidth,
+    leftOuter,
+    hasSports,
+    innerWidth
+  );
+  const showSports = hasSports && isSportsWideTerminal(leftOuter, weatherInner, innerWidth);
+  const showWeatherMiddle = isWeatherWideTerminal(leftOuter, weatherInner);
+  if (!showWeatherMiddle) {
+    const narrowStack = [...leftStack];
+    narrowStack.push(boxLines(weatherLines, weatherInner));
+    writeFullscreenScreen(stackBoxesVertically(narrowStack));
+    return;
+  }
+  const columns = [leftColumn, boxLines(weatherLines, weatherInner)];
+  const outerWidths = [leftOuter, boxOuterWidth(weatherInner)];
+  if (showSports) {
+    const sportsStack = [];
+    if (cricLines && cricLines.length > 0) {
+      sportsStack.push(boxLines(cricLines, innerWidth));
+    }
+    if (footyLines && footyLines.length > 0) {
+      sportsStack.push(boxLines(footyLines, innerWidth));
+    }
+    columns.push(stackBoxesVertically(sportsStack));
+    outerWidths.push(boxOuterWidth(innerWidth));
+  }
+  writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths, WIDE_LAYOUT_GAP));
 }
 
 // lib/terminalInput.ts
@@ -15808,44 +17000,6 @@ function formatDate(now) {
     timeZone: UK_TZ6
   });
 }
-function parseClockMinutes(value) {
-  if (!value || value === "-") return null;
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
-  if (!match) return null;
-  const hours = Number.parseInt(match[1], 10);
-  const minutes = Number.parseInt(match[2], 10);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-function formatDurationMinutes(totalMinutes) {
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
-  if (hours > 0) return `${hours}h`;
-  return `${minutes}m`;
-}
-function sunEventTime(clock, dayYmd) {
-  const eventMinutes = parseClockMinutes(clock);
-  if (eventMinutes == null) return null;
-  const [year, month, day] = dayYmd.split("-").map(Number);
-  const hours = Math.floor(eventMinutes / 60);
-  const minutes = eventMinutes % 60;
-  return ukWallTimeToDate(year, month, day, hours, minutes);
-}
-function formatSunRelative(clock, now, dayYmd) {
-  const event = sunEventTime(clock, dayYmd);
-  if (!event) return "";
-  const diffMinutes = Math.round((now.getTime() - event.getTime()) / 6e4);
-  if (diffMinutes === 0) return " (now)";
-  if (diffMinutes > 0) return ` (${formatDurationMinutes(diffMinutes)} ago)`;
-  return ` (in ${formatDurationMinutes(-diffMinutes)})`;
-}
-function formatSunPart(label, clock, now, dayYmd) {
-  return `${label} ${clock}${formatSunRelative(clock, now, dayYmd)}`;
-}
-function formatSunriseSunsetLine(sunrise, sunset, now, dayYmd) {
-  return `${formatSunPart("sunrise", sunrise, now, dayYmd)} // ${formatSunPart("sunset", sunset, now, dayYmd)}`;
-}
 function formatSolarYieldLine(solarYield) {
   return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
@@ -15866,38 +17020,12 @@ function sectionDivider(name) {
 function sectionBreak(name) {
   return ["", sectionDivider(name)];
 }
-function formatDayWeatherLine(label, line) {
-  return line === "-" ? `${label}: -` : `${label}: ${line}`;
-}
-function weatherSnapshotFromData(weather, todayYmd) {
-  const tomorrowYmd = ukTomorrowYmd(/* @__PURE__ */ new Date(`${todayYmd}T12:00:00Z`));
-  const todaySun = sunriseSunsetForDate(weather, todayYmd);
-  return {
-    weatherLine: formatTodayWeatherLine(todayWeatherReport(weather, todayYmd)),
-    tomorrowWeatherLine: formatWeatherLine(weatherReportForDate(weather, tomorrowYmd)),
-    hourlyReports: hourlyReportsFromWeather(weather),
-    sunrise: todaySun.sunrise,
-    sunset: todaySun.sunset
-  };
-}
 function buildStatusLines(state) {
   const now = state.now;
-  const todayYmd = state.todayYmd;
-  const weather = state.weather;
   return [
     ...sectionBreak(datesSectionLabel(now)),
     `time: ${formatTime(now)}, ${formatDate(now)}`,
     ...upcomingBdaySectionLines(state.bdayConfig, now),
-    ...sectionBreak("weather"),
-    formatDayWeatherLine("today", weather.weatherLine),
-    formatDayWeatherLine("tomorrow", weather.tomorrowWeatherLine),
-    formatNextRainChancesLine(
-      weather.hourlyReports,
-      now,
-      todayYmd,
-      ukTomorrowYmd(now)
-    ),
-    formatSunriseSunsetLine(weather.sunrise, weather.sunset, now, todayYmd),
     ...sectionBreak("solar"),
     formatSolarYieldLine(state.solarYield),
     formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
@@ -15909,6 +17037,13 @@ function buildStatusLines(state) {
     statusShortcutFooter()
   ];
 }
+function buildSportsPanelLines(title, lines) {
+  return ["", sectionDivider(title), ...lines];
+}
+async function loadFullWeatherLines(location) {
+  const data = await fetchBbcWeatherAggregated(location);
+  return buildFullWeatherLines(data, location);
+}
 function solarSnapshotFromData(data, dayKey, now) {
   return {
     yield: todayYieldKwh(data, dayKey),
@@ -15916,13 +17051,28 @@ function solarSnapshotFromData(data, dayKey, now) {
     powerHourAvg: currentHourPowerAvgWatts(data, now)
   };
 }
-function writeDisplay(lines, fullscreen) {
+function writeDisplay(statusLines, fullscreen, panels = {}) {
   if (fullscreen) {
-    writeFullscreenLines(lines);
+    writeFullscreenLines(statusLines, statusShortcutFooterWidth(), panels);
     return;
   }
-  for (const line of lines) {
+  for (const line of statusLines) {
     console.log(line);
+  }
+  if (panels.weatherLines) {
+    for (const line of panels.weatherLines) {
+      console.log(line);
+    }
+  }
+  if (panels.cricLines) {
+    for (const line of panels.cricLines) {
+      console.log(line);
+    }
+  }
+  if (panels.footyLines) {
+    for (const line of panels.footyLines) {
+      console.log(line);
+    }
   }
 }
 async function loadSolarSnapshot(dayKey, now) {
@@ -15982,23 +17132,33 @@ async function loadHouseOctoPrices(now = /* @__PURE__ */ new Date()) {
     return emptyHouseOctoSnapshot();
   }
 }
+async function loadSportsLines(ymd) {
+  const [cricResult, footyResult] = await Promise.allSettled([
+    loadCricketStatusLines(ymd),
+    loadFootballStatusLines(ymd)
+  ]);
+  return {
+    cricLines: cricResult.status === "fulfilled" ? cricResult.value : ["-"],
+    footyLines: footyResult.status === "fulfilled" ? footyResult.value : ["-"]
+  };
+}
 async function printOnce() {
   const now = /* @__PURE__ */ new Date();
   const dayKey = ukTodayYmd(now);
   const bdayConfig = readBdayConfig();
-  const [weather, solar, wfh, temps, houseOcto] = await Promise.all([
-    fetchBbcWeatherAggregated(resolveDefaultLocation()),
+  const location = resolveDefaultLocation();
+  const [weatherLines, solar, wfh, temps, houseOcto, sports] = await Promise.all([
+    loadFullWeatherLines(location),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
     loadTemps(),
-    loadHouseOctoPrices(now)
+    loadHouseOctoPrices(now),
+    loadSportsLines(dayKey)
   ]);
-  const weatherSnapshot = weatherSnapshotFromData(weather, dayKey);
   writeDisplay(
     buildStatusLines({
       now,
       todayYmd: dayKey,
-      weather: weatherSnapshot,
       houseOcto,
       bdayConfig,
       wfh,
@@ -16008,7 +17168,12 @@ async function printOnce() {
       powerNow: solar.powerNow,
       powerHourAvg: solar.powerHourAvg
     }),
-    false
+    false,
+    {
+      weatherLines,
+      cricLines: buildSportsPanelLines("cric", sports.cricLines),
+      footyLines: buildSportsPanelLines("footy", sports.footyLines)
+    }
   );
 }
 function handleStatusKey(key) {
@@ -16027,8 +17192,7 @@ async function runLive() {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
   let bdayConfig = readBdayConfig();
-  let weather = await fetchBbcWeatherAggregated(location);
-  let weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
+  let fullWeatherLines = [];
   let wfh = null;
   let houseOcto = emptyHouseOctoSnapshot();
   let downstairsTemp = null;
@@ -16041,13 +17205,15 @@ async function runLive() {
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
   let lastGasRefreshAt = 0;
+  let calendarData = null;
+  let cricLines = ["-"];
+  let footyLines = ["-"];
   let runningCommand = false;
   let timer;
   let disableRawInput;
   const displayState = () => ({
     now: /* @__PURE__ */ new Date(),
     todayYmd: trackedDate,
-    weather: weatherSnapshot,
     houseOcto,
     bdayConfig,
     wfh,
@@ -16058,7 +17224,33 @@ async function runLive() {
     powerHourAvg
   });
   const render = () => {
-    writeDisplay(buildStatusLines(displayState()), true);
+    const state = displayState();
+    const boxWidth = statusShortcutFooterWidth();
+    const calendarWidth = statusCalendarInnerWidth();
+    const statusLines = buildStatusLines(state);
+    const calendarLines = calendarData ? buildStatusCalendarLines(
+      calendarData.months,
+      state.now,
+      calendarData.colors,
+      maxCalendarContentLines(statusLines.length, true),
+      calendarWidth
+    ) : null;
+    writeDisplay(statusLines, true, {
+      calendarLines,
+      calendarInnerWidth: calendarWidth,
+      weatherLines: fullWeatherLines.length > 0 ? fullWeatherLines : null,
+      cricLines: buildSportsPanelLines("cric", cricLines),
+      footyLines: buildSportsPanelLines("footy", footyLines)
+    });
+  };
+  const refreshWeather = async () => {
+    fullWeatherLines = await loadFullWeatherLines(location);
+  };
+  const refreshCalendar = async (now) => {
+    calendarData = await loadStatusCalendarData(now);
+  };
+  const refreshSports = async (ymd) => {
+    ({ cricLines, footyLines } = await loadSportsLines(ymd));
   };
   const stop = () => {
     if (timer) clearInterval(timer);
@@ -16094,11 +17286,18 @@ async function runLive() {
       }
     }
   };
-  [wfh, { downstairsTemp, shedTemp }, houseOcto] = await Promise.all([
+  [wfh, { downstairsTemp, shedTemp }, houseOcto, calendarData, { cricLines, footyLines }] = await Promise.all([
     fetchWfhStatus(),
     loadTemps(),
-    loadHouseOctoPrices()
+    loadHouseOctoPrices(),
+    loadStatusCalendarData(),
+    loadSportsLines(trackedDate)
   ]);
+  try {
+    await refreshWeather();
+  } catch {
+    fullWeatherLines = ["weather unavailable"];
+  }
   const startedAt = Date.now();
   lastTempRefreshAt = startedAt;
   lastGasRefreshAt = startedAt;
@@ -16127,11 +17326,14 @@ async function runLive() {
       if (dayChanged) {
         trackedDate = today;
         bdayConfig = readBdayConfig();
-        [weather, wfh] = await Promise.all([
-          fetchBbcWeatherAggregated(location),
-          fetchWfhStatus()
+        [, wfh] = await Promise.all([
+          refreshWeather().catch(() => {
+            fullWeatherLines = ["weather unavailable"];
+          }),
+          fetchWfhStatus(),
+          refreshCalendar(now),
+          refreshSports(today)
         ]);
-        weatherSnapshot = weatherSnapshotFromData(weather, trackedDate);
       }
       if (needYieldRefresh || needPowerRefresh) {
         try {

@@ -136,8 +136,6 @@ var require_string_width = __commonJS({
 // w.ts
 var w_exports = {};
 module.exports = __toCommonJS(w_exports);
-var import_strip_ansi = __toESM(require_strip_ansi());
-var import_string_width = __toESM(require_string_width());
 
 // config.ts
 var import_node_fs = require("node:fs");
@@ -14757,7 +14755,9 @@ async function fetchBbcWeatherAggregated(location) {
   return await response.json();
 }
 
-// w.ts
+// lib/wApi.ts
+var import_strip_ansi = __toESM(require_strip_ansi());
+var import_string_width = __toESM(require_string_width());
 var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
 var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
 var ANSI_RESET2 = "\x1B[0m";
@@ -14767,59 +14767,11 @@ var ANSI_ORANGE2 = "\x1B[38;5;208m";
 var ANSI_RED2 = "\x1B[31m";
 var HEAVY_RAIN_WORDING = /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 var LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
-var EXTENDED_PICTOGRAPHIC = new RegExp("\\p{Extended_Pictographic}", "u");
 function visibleLength(value) {
   return (0, import_string_width.default)((0, import_strip_ansi.default)(value));
 }
 function emojiTerminalDisplayWidth(value) {
-  const plain = (0, import_strip_ansi.default)(value);
-  if (!plain) return 0;
-  try {
-    const segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" });
-    let total = 0;
-    for (const { segment } of segmenter.segment(plain)) {
-      const sw = (0, import_string_width.default)(segment);
-      if (EXTENDED_PICTOGRAPHIC.test(segment)) {
-        let w = Math.max(sw, 2);
-        total += w - 1;
-      } else if (new RegExp("\\p{Regional_Indicator}", "u").test(segment)) {
-        total += Math.max(sw, 2);
-      } else {
-        total += sw;
-      }
-    }
-    return total;
-  } catch {
-    return visibleLength(value);
-  }
-}
-function usage() {
-  console.log("Usage:");
-  console.log("  w");
-  console.log("  w <postcode>");
-  console.log("");
-  console.log("Examples:");
-  console.log("  w");
-  console.log("  w ws9");
-  console.log("  w sw1a");
-  console.log("");
-}
-function parseArgs(argv) {
-  const args = argv.slice(2);
-  if (args[0] === "--help" || args[0] === "-h") {
-    return { help: true };
-  }
-  if (args.length === 0) {
-    return { postcode: resolveDefaultLocation() };
-  }
-  if (args.length > 1) {
-    throw new Error("Pass at most one postcode.");
-  }
-  const postcode = sanitizeWeatherLocation(args[0]);
-  if (!postcode) {
-    return { postcode: resolveDefaultLocation() };
-  }
-  return { postcode };
+  return visibleLength((0, import_strip_ansi.default)(value).replace(/\uFE0F/g, ""));
 }
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -14868,29 +14820,65 @@ function formatWeatherDisplay(weatherTypeText, enhancedWeatherDescription) {
   const description = (weatherTypeText || enhancedWeatherDescription || "Unknown").trim() || "Unknown";
   const lower = description.toLowerCase();
   if (/\b(snow|sleet|hail|blizzard|ice pellets|freezing rain|wintry|wintry showers)\b/.test(lower)) {
-    return { icon: "\u2744\uFE0F", description };
+    return { icon: "\u2744", description };
   }
   if (HEAVY_RAIN_WORDING.test(lower)) {
-    return { icon: "\u26C8\uFE0F\u26C8\uFE0F", description };
+    return { icon: "\u26C8\u26C8", description };
   }
-  if (LIGHT_RAIN_WORDING.test(lower)) {
-    return { icon: "\u26C8\uFE0F", description };
+  if (LIGHT_RAIN_WORDING.test(lower) || /\b(thundery|thunderstorm|thunder|lightning)\b/.test(lower)) {
+    return { icon: "\u26C8", description };
   }
   if (/\b(light cloud|thin cloud|partly cloudy|partly sunny|sunny intervals|medium cloud|bright intervals)\b/.test(
     lower
   )) {
-    return { icon: "\u26C5\uFE0F", description };
+    return { icon: "\u26C5", description };
   }
   if (/\bsunny\b/.test(lower) && !/\bnot\s+sunny\b/.test(lower)) {
-    return { icon: "\u2600\uFE0F", description };
+    return { icon: "\u2600", description };
   }
   if (/\b(overcast|heavy cloud|thick cloud|grey cloud|gray cloud|cloudy)\b/.test(lower)) {
-    return { icon: "\u2601\uFE0F", description };
+    return { icon: "\u2601", description };
   }
   if (/\bclear\s+sky\b/.test(lower)) {
     return { icon: "\u263E", description };
   }
   return { icon: "", description };
+}
+function shouldUseColor2() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize2(value, color) {
+  if (!shouldUseColor2()) return value;
+  return `${color}${value}${ANSI_RESET2}`;
+}
+function formatMaxTemp(value) {
+  return formatTemperatureText(value, { scale: "max" });
+}
+function formatMinTemp(value) {
+  return formatTemperatureText(value, { scale: "min" });
+}
+function formatRain(value) {
+  if (value == null) return "?%";
+  const text = `${value}%`;
+  const colored = value > 80 ? colorize2(text, ANSI_RED2) : value >= 50 ? colorize2(text, ANSI_ORANGE2) : value >= 25 ? colorize2(text, ANSI_YELLOW2) : colorize2(text, ANSI_GREEN2);
+  return colored;
+}
+function formatWindSpeed(value) {
+  if (value == null) return "?mph";
+  const text = `${value}mph`;
+  if (value > 40) return colorize2(text, ANSI_RED2);
+  if (value >= 20) return colorize2(text, ANSI_ORANGE2);
+  if (value >= 10) return colorize2(text, ANSI_YELLOW2);
+  return colorize2(text, ANSI_GREEN2);
+}
+function formatDisplayDate(localDate) {
+  if (!localDate) return "unknown-date";
+  const d = /* @__PURE__ */ new Date(`${localDate}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return localDate;
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "short" });
+  const day = d.toLocaleDateString("en-GB", { day: "2-digit" });
+  const month = d.toLocaleDateString("en-GB", { month: "2-digit" });
+  return `${weekday} ${day}/${month}`;
 }
 function formatDayCells(report) {
   const date5 = formatDisplayDate(report.localDate);
@@ -14901,15 +14889,6 @@ function formatDayCells(report) {
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
   return [date5, wx.icon, wx.description, lo, hi, rain, `${windSpeed} ${windDir}`];
-}
-function formatDisplayDate(localDate) {
-  if (!localDate) return "unknown-date";
-  const d = /* @__PURE__ */ new Date(`${localDate}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return localDate;
-  const weekday = d.toLocaleDateString("en-GB", { weekday: "short" });
-  const day = d.toLocaleDateString("en-GB", { day: "2-digit" });
-  const month = d.toLocaleDateString("en-GB", { month: "2-digit" });
-  return `${weekday} ${day}/${month}`;
 }
 function formatHourlyTemp(value) {
   if (value == null) return "?";
@@ -14953,33 +14932,6 @@ function formatPollen(report) {
   if (!text) return String(index);
   return `${index} (${text})`;
 }
-function shouldUseColor2() {
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-function colorize2(value, color) {
-  if (!shouldUseColor2()) return value;
-  return `${color}${value}${ANSI_RESET2}`;
-}
-function formatMaxTemp(value) {
-  return formatTemperatureText(value, { scale: "max" });
-}
-function formatMinTemp(value) {
-  return formatTemperatureText(value, { scale: "min" });
-}
-function formatRain(value) {
-  if (value == null) return "?%";
-  const text = `${value}%`;
-  const colored = value > 80 ? colorize2(text, ANSI_RED2) : value >= 50 ? colorize2(text, ANSI_ORANGE2) : value >= 25 ? colorize2(text, ANSI_YELLOW2) : colorize2(text, ANSI_GREEN2);
-  return colored;
-}
-function formatWindSpeed(value) {
-  if (value == null) return "?mph";
-  const text = `${value}mph`;
-  if (value > 40) return colorize2(text, ANSI_RED2);
-  if (value >= 20) return colorize2(text, ANSI_ORANGE2);
-  if (value >= 10) return colorize2(text, ANSI_YELLOW2);
-  return colorize2(text, ANSI_GREEN2);
-}
 function cellWidthForTable(colIdx, value, colWidthFns) {
   const fn = colWidthFns?.[colIdx];
   if (fn) return fn(value);
@@ -15009,16 +14961,18 @@ function makeAsciiTable(headers, rows, forcedWidths, colWidthFns) {
   lines.push(border);
   return lines;
 }
-async function printForecast(data, requestedPostcode) {
+async function buildFullWeatherLines(data, requestedPostcode) {
   const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
   const lastUpdated = data.lastUpdated || "unknown";
   const reports = (data.forecasts || []).map((f) => f.summary?.report).filter((r) => Boolean(r));
-  console.log(`Weather for ${location}`);
-  console.log(`Last updated: ${lastUpdated}`);
-  console.log("");
+  const lines = [
+    `Weather for ${location}`,
+    `Last updated: ${lastUpdated}`,
+    ""
+  ];
   if (reports.length === 0) {
-    console.log("No daily forecast data available.");
-    return;
+    lines.push("No daily forecast data available.");
+    return lines;
   }
   const forecastColWidthFns = { 1: emojiTerminalDisplayWidth };
   const todayExtrasColWidthFns = { 4: emojiTerminalDisplayWidth };
@@ -15085,17 +15039,14 @@ async function printForecast(data, requestedPostcode) {
     sharedWidths.rain,
     sharedWidths.wind
   ];
-  const printHourlySection = (date5, rows) => {
+  const appendHourlySection = (date5, rows) => {
     if (!date5 || rows.length === 0) return;
-    console.log(`Hourly forecast for ${formatDisplayDate(date5)}`);
-    const lines = makeAsciiTable(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns);
-    for (const line of lines) {
-      console.log(line);
-    }
-    console.log("");
+    lines.push(`Hourly forecast for ${formatDisplayDate(date5)}`);
+    lines.push(...makeAsciiTable(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
+    lines.push("");
   };
-  printHourlySection(tomorrowDate, tomorrowHourlyRows);
-  printHourlySection(todayDate, todayHourlyRows);
+  appendHourlySection(tomorrowDate, tomorrowHourlyRows);
+  appendHourlySection(todayDate, todayHourlyRows);
   if (todayDate) {
     const moon = await fetchMoonPhase(todayDate);
     const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
@@ -15106,19 +15057,18 @@ async function printForecast(data, requestedPostcode) {
       formatDayLength(todayReport?.sunrise, todayReport?.sunset),
       moon
     ]];
-    console.log(`Today extras (${formatDisplayDate(todayDate)})`);
-    const extraLines = makeAsciiTable(
-      ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
-      extrasRows,
-      void 0,
-      todayExtrasColWidthFns
+    lines.push(`Today extras (${formatDisplayDate(todayDate)})`);
+    lines.push(
+      ...makeAsciiTable(
+        ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
+        extrasRows,
+        void 0,
+        todayExtrasColWidthFns
+      )
     );
-    for (const line of extraLines) {
-      console.log(line);
-    }
-    console.log("");
+    lines.push("");
   }
-  console.log("Daily forecast");
+  lines.push("Daily forecast");
   const dayWidths = [
     sharedWidths.dateOrTime,
     sharedWidths.icon,
@@ -15128,10 +15078,38 @@ async function printForecast(data, requestedPostcode) {
     sharedWidths.rain,
     sharedWidths.wind
   ];
-  const dayTableLines = makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
-  for (const line of dayTableLines) {
-    console.log(line);
+  lines.push(...makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
+  return lines;
+}
+
+// w.ts
+function usage() {
+  console.log("Usage:");
+  console.log("  w");
+  console.log("  w <postcode>");
+  console.log("");
+  console.log("Examples:");
+  console.log("  w");
+  console.log("  w ws9");
+  console.log("  w sw1a");
+  console.log("");
+}
+function parseArgs(argv) {
+  const args = argv.slice(2);
+  if (args[0] === "--help" || args[0] === "-h") {
+    return { help: true };
   }
+  if (args.length === 0) {
+    return { postcode: resolveDefaultLocation() };
+  }
+  if (args.length > 1) {
+    throw new Error("Pass at most one postcode.");
+  }
+  const postcode = sanitizeWeatherLocation(args[0]);
+  if (!postcode) {
+    return { postcode: resolveDefaultLocation() };
+  }
+  return { postcode };
 }
 async function main() {
   try {
@@ -15142,7 +15120,10 @@ async function main() {
     }
     const postcode = parsed.postcode || resolveDefaultLocation();
     const data = await fetchBbcWeatherAggregated(postcode);
-    await printForecast(data, postcode);
+    const lines = await buildFullWeatherLines(data, postcode);
+    for (const line of lines) {
+      console.log(line);
+    }
   } catch (error51) {
     const message = error51 instanceof Error ? error51.message : String(error51);
     console.error(message);

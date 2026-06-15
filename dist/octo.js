@@ -654,10 +654,14 @@ function formatKwh(value) {
 function formatPoundsFromPence(valuePence) {
   return `\xA3${(valuePence / 100).toFixed(2)}`;
 }
-function formatAverageAndTotalCost(averagePence, totalPence) {
+function formatAverageAndTotalCost(averagePence, totalPence, projectedPence) {
   const average = Math.round(averagePence);
   const totalPounds = Math.round(totalPence / 100);
-  return `${average}p (\xA3${totalPounds})`;
+  if (projectedPence === void 0) {
+    return `${average}p (\xA3${totalPounds})`;
+  }
+  const projectedPounds = Math.round(projectedPence / 100);
+  return `${average}p (\xA3${totalPounds} // \xA3${projectedPounds})`;
 }
 function rankedColorByDay(dayKeys, totals, fuel) {
   const rankableDays = dayKeys.slice(0, Math.max(0, dayKeys.length - 2));
@@ -945,11 +949,12 @@ function printFinalMonthTotals(cache, now) {
     const gTotal = rec.gCost * rec.days;
     const totalAverage = rec.eCost + rec.gCost;
     const totalCost = eTotal + gTotal;
+    const projectedCost = item.key === currentKey ? totalAverage * daysInMonthKey(item.key) : void 0;
     return [
       item.label,
       formatPoundsFromPence(eTotal),
       formatPoundsFromPence(gTotal),
-      formatAverageAndTotalCost(totalAverage, totalCost)
+      formatAverageAndTotalCost(totalAverage, totalCost, projectedCost)
     ];
   });
   console.log("");

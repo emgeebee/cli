@@ -38,14 +38,10 @@ async function fetchBbcJson(url, refDate, sport) {
   return await response.json();
 }
 
-// cric.ts
+// lib/cricApi.ts
 var CRICKET_BASE_URL = "https://web-cdn.api.bbci.co.uk/wc-poll-data/container/sport-data-scores-fixtures";
 var CRICKET_URN = "urn:bbc:sportsdata:cricket:tournament-collection:collated";
 var DAY_MS = 24 * 60 * 60 * 1e3;
-function usage() {
-  console.log("Usage:");
-  console.log("  cric");
-}
 function teamLabel(team) {
   return team?.shortName || team?.name || "TBC";
 }
@@ -134,11 +130,22 @@ function multiDayLabel(event, selectedYmd) {
   const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS) + 1;
   return `Day ${dayNumber}`;
 }
-function printFixtures(data, ymd) {
-  console.log(`Cricket fixtures for ${ymd}`);
-  const groups = data.eventGroups || [];
-  let count = 0;
-  for (const group of groups) {
+function fixtureHeaderLine(event, ymd) {
+  const homeTeam = event.participants?.homeTeam;
+  const awayTeam = event.participants?.awayTeam;
+  const dayLabel = multiDayLabel(event, ymd);
+  return [
+    event.startTime || "??:??",
+    `${teamLabel(homeTeam)} vs ${teamLabel(awayTeam)}`,
+    event.groundShortName || "-",
+    dayLabel || "-",
+    event.matchSummary?.resultString || "-"
+  ].join(" | ");
+}
+function cricketStatusSectionLines(data, ymd) {
+  const lines = [];
+  let matchCount = 0;
+  for (const group of data.eventGroups || []) {
     for (const secondary of group.secondaryGroups || []) {
       const events = [...secondary.events || []].sort((a, b) => {
         const aTime = new Date(a.startDateTime || "").getTime();
@@ -149,35 +156,54 @@ function printFixtures(data, ymd) {
         (event) => isAllowedCompetition(competitionLabel(secondary, event))
       );
       if (allowedEvents.length === 0) continue;
-      console.log("");
-      console.log(secondary.displayLabel || "Other");
+      if (lines.length > 0) {
+        lines.push("");
+      }
+      lines.push(secondary.displayLabel || "Other");
       for (const event of allowedEvents) {
-        count += 1;
+        matchCount += 1;
         const homeTeam = event.participants?.homeTeam;
         const awayTeam = event.participants?.awayTeam;
-        const dayLabel = multiDayLabel(event, ymd);
-        const header = [
-          event.startTime || "??:??",
-          `${teamLabel(homeTeam)} vs ${teamLabel(awayTeam)}`,
-          event.groundShortName || "-",
-          dayLabel || "-",
-          event.matchSummary?.resultString || "-"
-        ].join(" | ");
-        console.log(header);
-        for (const line of orderedInningsLines(homeTeam, awayTeam)) {
-          console.log(line);
-        }
-        console.log("");
+        lines.push(fixtureHeaderLine(event, ymd));
+        lines.push(...orderedInningsLines(homeTeam, awayTeam));
+        lines.push("");
       }
     }
   }
-  if (count === 0) {
-    console.log("No cricket fixtures found today.");
+  if (matchCount === 0) {
+    return ["none today"];
   }
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+function cricketFixtureLines(data, ymd) {
+  const lines = cricketStatusSectionLines(data, ymd);
+  if (lines.length === 1 && lines[0] === "none today") {
+    return lines;
+  }
+  return [`Cricket fixtures for ${ymd}`, "", ...lines];
 }
 async function fetchTodayCricket(ymd) {
   const url = `${CRICKET_BASE_URL}?selectedEndDate=${ymd}&selectedStartDate=${ymd}&todayDate=${ymd}&urn=${encodeURIComponent(CRICKET_URN)}`;
   return fetchBbcJson(url, ymd, "cricket");
+}
+
+// cric.ts
+function usage() {
+  console.log("Usage:");
+  console.log("  cric");
+}
+function printFixtures(data, ymd) {
+  const lines = cricketFixtureLines(data, ymd);
+  if (lines.length === 1 && lines[0] === "none today") {
+    console.log("No cricket fixtures found today.");
+    return;
+  }
+  for (const line of lines) {
+    console.log(line);
+  }
 }
 async function main() {
   try {

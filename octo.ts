@@ -244,10 +244,18 @@ function formatPoundsFromPence(valuePence: number): string {
   return `£${(valuePence / 100).toFixed(2)}`;
 }
 
-function formatAverageAndTotalCost(averagePence: number, totalPence: number): string {
+function formatAverageAndTotalCost(
+  averagePence: number,
+  totalPence: number,
+  projectedPence?: number,
+): string {
   const average = Math.round(averagePence);
   const totalPounds = Math.round(totalPence / 100);
-  return `${average}p (£${totalPounds})`;
+  if (projectedPence === undefined) {
+    return `${average}p (£${totalPounds})`;
+  }
+  const projectedPounds = Math.round(projectedPence / 100);
+  return `${average}p (£${totalPounds} // £${projectedPounds})`;
 }
 
 function rankedColorByDay(
@@ -620,11 +628,15 @@ function printFinalMonthTotals(cache: MonthlyAverageCache, now: Date): void {
     const gTotal = rec.gCost * rec.days;
     const totalAverage = rec.eCost + rec.gCost;
     const totalCost = eTotal + gTotal;
+    const projectedCost =
+      item.key === currentKey
+        ? totalAverage * daysInMonthKey(item.key)
+        : undefined;
     return [
       item.label,
       formatPoundsFromPence(eTotal),
       formatPoundsFromPence(gTotal),
-      formatAverageAndTotalCost(totalAverage, totalCost),
+      formatAverageAndTotalCost(totalAverage, totalCost, projectedCost),
     ];
   });
 

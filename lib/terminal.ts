@@ -1,3 +1,5 @@
+import stringWidth from "string-width";
+
 export const ANSI_ENTER_ALTERNATE_SCREEN = "\x1b[?1049h";
 export const ANSI_LEAVE_ALTERNATE_SCREEN = "\x1b[?1049l";
 export const ANSI_CLEAR_SCREEN = "\x1b[2J";
@@ -5,6 +7,226 @@ export const ANSI_HOME = "\x1b[H";
 export const ANSI_ERASE_TO_END = "\x1b[J";
 export const ANSI_HIDE_CURSOR = "\x1b[?25l";
 export const ANSI_SHOW_CURSOR = "\x1b[?25h";
+
+const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
+
+function visibleLength(value: string): number {
+  return stringWidth(value.replace(ANSI_REGEX, ""));
+}
+
+function truncateToWidth(line: string, maxWidth: number): string {
+  const plain = line.replace(ANSI_REGEX, "");
+  if (stringWidth(plain) <= maxWidth) return line;
+  let result = "";
+  let width = 0;
+  try {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    for (const { segment } of segmenter.segment(plain)) {
+      const segmentWidth = stringWidth(segment);
+      if (width + segmentWidth > maxWidth) break;
+      result += segment;
+      width += segmentWidth;
+    }
+    return result;
+  } catch {
+    return plain.slice(0, maxWidth);
+  }
+}
+
+export function boxOuterWidth(innerWidth: number): number {
+  return innerWidth + 4;
+}
+
+const WIDE_LAYOUT_GAP = 3;
+
+export function wideLayoutWidth(innerWidth: number): number {
+  return 2 * boxOuterWidth(innerWidth) + WIDE_LAYOUT_GAP;
+}
+
+export function extraWideLayoutWidth(innerWidth: number): number {
+  return 3 * boxOuterWidth(innerWidth) + 2 * WIDE_LAYOUT_GAP;
+}
+
+export function isWideTerminal(innerWidth: number): boolean {
+  const columns = process.stdout.columns ?? 80;
+  return columns >= wideLayoutWidth(innerWidth);
+}
+
+export function isExtraWideTerminal(innerWidth: number): boolean {
+  const columns = process.stdout.columns ?? 80;
+  return columns >= extraWideLayoutWidth(innerWidth);
+}
+
+export function maxCalendarContentLines(
+  statusContentLineCount: number,
+  useFullHeight = false,
+): number {
+  const terminalRows = process.stdout.rows ?? 24;
+  if (useFullHeight) {
+    const statusBoxRows = statusContentLineCount + 2;
+    return Math.max(0, terminalRows - statusBoxRows - 2);
+  }
+  const statusBoxRows = statusContentLineCount + 2;
+  return Math.max(0, terminalRows - statusBoxRows);
+}
+
+export function layoutWidth(
+  outerWidths: number[],
+  gap = WIDE_LAYOUT_GAP,
+): number {
+  if (outerWidths.length === 0) return 0;
+  return outerWidths.reduce((sum, width) => sum + width, 0) + gap * (outerWidths.length - 1);
+}
+
+export function isSportsWideTerminal(
+  leftOuter: number,
+  weatherInner: number,
+  sportsInner: number,
+): boolean {
+  const columns = process.stdout.columns ?? 80;
+  const needed = layoutWidth([
+    leftOuter,
+    boxOuterWidth(weatherInner),
+    boxOuterWidth(sportsInner),
+  ]);
+  return columns >= needed;
+}
+
+export function isWeatherWideTerminal(
+  leftOuter: number,
+  weatherInner: number,
+): boolean {
+  const columns = process.stdout.columns ?? 80;
+  return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
+}
+
+function fitCalendarContentLines(
+  calendarLines: string[],
+  statusContentLineCount: number,
+  useFullHeight = false,
+): string[] {
+  const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
+  if (calendarLines.length <= maxCalendarContent) {
+    return calendarLines;
+  }
+  if (maxCalendarContent <= 1) {
+    return calendarLines.slice(0, maxCalendarContent);
+  }
+
+  const sections: string[][] = [];
+  let index = 1;
+  while (index < calendarLines.length && calendarLines[index] === "") {
+    index += 1;
+  }
+  while (index < calendarLines.length) {
+    const section: string[] = [];
+    while (index < calendarLines.length && calendarLines[index] !== "") {
+      section.push(calendarLines[index]);
+      index += 1;
+    }
+    if (section.length > 0) {
+      sections.push(section);
+    }
+    while (index < calendarLines.length && calendarLines[index] === "") {
+      index += 1;
+    }
+  }
+
+  const fitted = [calendarLines[0]];
+  for (const section of sections) {
+    if (fitted.length > 0) {
+      if (fitted.length + 1 > maxCalendarContent) break;
+      fitted.push("");
+    }
+    if (fitted.length + section.length > maxCalendarContent) break;
+    fitted.push(...section);
+  }
+  return fitted;
+}
+
+function padVisible(line: string, width: number): string {
+  const len = visibleLength(line);
+  return len >= width ? line : `${line}${" ".repeat(width - len)}`;
+}
+
+export function boxLines(lines: string[], innerWidth: number): string[] {
+  if (lines.length === 0 || innerWidth <= 0) return lines;
+  const top = `┌${"─".repeat(innerWidth + 2)}┐`;
+  const bottom = `└${"─".repeat(innerWidth + 2)}┘`;
+  const body = lines.map((line) => {
+    const fitted = truncateToWidth(line, innerWidth);
+    const padding = innerWidth - visibleLength(fitted);
+    return `│ ${fitted}${" ".repeat(padding)} │`;
+  });
+  return [top, ...body, bottom];
+}
+
+export function joinBoxedColumns(
+  boxes: string[][],
+  innerWidth: number,
+  gap = 3,
+): string[] {
+  const outerWidths = boxes.map(() => boxOuterWidth(innerWidth));
+  return joinBoxedColumnsVariable(boxes, outerWidths, gap);
+}
+
+export function joinBoxedColumnsVariable(
+  boxes: string[][],
+  outerWidths: number[],
+  gap = 3,
+): string[] {
+  const gapStr = " ".repeat(gap);
+  const maxHeight = Math.max(...boxes.map((box) => box.length), 0);
+  const rows: string[] = [];
+  for (let i = 0; i < maxHeight; i += 1) {
+    rows.push(
+      boxes
+        .map((box, boxIdx) => {
+          const outerWidth = outerWidths[boxIdx] ?? 0;
+          const line = box[i];
+          if (!line) return " ".repeat(outerWidth);
+          return padVisible(truncateToWidth(line, outerWidth), outerWidth);
+        })
+        .join(gapStr),
+    );
+  }
+  return rows;
+}
+
+function stackBoxesVertically(boxes: string[][]): string[] {
+  const rows: string[] = [];
+  for (const box of boxes) {
+    rows.push(...box);
+  }
+  return rows;
+}
+
+function contentInnerWidth(lines: string[], fallback: number): number {
+  const columns = process.stdout.columns ?? 80;
+  const contentWidth = lines.reduce(
+    (max, line) => Math.max(max, visibleLength(line)),
+    0,
+  );
+  return Math.min(Math.max(contentWidth, fallback), Math.max(fallback, columns - 4));
+}
+
+function weatherBoxInnerWidth(
+  weatherLines: string[],
+  statusInnerWidth: number,
+  leftOuter: number,
+  includeSportsColumn: boolean,
+  sportsInnerWidth: number,
+): number {
+  const columns = process.stdout.columns ?? 80;
+  const contentWidth = weatherLines.reduce(
+    (max, line) => Math.max(max, visibleLength(line)),
+    0,
+  );
+  const sportsOuter = includeSportsColumn ? WIDE_LAYOUT_GAP + boxOuterWidth(sportsInnerWidth) : 0;
+  const availableOuter = columns - leftOuter - WIDE_LAYOUT_GAP - sportsOuter;
+  const maxInner = Math.max(statusInnerWidth, availableOuter - 4);
+  return Math.min(Math.max(contentWidth, statusInnerWidth), maxInner);
+}
 
 export const getTerminalWidth = (): number => {
   const columns = process.stdout.columns;
@@ -24,10 +246,85 @@ export function leaveFullscreen(): void {
   process.stdout.write(`${ANSI_SHOW_CURSOR}${ANSI_LEAVE_ALTERNATE_SCREEN}`);
 }
 
-export function writeFullscreenLines(lines: string[]): void {
+export function writeFullscreenScreen(lines: string[]): void {
+  const terminalRows = process.stdout.rows ?? 24;
+  const clipped = lines.slice(0, terminalRows);
   process.stdout.write(ANSI_HOME);
-  for (const line of lines) {
+  for (const line of clipped) {
     process.stdout.write(`\x1b[2K${line}\n`);
   }
   process.stdout.write(ANSI_ERASE_TO_END);
+}
+
+export type FullscreenPanelLines = {
+  cricLines?: string[] | null;
+  footyLines?: string[] | null;
+  calendarLines?: string[] | null;
+  calendarInnerWidth?: number;
+  weatherLines?: string[] | null;
+};
+
+export function writeFullscreenLines(
+  statusLines: string[],
+  innerWidth: number,
+  panels: FullscreenPanelLines = {},
+): void {
+  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines } = panels;
+  const calInner = calendarInnerWidth ?? innerWidth;
+  const statusBox = boxLines(statusLines, innerWidth);
+  const leftStack: string[][] = [statusBox];
+
+  if (calendarLines && calendarLines.length > 0) {
+    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+    if (calendarContent.length > 0) {
+      leftStack.push(boxLines(calendarContent, calInner));
+    }
+  }
+
+  const leftOuter = Math.max(boxOuterWidth(innerWidth), boxOuterWidth(calInner));
+  const leftColumn = stackBoxesVertically(leftStack);
+
+  const hasWeather = Boolean(weatherLines && weatherLines.length > 0);
+  const hasSports = Boolean(
+    (cricLines && cricLines.length > 0) || (footyLines && footyLines.length > 0),
+  );
+
+  if (!hasWeather) {
+    writeFullscreenScreen(leftColumn);
+    return;
+  }
+
+  const weatherInner = weatherBoxInnerWidth(
+    weatherLines!,
+    innerWidth,
+    leftOuter,
+    hasSports,
+    innerWidth,
+  );
+  const showSports = hasSports && isSportsWideTerminal(leftOuter, weatherInner, innerWidth);
+  const showWeatherMiddle = isWeatherWideTerminal(leftOuter, weatherInner);
+
+  if (!showWeatherMiddle) {
+    const narrowStack = [...leftStack];
+    narrowStack.push(boxLines(weatherLines!, weatherInner));
+    writeFullscreenScreen(stackBoxesVertically(narrowStack));
+    return;
+  }
+
+  const columns: string[][] = [leftColumn, boxLines(weatherLines!, weatherInner)];
+  const outerWidths = [leftOuter, boxOuterWidth(weatherInner)];
+
+  if (showSports) {
+    const sportsStack: string[][] = [];
+    if (cricLines && cricLines.length > 0) {
+      sportsStack.push(boxLines(cricLines, innerWidth));
+    }
+    if (footyLines && footyLines.length > 0) {
+      sportsStack.push(boxLines(footyLines, innerWidth));
+    }
+    columns.push(stackBoxesVertically(sportsStack));
+    outerWidths.push(boxOuterWidth(innerWidth));
+  }
+
+  writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths, WIDE_LAYOUT_GAP));
 }
