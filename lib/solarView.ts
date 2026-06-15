@@ -369,21 +369,22 @@ export function buildSolarCliLines(data: SolarResponse): string[] {
   ];
 }
 
-export function formatSolarStatusPowerLine(
+export function formatSolarStatusPowerLines(
   powerNow: number | null,
   powerHourAvg: number | null,
   now: Date,
   yieldAverages: YieldAverage[] | null,
-): string {
+): string[] {
   const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
   const avgText = powerHourAvg == null ? "-" : formatColoredWattsPrecise(powerHourAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  const power = `Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`;
-  if (!yieldAverages || yieldAverages.length === 0) return power;
+  const lines = [`Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`];
+  if (!yieldAverages || yieldAverages.length === 0) return lines;
   const averages = yieldAverages
     .map(({ days, average }) => `${days}d: ${average == null ? "-" : formatColoredKwh(average)}`)
     .join(" // ");
-  return `${power} // ${averages}`;
+  lines.push(averages);
+  return lines;
 }
 
 export function maxSolarPanelLineWidth(lines: string[]): number {

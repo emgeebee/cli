@@ -17,7 +17,7 @@ import {
 } from "./lib/solarApi";
 import {
   buildSolarPanelLines,
-  formatSolarStatusPowerLine,
+  formatSolarStatusPowerLines,
   yieldAveragesFromData,
   type YieldAverage,
 } from "./lib/solarView";
@@ -157,7 +157,7 @@ function sectionDivider(name: string): string {
 }
 
 function sectionBreak(name: string): string[] {
-  return [sectionDivider(name)];
+  return ["", sectionDivider(name)];
 }
 
 type GasSnapshot = {
@@ -193,7 +193,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
     ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarStatusPowerLine(
+    ...formatSolarStatusPowerLines(
       state.powerNow,
       state.powerHourAvg,
       now,

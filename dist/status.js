@@ -15162,14 +15162,15 @@ function buildSolarPanelLines(data, countdown) {
   const title = countdown ? `=== Solar (Weather in ${countdown.seconds}, n) ===` : "=== Solar ===";
   return [title, "", ...buildSolarViewBody(data)];
 }
-function formatSolarStatusPowerLine(powerNow, powerHourAvg, now, yieldAverages) {
+function formatSolarStatusPowerLines(powerNow, powerHourAvg, now, yieldAverages) {
   const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
   const avgText = powerHourAvg == null ? "-" : formatColoredWattsPrecise(powerHourAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  const power = `Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`;
-  if (!yieldAverages || yieldAverages.length === 0) return power;
+  const lines = [`Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`];
+  if (!yieldAverages || yieldAverages.length === 0) return lines;
   const averages = yieldAverages.map(({ days, average }) => `${days}d: ${average == null ? "-" : formatColoredKwh(average)}`).join(" // ");
-  return `${power} // ${averages}`;
+  lines.push(averages);
+  return lines;
 }
 
 // lib/tempApi.ts
@@ -17713,7 +17714,7 @@ function sectionDivider(name) {
   return `\u2500\u2500 ${name} \u2500\u2500`;
 }
 function sectionBreak(name) {
-  return [sectionDivider(name)];
+  return ["", sectionDivider(name)];
 }
 function buildStatusLines(state) {
   const now = state.now;
@@ -17724,7 +17725,7 @@ function buildStatusLines(state) {
     ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
     ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarStatusPowerLine(
+    ...formatSolarStatusPowerLines(
       state.powerNow,
       state.powerHourAvg,
       now,
