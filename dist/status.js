@@ -100,14 +100,14 @@ var require_emoji_regex = __commonJS({
 var require_string_width = __commonJS({
   "node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js"(exports2, module2) {
     "use strict";
-    var stripAnsi2 = require_strip_ansi();
+    var stripAnsi3 = require_strip_ansi();
     var isFullwidthCodePoint = require_is_fullwidth_code_point();
     var emojiRegex = require_emoji_regex();
-    var stringWidth3 = (string4) => {
+    var stringWidth5 = (string4) => {
       if (typeof string4 !== "string" || string4.length === 0) {
         return 0;
       }
-      string4 = stripAnsi2(string4);
+      string4 = stripAnsi3(string4);
       if (string4.length === 0) {
         return 0;
       }
@@ -128,8 +128,8 @@ var require_string_width = __commonJS({
       }
       return width;
     };
-    module2.exports = stringWidth3;
-    module2.exports.default = stringWidth3;
+    module2.exports = stringWidth5;
+    module2.exports.default = stringWidth5;
   }
 });
 
@@ -14889,6 +14889,289 @@ async function fetchBbcWeatherAggregated(location) {
   return await response.json();
 }
 
+// lib/solarView.ts
+var import_strip_ansi = __toESM(require_strip_ansi());
+var import_string_width = __toESM(require_string_width());
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var HOUR_MS = 60 * 60 * 1e3;
+var DAILY_YIELD_DAYS = 28;
+var AVERAGE_WINDOWS = [7, 14, 31];
+var POWER_HISTORY_HOURS = 34;
+var POWER_CHART_MIN_W = 0;
+var POWER_CHART_MAX_W = 800;
+var POWER_CHART_STEP_W = 50;
+var POWER_CHART_HEIGHT = (POWER_CHART_MAX_W - POWER_CHART_MIN_W) / POWER_CHART_STEP_W + 1;
+var CHART_POINT = "\u25CF";
+var UK_TZ3 = "Europe/London";
+var ANSI_RESET3 = "\x1B[0m";
+var ANSI_GREEN3 = "\x1B[32m";
+var ANSI_YELLOW3 = "\x1B[33m";
+var ANSI_ORANGE3 = "\x1B[38;5;208m";
+var ANSI_RED3 = "\x1B[31m";
+function parseDateKey(key) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date5 = new Date(Date.UTC(year, month - 1, day));
+  return Number.isNaN(date5.getTime()) ? null : date5;
+}
+function toYmd(date5) {
+  return date5.toISOString().slice(0, 10);
+}
+function dayKeyUK(date5 = /* @__PURE__ */ new Date()) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
+}
+function subtractDayKey(dayKey, days) {
+  const [year, month, day] = dayKey.split("-").map(Number);
+  const date5 = new Date(Date.UTC(year, month - 1, day));
+  date5.setUTCDate(date5.getUTCDate() - days);
+  return toYmd(date5);
+}
+function startOfUtcDay(date5) {
+  return new Date(Date.UTC(date5.getUTCFullYear(), date5.getUTCMonth(), date5.getUTCDate()));
+}
+function startOfUkHour(ms) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: UK_TZ3,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(ms));
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+  const day = Number(parts.find((part) => part.type === "day")?.value);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  return ukWallTimeToDate(year, month, day, hour, 0).getTime();
+}
+function formatDateLabel(ymd) {
+  const date5 = parseDateKey(ymd);
+  if (!date5) return ymd;
+  return date5.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "UTC"
+  });
+}
+function formatHourLabel(ms) {
+  return new Date(ms).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: UK_TZ3
+  });
+}
+function formatWatts(value) {
+  if (value >= 1e3) return `${(value / 1e3).toFixed(1)}kW`;
+  return `${Math.round(value)}W`;
+}
+function shouldUseColor3() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function colorize3(text, color) {
+  if (!shouldUseColor3()) return text;
+  return `${color}${text}${ANSI_RESET3}`;
+}
+function colorForPower2(watts) {
+  if (watts > 400) return ANSI_GREEN3;
+  if (watts > 200) return ANSI_YELLOW3;
+  if (watts > 100) return ANSI_ORANGE3;
+  return ANSI_RED3;
+}
+function formatColoredPowerPoint(value) {
+  return `${colorize3(CHART_POINT, colorForPower2(value))} `;
+}
+function visibleLength(value) {
+  return (0, import_string_width.default)((0, import_strip_ansi.default)(value));
+}
+function padCell(value, width) {
+  return value + " ".repeat(Math.max(0, width - visibleLength(value)));
+}
+function makeAsciiTable(headers, rows) {
+  const widths = headers.map(
+    (header, idx) => Math.max(
+      visibleLength(header),
+      ...rows.map((row) => visibleLength(row[idx] || ""))
+    )
+  );
+  const border = `+-${widths.map((width) => "-".repeat(width)).join("-+-")}-+`;
+  const headerLine = `| ${headers.map((header, idx) => padCell(header, widths[idx])).join(" | ")} |`;
+  const body = rows.map(
+    (row) => `| ${row.map((value, idx) => padCell(value || "", widths[idx])).join(" | ")} |`
+  );
+  return [border, headerLine, border, ...body, border];
+}
+function normalizeDailyYield(data) {
+  return Object.entries(data.yield).map(([date5, value]) => ({ date: date5, value })).filter((entry) => parseDateKey(entry.date) && Number.isFinite(entry.value)).sort((a, b) => a.date.localeCompare(b.date));
+}
+function normalizePowerAvgReadings(data) {
+  return Object.entries(data.powerAvg).map(([key, value]) => {
+    const parsed = parsePowerDateTimeKey(key);
+    return parsed && Number.isFinite(value) ? { time: parsed.getTime(), value } : null;
+  }).filter((entry) => entry != null).sort((a, b) => a.time - b.time);
+}
+function normalizePowerNow(data) {
+  const value = data.powerNow?.value;
+  return value != null && Number.isFinite(value) ? value : null;
+}
+function joinAsciiTables(left, right, gap = 3) {
+  const gapStr = " ".repeat(gap);
+  const maxLeft = left.reduce((max, line) => Math.max(max, visibleLength(line)), 0);
+  const rows = Math.max(left.length, right.length);
+  return Array.from({ length: rows }, (_, index) => {
+    const leftLine = left[index] ?? "";
+    const rightLine = right[index] ?? "";
+    const padding = maxLeft - visibleLength(leftLine);
+    return `${leftLine}${" ".repeat(padding)}${gapStr}${rightLine}`;
+  });
+}
+function buildPowerRows(powerNow, powerAvgReadings) {
+  const latestAvg = powerAvgReadings.at(-1);
+  return [
+    ["Now", powerNow == null ? "-" : formatColoredWattsPrecise(powerNow)],
+    [
+      latestAvg ? `Avg ${formatHourLabel(latestAvg.time)}` : "Latest avg",
+      latestAvg == null ? "-" : formatColoredWattsPrecise(latestAvg.value)
+    ]
+  ];
+}
+function latestYieldDay(yields) {
+  const latest = yields.at(-1);
+  return latest ? parseDateKey(latest.date) ?? startOfUtcDay(/* @__PURE__ */ new Date()) : startOfUtcDay(/* @__PURE__ */ new Date());
+}
+function buildDailyYieldRows(yields) {
+  const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
+  const end = latestYieldDay(yields);
+  const start = new Date(end.getTime() - (DAILY_YIELD_DAYS - 1) * DAY_MS);
+  const rows = [];
+  for (let offset = 0; offset < DAILY_YIELD_DAYS; offset += 1) {
+    const date5 = new Date(start.getTime() + offset * DAY_MS);
+    const ymd = toYmd(date5);
+    const value = byDate.get(ymd);
+    rows.push([formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)]);
+  }
+  return rows;
+}
+function yieldAveragesFromYields(yields) {
+  const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
+  const todayKey = dayKeyUK();
+  return AVERAGE_WINDOWS.map((days) => {
+    const values = [];
+    for (let back = 1; back <= days; back += 1) {
+      const value = byDate.get(subtractDayKey(todayKey, back));
+      if (value != null) values.push(value);
+    }
+    const average = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    return { days, average, samples: values.length };
+  });
+}
+function yieldAveragesFromData(data) {
+  return yieldAveragesFromYields(normalizeDailyYield(data));
+}
+function buildAverageRows(yields) {
+  return yieldAveragesFromYields(yields).map(({ days, average, samples }) => [
+    `${days} days`,
+    average == null ? "-" : formatColoredKwh(average),
+    `${samples}/${days}`
+  ]);
+}
+function buildHourlyPowerSeries(readings) {
+  const latestHour = startOfUkHour(Date.now());
+  const firstHour = latestHour - (POWER_HISTORY_HOURS - 1) * HOUR_MS;
+  const buckets = Array.from({ length: POWER_HISTORY_HOURS }, () => []);
+  for (const reading of readings) {
+    const hour = startOfUkHour(reading.time);
+    const index = Math.floor((hour - firstHour) / HOUR_MS);
+    if (index < 0 || index >= buckets.length) continue;
+    buckets[index].push(reading.value);
+  }
+  return {
+    firstHour,
+    series: buckets.map(
+      (bucket) => bucket.length > 0 ? bucket.reduce((sum, value) => sum + value, 0) / bucket.length : null
+    )
+  };
+}
+function powerRowForValue(value) {
+  const clamped = Math.max(POWER_CHART_MIN_W, Math.min(POWER_CHART_MAX_W, value));
+  return Math.max(
+    0,
+    Math.min(
+      POWER_CHART_HEIGHT - 1,
+      Math.round((POWER_CHART_MAX_W - clamped) / POWER_CHART_STEP_W)
+    )
+  );
+}
+function renderPowerGraph(readings) {
+  const { firstHour, series } = buildHourlyPowerSeries(readings);
+  const values = series.filter((value) => value != null);
+  if (values.length === 0) {
+    return [`No power readings in the last ${POWER_HISTORY_HOURS} available hours.`];
+  }
+  const grid = Array.from(
+    { length: POWER_CHART_HEIGHT },
+    () => Array.from({ length: series.length }, () => "  ")
+  );
+  for (let col = 0; col < series.length; col += 1) {
+    const value = series[col];
+    if (value == null) continue;
+    grid[powerRowForValue(value)][col] = formatColoredPowerPoint(value);
+  }
+  const lines = [];
+  for (let row = 0; row < POWER_CHART_HEIGHT; row += 1) {
+    const labelValue = POWER_CHART_MAX_W - row * POWER_CHART_STEP_W;
+    lines.push(`${formatWatts(labelValue).padStart(6)} |${grid[row].join("")}`);
+  }
+  lines.push(`       +${"-".repeat(series.length * 2)}`);
+  const labelChars = Array(series.length * 2).fill(" ");
+  for (let col = 0; col < series.length; col += 6) {
+    const label = formatHourLabel(firstHour + col * HOUR_MS);
+    const pos = col * 2;
+    for (let idx = 0; idx < label.length && pos + idx < labelChars.length; idx += 1) {
+      labelChars[pos + idx] = label[idx] || " ";
+    }
+  }
+  lines.push(`        ${labelChars.join("")}`);
+  return lines;
+}
+function buildSolarViewBody(data) {
+  const yields = normalizeDailyYield(data);
+  const powerNow = normalizePowerNow(data);
+  const powerAvgReadings = normalizePowerAvgReadings(data);
+  const lines = [];
+  lines.push("Daily Yield (Last 4 Weeks)");
+  lines.push(...makeAsciiTable(["Date", "Yield"], buildDailyYieldRows(yields)));
+  lines.push("");
+  lines.push("Power");
+  lines.push(
+    ...joinAsciiTables(
+      makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings)),
+      makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields))
+    )
+  );
+  lines.push("");
+  lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
+  lines.push(...renderPowerGraph(powerAvgReadings));
+  return lines;
+}
+function buildSolarPanelLines(data, countdown) {
+  const title = countdown ? `=== Solar (Weather in ${countdown.seconds}, n) ===` : "=== Solar ===";
+  return [title, "", ...buildSolarViewBody(data)];
+}
+function formatSolarStatusPowerLine(powerNow, powerHourAvg, now, yieldAverages) {
+  const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
+  const avgText = powerHourAvg == null ? "-" : formatColoredWattsPrecise(powerHourAvg);
+  const hourLabel = formatUkHourLabel(ukHourStartMs(now));
+  const power = `Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`;
+  if (!yieldAverages || yieldAverages.length === 0) return power;
+  const averages = yieldAverages.map(({ days, average }) => `${days}d: ${average == null ? "-" : formatColoredKwh(average)}`).join(" // ");
+  return `${power} // ${averages}`;
+}
+
 // lib/tempApi.ts
 var TEMP_API_URL = "http://api.emgeebee.buzz:1880/api/get-house-temp";
 var nullableNumericField = external_exports.preprocess((value) => {
@@ -14943,14 +15226,14 @@ var ELECTRICITY_PERIODS = [
   { label: "> 7", minHour: 19, maxHour: 24 }
 ];
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
-var DAY_MS = 24 * 60 * 60 * 1e3;
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var CACHE_MAX_AGE_DAYS = 2;
-var UK_TZ3 = "Europe/London";
-var ANSI_RESET3 = "\x1B[0m";
-var ANSI_GREEN3 = "\x1B[32m";
-var ANSI_YELLOW3 = "\x1B[33m";
-var ANSI_ORANGE3 = "\x1B[38;5;208m";
-var ANSI_RED3 = "\x1B[31m";
+var UK_TZ4 = "Europe/London";
+var ANSI_RESET4 = "\x1B[0m";
+var ANSI_GREEN4 = "\x1B[32m";
+var ANSI_YELLOW4 = "\x1B[33m";
+var ANSI_ORANGE4 = "\x1B[38;5;208m";
+var ANSI_RED4 = "\x1B[31m";
 var ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 function resolveOctoCredentials() {
   const parseGasFactor = (value) => {
@@ -15108,44 +15391,44 @@ function ratesUrlWithWindow(baseUrl, from, to) {
   url2.searchParams.set("period_to", toIsoNoMs(to));
   return url2.toString();
 }
-function shouldUseColor3() {
+function shouldUseColor4() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize3(text, color) {
-  if (!shouldUseColor3()) return text;
-  return `${color}${text}${ANSI_RESET3}`;
+function colorize4(text, color) {
+  if (!shouldUseColor4()) return text;
+  return `${color}${text}${ANSI_RESET4}`;
 }
 function colorForRate(rateIncVat, fuel) {
   if (fuel === "electricity") {
-    if (rateIncVat <= 5) return ANSI_GREEN3;
-    if (rateIncVat <= 12) return ANSI_YELLOW3;
-    if (rateIncVat < 20) return ANSI_ORANGE3;
-    return ANSI_RED3;
+    if (rateIncVat <= 5) return ANSI_GREEN4;
+    if (rateIncVat <= 12) return ANSI_YELLOW4;
+    if (rateIncVat < 20) return ANSI_ORANGE4;
+    return ANSI_RED4;
   }
-  if (rateIncVat < 4) return ANSI_GREEN3;
-  if (rateIncVat <= 5) return ANSI_YELLOW3;
-  if (rateIncVat < 6) return ANSI_ORANGE3;
-  return ANSI_RED3;
+  if (rateIncVat < 4) return ANSI_GREEN4;
+  if (rateIncVat <= 5) return ANSI_YELLOW4;
+  if (rateIncVat < 6) return ANSI_ORANGE4;
+  return ANSI_RED4;
 }
-function dayKeyUK(date5) {
-  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
+function dayKeyUK2(date5) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ4 });
 }
 function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
-  const [year, month, day] = dayKeyUK(now).split("-").map(Number);
+  const [year, month, day] = dayKeyUK2(now).split("-").map(Number);
   const date5 = new Date(Date.UTC(year, month - 1, day + 1));
   return date5.toISOString().slice(0, 10);
 }
 function gasRatesForDay(rates, dayYmd) {
-  return rates.filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
+  return rates.filter((rate) => rate.valid_from && dayKeyUK2(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
 function cacheEntryAgeDays(dayYmd, now) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return null;
-  const [tY, tM, tD] = dayKeyUK(now).split("-").map(Number);
+  const [tY, tM, tD] = dayKeyUK2(now).split("-").map(Number);
   const [y, m, d] = dayYmd.split("-").map(Number);
   const todayUtc = Date.UTC(tY, tM - 1, tD);
   const entryUtc = Date.UTC(y, m - 1, d);
   if (Number.isNaN(entryUtc)) return null;
-  return Math.floor((todayUtc - entryUtc) / DAY_MS);
+  return Math.floor((todayUtc - entryUtc) / DAY_MS2);
 }
 function pruneStaleDateKeyedCache(cache, now = /* @__PURE__ */ new Date()) {
   let pruned = false;
@@ -15216,7 +15499,7 @@ async function ensureGasPricesCached(dayKeys, now) {
     return cache;
   }
   const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const to = new Date(from.getTime() + 2 * DAY_MS2);
   const fetched = await fetchGasRates(from, to);
   let updated = false;
   for (const dayKey of missing) {
@@ -15240,7 +15523,7 @@ async function fetchGasRates(from, to) {
   return fetchAllOctopusResults(url2, token);
 }
 async function loadTodayTomorrowGasRates(now = /* @__PURE__ */ new Date()) {
-  const todayYmd = dayKeyUK(now);
+  const todayYmd = dayKeyUK2(now);
   const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureGasPricesCached([todayYmd, tomorrowYmd], now);
   return {
@@ -15252,7 +15535,7 @@ function formatGasPrice(rate) {
   const inc = rate.value_inc_vat;
   if (inc == null) return "?";
   const text = `${inc.toFixed(4)}p`;
-  return colorize3(text, colorForRate(inc, "gas"));
+  return colorize4(text, colorForRate(inc, "gas"));
 }
 function formatGasPrices(rates) {
   if (rates.length === 0) return "-";
@@ -15337,7 +15620,7 @@ async function ensureElectricityPricesCached(dayKeys, now) {
     return cache;
   }
   const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const to = new Date(from.getTime() + 2 * DAY_MS2);
   const fetched = await fetchElectricityRates(from, to);
   let updated = false;
   for (const dayKey of missing) {
@@ -15353,7 +15636,7 @@ async function ensureElectricityPricesCached(dayKeys, now) {
   return cache;
 }
 async function loadTodayTomorrowElectricityRates(now = /* @__PURE__ */ new Date()) {
-  const todayYmd = dayKeyUK(now);
+  const todayYmd = dayKeyUK2(now);
   const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
   return {
@@ -15367,7 +15650,7 @@ function ukHourFromIso(iso) {
   const hour = Number(date5.toLocaleTimeString("en-GB", {
     hour: "numeric",
     hour12: false,
-    timeZone: UK_TZ3
+    timeZone: UK_TZ4
   }));
   return Number.isFinite(hour) ? hour : null;
 }
@@ -15396,7 +15679,7 @@ function averageElectricityByPeriod(rates) {
 }
 function formatElectricityPrice(pence) {
   const text = `${pence.toFixed(2)}p`;
-  return colorize3(text, colorForRate(pence, "electricity"));
+  return colorize4(text, colorForRate(pence, "electricity"));
 }
 function formatElectricityPeriodLabel(label) {
   return label.replace(/\s+/g, "");
@@ -15405,7 +15688,7 @@ function padAsciiCell(value, width) {
   const visible = value.replace(ANSI_REGEX, "").length;
   return value + " ".repeat(Math.max(0, width - visible));
 }
-function makeAsciiTable(headers, rows) {
+function makeAsciiTable2(headers, rows) {
   const widths = headers.map(
     (header, idx) => Math.max(
       header.replace(ANSI_REGEX, "").length,
@@ -15440,12 +15723,12 @@ function formatElectricityPeriodAvgTable(today, tomorrow) {
   ];
   const hasValue = rows.some((row) => row.slice(1).some((cell) => cell !== "-"));
   if (!hasValue) return [];
-  return makeAsciiTable(ELECTRICITY_TABLE_HEADERS, rows);
+  return makeAsciiTable2(ELECTRICITY_TABLE_HEADERS, rows);
 }
 
 // lib/bdayApi.ts
-var DAY_MS2 = 24 * 60 * 60 * 1e3;
-var UK_TZ4 = "Europe/London";
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
+var UK_TZ5 = "Europe/London";
 function readBdayConfig() {
   const config2 = readPhoneCliConfig();
   const bday = config2.bday;
@@ -15455,7 +15738,7 @@ function readBdayConfig() {
   return bday;
 }
 function ukTodayYmd2(now = /* @__PURE__ */ new Date()) {
-  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ4 });
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ5 });
 }
 function isLeapYear(year) {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
@@ -15490,7 +15773,7 @@ function nextUpcomingBirthdays(config2, now = /* @__PURE__ */ new Date(), limit 
     if (!bdYmd) continue;
     const nextYmd = nextBirthdayYmd(bdYmd, now);
     if (!nextYmd) continue;
-    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS2);
+    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS3);
     const birthYear = Number(bdYmd.slice(0, 4));
     const nextYear = Number(nextYmd.slice(0, 4));
     upcoming.push({
@@ -15508,7 +15791,7 @@ function formatBdayDate(ymd) {
   return date5.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
-    timeZone: UK_TZ4
+    timeZone: UK_TZ5
   });
 }
 function formatDaysUntil(daysUntil) {
@@ -15629,11 +15912,11 @@ function applyStyles(text, parts) {
   }
   return `${parts.join("")}${text}${RESET}`;
 }
-function visibleLength(value) {
+function visibleLength2(value) {
   return value.replace(ANSI_REGEX2, "").length;
 }
 function padRightVisible(value, width) {
-  const diff = width - visibleLength(value);
+  const diff = width - visibleLength2(value);
   return diff > 0 ? `${value}${" ".repeat(diff)}` : value;
 }
 function colorLabel(label, color) {
@@ -15672,7 +15955,7 @@ function statusCalendarInnerWidth() {
 }
 function columnWidthsForRow(innerWidth, columns, gutter) {
   if (innerWidth === void 0) {
-    return columns.map((col) => Math.max(0, ...col.map(visibleLength)));
+    return columns.map((col) => Math.max(0, ...col.map(visibleLength2)));
   }
   const gutterTotal = (columns.length - 1) * gutter.length;
   const available = innerWidth - gutterTotal;
@@ -15696,7 +15979,7 @@ function joinMonthRow(columns, innerWidth, gutter = STATUS_CALENDAR_GUTTER) {
 function buildStatusCalendarLines(months, today, colors, maxContentLines, innerWidth) {
   const calendarWidth = innerWidth ?? statusCalendarInnerWidth();
   const legend = buildCalendarLegendLine();
-  const lines = [padRightVisible(legend, calendarWidth)];
+  const lines = ["=== Dates ===", "", padRightVisible(legend, calendarWidth)];
   for (let i = 0; i < months.length; i += STATUS_CALENDAR_COLUMNS) {
     const rowMonths = months.slice(i, i + STATUS_CALENDAR_COLUMNS).map(
       ({ year, month }) => buildCalendarLines(year, month, today, colors)
@@ -15822,7 +16105,7 @@ async function loadStatusCalendarData(now = /* @__PURE__ */ new Date()) {
 }
 
 // bbc.ts
-function toYmd(date5) {
+function toYmd2(date5) {
   return date5.toISOString().slice(0, 10);
 }
 async function fetchBbcJson(url2, refDate, sport) {
@@ -15842,7 +16125,110 @@ async function fetchBbcJson(url2, refDate, sport) {
   return await response.json();
 }
 
+// lib/ballEvents.ts
+var import_string_width2 = __toESM(require_string_width());
+var COLUMN_GAP = 8;
+function parseMinuteSortKey(label) {
+  const match = String(label).match(/^(\d+)'\s*(?:\+\s*(\d+))?/);
+  if (!match) return 99999;
+  const base = Number.parseInt(match[1], 10);
+  const extra = match[2] ? Number.parseInt(match[2], 10) : 0;
+  return base * 100 + extra;
+}
+function kindForActionType(type) {
+  switch (type) {
+    case "Goal":
+      return "";
+    case "Penalty":
+      return "pen";
+    case "Own Goal":
+      return "og";
+    case "Red Card":
+      return "RC";
+    case "Two Yellow Cards":
+      return "2YC";
+    default:
+      if (type.toLowerCase().includes("miss")) return "pen missed";
+      return type.toLowerCase();
+  }
+}
+function displayPlayerName(name) {
+  const parts = name.trim().split(/\s+/);
+  const surname = parts[parts.length - 1] || name;
+  return surname.charAt(0).toUpperCase() + surname.slice(1).toLowerCase();
+}
+function displayMinute(label) {
+  return label.replace(/'/g, "");
+}
+function padEndDisplay(text, width) {
+  const w = (0, import_string_width2.default)(text);
+  if (w >= width) return text;
+  return text + " ".repeat(width - w);
+}
+function collectSideEvents(side) {
+  const byPlayer = /* @__PURE__ */ new Map();
+  for (const entry of side?.actions || []) {
+    const player = String(entry.playerName || "").trim();
+    if (!player) continue;
+    for (const action of entry.actions || []) {
+      const type = String(action.type || "").trim();
+      if (!type) continue;
+      const rawMinute = String(action.timeLabel?.value || "").trim();
+      const sortKey = parseMinuteSortKey(rawMinute);
+      const minute = displayMinute(rawMinute || "?");
+      const kind = kindForActionType(type);
+      let group = byPlayer.get(player);
+      if (!group) {
+        group = {
+          sortKey,
+          displayName: displayPlayerName(player),
+          items: []
+        };
+        byPlayer.set(player, group);
+      }
+      group.sortKey = Math.min(group.sortKey, sortKey);
+      group.items.push({ sortKey, minute, kind });
+    }
+  }
+  return [...byPlayer.values()].sort((a, b) => a.sortKey - b.sortKey);
+}
+function formatPlayerGroup(group) {
+  const sorted = [...group.items].sort((a, b) => a.sortKey - b.sortKey);
+  const times = sorted.map((item) => item.kind ? `${item.minute} ${item.kind}` : item.minute).join(", ");
+  return `${group.displayName} ${times}`;
+}
+function matchEventLines(homeTeam, awayTeam, indent = "    ") {
+  const homeLines = collectSideEvents(homeTeam).map(formatPlayerGroup);
+  const awayLines = collectSideEvents(awayTeam).map(formatPlayerGroup);
+  if (homeLines.length === 0 && awayLines.length === 0) return [];
+  const leftWidth = Math.max(
+    ...homeLines.map((line) => (0, import_string_width2.default)(line)),
+    16
+  );
+  const rows = Math.max(homeLines.length, awayLines.length);
+  const lines = [];
+  for (let i = 0; i < rows; i++) {
+    const left = homeLines[i] || "";
+    const right = awayLines[i] || "";
+    lines.push(`${indent}${padEndDisplay(left, leftWidth + COLUMN_GAP)}${right}`);
+  }
+  return lines;
+}
+
 // lib/ballApi.ts
+var COMPETITION_ORDER = [
+  "FIFA World Cup",
+  "Premier League",
+  "FA Cup",
+  "League Cup",
+  "UEFA Champions League",
+  "UEFA Europa League",
+  "Championship",
+  "League One",
+  "Scottish Premiership"
+];
+var DAY_MS4 = 24 * 60 * 60 * 1e3;
+var STATUS_FORWARD_DAYS = 59;
 var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
   "premierleague",
   "championship",
@@ -15862,13 +16248,16 @@ var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
   "fifaworldcup"
 ]);
 var BBC_BASE_URL = "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
-var ANSI_RESET4 = "\x1B[0m";
+var ANSI_RESET5 = "\x1B[0m";
 var ANSI_DARK_GREEN = "\x1B[32m";
 var ANSI_DARK_RED = "\x1B[31m";
+var ANSI_DARK_YELLOW = "\x1B[33m";
+var ANSI_PALE_YELLOW = "\x1B[38;5;227m";
 var ANSI_BRIGHT_GREEN = "\x1B[92m";
 var ANSI_BRIGHT_RED = "\x1B[91m";
 var ANSI_BG_CLARET = "\x1B[48;5;88m";
 var ANSI_VILLA_BLUE = "\x1B[38;5;39m";
+var ANSI_PURPLE = "\x1B[35m";
 var ANSI_BLUE2 = "\x1B[94m";
 var urlForDaysGames = (today, end, start) => `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent("urn:bbc:sportsdata:football:tournament-collection:collated")}`;
 function normalizeText(value) {
@@ -15879,7 +16268,7 @@ function urnSlug(urn) {
   const parts = String(urn).split(":");
   return parts[parts.length - 1] || "";
 }
-function shouldUseColor4() {
+function shouldUseColor5() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
 function isAstonVillaName(name) {
@@ -15887,12 +16276,20 @@ function isAstonVillaName(name) {
   return n === "astonvilla" || n === "avfc" || n === "avl";
 }
 function highlightAstonVilla(name) {
-  if (!shouldUseColor4() || !isAstonVillaName(name)) return name;
-  return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET4}`;
+  if (!shouldUseColor5() || !isAstonVillaName(name)) return name;
+  return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET5}`;
+}
+function isEnglandName(name) {
+  const n = normalizeText(name);
+  return n === "england" || n === "eng";
+}
+function highlightEngland(name) {
+  if (!shouldUseColor5() || !isEnglandName(name)) return name;
+  return `${ANSI_PURPLE}${name}${ANSI_RESET5}`;
 }
 function teamLabel(team) {
   const base = team?.name?.shortName || team?.shortName || team?.name?.abbreviation || team?.name?.fullName || team?.fullName || team?.key || "unknown-team";
-  return highlightAstonVilla(base);
+  return highlightEngland(highlightAstonVilla(base));
 }
 function competitionLabel(event) {
   return event?.tournament?.disambiguatedName || event?.tournament?.name || event?.eventGroupingLabel || "Other";
@@ -15948,36 +16345,42 @@ function scoreNumber(score) {
 }
 function colorTeamName(name, role, isLive) {
   if (isAstonVillaName(name)) return highlightAstonVilla(name);
-  if (!shouldUseColor4()) return name;
-  if (role === "win") return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET4}`;
-  if (role === "loss") return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET4}`;
-  return name;
+  if (isEnglandName(name)) return highlightEngland(name);
+  if (!shouldUseColor5()) return name;
+  if (role === "win") return `${isLive ? ANSI_DARK_GREEN : ANSI_BRIGHT_GREEN}${name}${ANSI_RESET5}`;
+  if (role === "loss") return `${isLive ? ANSI_DARK_RED : ANSI_BRIGHT_RED}${name}${ANSI_RESET5}`;
+  return `${isLive ? ANSI_DARK_YELLOW : ANSI_PALE_YELLOW}${name}${ANSI_RESET5}`;
 }
 function fixtureLine(event) {
   const home = teamLabel(event.homeTeam);
   const away = teamLabel(event.awayTeam);
   const statusLabel = event.eventStatusNote || event.statusText || "scheduled";
-  const competitionTag = competitionLabel(event);
   const homeScore = teamScore(event.homeTeam, event);
   const awayScore = teamScore(event.awayTeam, event);
   const hasScore = homeScore != null && awayScore != null;
   const isLive = isResultState(event) && !isFinishedState(event);
   const time3 = eventTime(event);
   const isScheduled = normalizeText(statusLabel) === "scheduled";
-  const liveStatusLabel = shouldUseColor4() && isLive ? `${ANSI_BLUE2}${statusLabel}${ANSI_RESET4}` : statusLabel;
-  const suffix = `(${competitionTag}) ${isScheduled ? "" : `(${liveStatusLabel})`}`.trim();
+  const liveStatusLabel = shouldUseColor5() && isLive ? `${ANSI_BLUE2}${statusLabel}${ANSI_RESET5}` : statusLabel;
+  const suffix = isScheduled ? "" : `(${liveStatusLabel})`;
+  const suffixWithSpace = suffix ? ` ${suffix}` : "";
   if (isResultState(event) && hasScore) {
     const homeN = scoreNumber(homeScore);
     const awayN = scoreNumber(awayScore);
     let homeDisplay = home;
     let awayDisplay = away;
-    if (homeN != null && awayN != null && homeN !== awayN) {
-      homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
-      awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+    if (homeN != null && awayN != null) {
+      if (homeN === awayN && (isLive || isFinishedState(event))) {
+        homeDisplay = colorTeamName(home, "draw", isLive);
+        awayDisplay = colorTeamName(away, "draw", isLive);
+      } else if (homeN !== awayN) {
+        homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
+        awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+      }
     }
-    return `${time3} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay} ${suffix}`.trim();
+    return `${time3} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay}${suffixWithSpace}`.trim();
   }
-  return `${time3} ${home} vs ${away} ${suffix}`.trim();
+  return `${time3} ${home} vs ${away}${suffixWithSpace}`.trim();
 }
 function normalizeEvent(raw) {
   const home = raw.homeTeam || raw.home;
@@ -16050,32 +16453,227 @@ function flattenEventsFromContainer(root) {
   return events;
 }
 async function fetchMatchData(url2, dayYmd) {
-  const refDate = dayYmd || toYmd(/* @__PURE__ */ new Date());
+  const refDate = dayYmd || toYmd2(/* @__PURE__ */ new Date());
   const data = await fetchBbcJson(url2, refDate, "football");
   const batchShape = data?.payload?.[0]?.body?.matchData;
   if (batchShape) return flattenEvents(batchShape);
   return flattenEventsFromContainer(data);
 }
-async function fetchTodayFootballFixtures(ymd) {
-  const today = toYmd(/* @__PURE__ */ new Date());
-  const url2 = urlForDaysGames(today, ymd, ymd);
-  return (await fetchMatchData(url2, ymd)).filter(competitionAllowed);
+function statusDayRows(todayYmd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayYmd);
+  if (!m) return [{ relative: "today", ymd: todayYmd }];
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const today = new Date(Date.UTC(y, mo, d));
+  const rows = [
+    { relative: "yesterday", ymd: toYmd2(new Date(today.getTime() - DAY_MS4)) },
+    { relative: "today", ymd: todayYmd },
+    { relative: "tomorrow", ymd: toYmd2(new Date(today.getTime() + DAY_MS4)) }
+  ];
+  for (let offset = 2; offset <= STATUS_FORWARD_DAYS; offset += 1) {
+    rows.push({
+      relative: "",
+      ymd: toYmd2(new Date(today.getTime() + offset * DAY_MS4))
+    });
+  }
+  return rows;
 }
-function footballStatusSectionLines(events) {
-  if (events.length === 0) return ["none today"];
-  return [...events].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()).map((event) => fixtureLine(event));
+function isFootballDayHeading(line) {
+  return line.startsWith("== ") && line.endsWith(" ==");
 }
-async function loadFootballStatusLines(ymd) {
-  const events = await fetchTodayFootballFixtures(ymd);
-  return footballStatusSectionLines(events);
+function splitFootballDaySections(lines) {
+  const sections = [];
+  let current = [];
+  for (const line of lines) {
+    if (isFootballDayHeading(line)) {
+      if (current.length > 0) sections.push(current);
+      current = [line];
+      continue;
+    }
+    if (line === "" && current.length === 0) continue;
+    current.push(line);
+  }
+  if (current.length > 0) sections.push(current);
+  return sections;
+}
+function fitFootballStatusLines(lines, maxContentLines) {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+  const sections = splitFootballDaySections(lines);
+  const fitted = [];
+  for (const section of sections) {
+    const needed = section.length + (fitted.length > 0 ? 1 : 0);
+    if (fitted.length + needed > maxContentLines) break;
+    if (fitted.length > 0) fitted.push("");
+    fitted.push(...section);
+  }
+  return fitted.length > 0 ? fitted : lines.slice(0, maxContentLines);
+}
+function formatStatusDayHeading(relative, ymd) {
+  if (relative === "yesterday") return "== Yesterday ==";
+  if (relative === "today") return "== Today ==";
+  if (relative === "tomorrow") return "== Tomorrow ==";
+  return `== ${formatYmdLondonShort(ymd)} ==`;
+}
+function formatYmdLondonShort(dayYmd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayYmd);
+  if (!m) return dayYmd;
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const date5 = new Date(Date.UTC(y, mo, d, 12, 0, 0));
+  const weekday = date5.toLocaleDateString("en-GB", {
+    weekday: "short",
+    timeZone: "Europe/London"
+  });
+  return `${weekday} ${String(d).padStart(2, "0")}/${String(mo + 1).padStart(2, "0")}`;
+}
+function eventLondonYmd(event) {
+  const d = new Date(event.startTime || event.startDateTime);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+async function fetchFootballFixturesRange(startYmd, endYmd) {
+  const today = toYmd2(/* @__PURE__ */ new Date());
+  const url2 = urlForDaysGames(today, endYmd, startYmd);
+  return (await fetchMatchData(url2, today)).filter(competitionAllowed);
+}
+function groupedFootballLines(events) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    const key = competitionLabel(event);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(event);
+  }
+  const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
+    const ai = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a));
+    const bi = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b));
+    const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    if (aRank !== bRank) return bRank - aRank;
+    return b.localeCompare(a);
+  });
+  const lines = [];
+  for (const [competition, list] of sortedGroups) {
+    list.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    lines.push(competition);
+    for (const event of list) {
+      lines.push(`- ${fixtureLine(event)}`);
+      if (isResultState(event)) {
+        lines.push(...matchEventLines(event.homeTeam, event.awayTeam, "    "));
+      }
+    }
+  }
+  return lines;
+}
+function footballStatusLinesFromDays(days, eventsByDay) {
+  const lines = [];
+  let anyEvents = false;
+  for (const { relative, ymd } of days) {
+    const dayEvents = eventsByDay.get(ymd) || [];
+    if (dayEvents.length === 0) continue;
+    anyEvents = true;
+    if (lines.length > 0) lines.push("");
+    lines.push(formatStatusDayHeading(relative, ymd));
+    lines.push(...groupedFootballLines(dayEvents));
+  }
+  return anyEvents ? lines : ["none"];
+}
+async function loadFootballStatusLines(todayYmd) {
+  const days = statusDayRows(todayYmd);
+  const events = await fetchFootballFixturesRange(days[0].ymd, days[days.length - 1].ymd);
+  const eventsByDay = /* @__PURE__ */ new Map();
+  for (const day of days) eventsByDay.set(day.ymd, []);
+  for (const event of events) {
+    const ymd = eventLondonYmd(event);
+    const bucket = eventsByDay.get(ymd);
+    if (bucket) bucket.push(event);
+  }
+  return footballStatusLinesFromDays(days, eventsByDay);
 }
 
 // lib/cricApi.ts
 var CRICKET_BASE_URL = "https://web-cdn.api.bbci.co.uk/wc-poll-data/container/sport-data-scores-fixtures";
 var CRICKET_URN = "urn:bbc:sportsdata:cricket:tournament-collection:collated";
-var DAY_MS3 = 24 * 60 * 60 * 1e3;
-function teamLabel2(team) {
+var DAY_MS5 = 24 * 60 * 60 * 1e3;
+var ANSI_RESET6 = "\x1B[0m";
+var ANSI_DARK_GREEN2 = "\x1B[32m";
+var ANSI_DARK_RED2 = "\x1B[31m";
+var ANSI_DARK_YELLOW2 = "\x1B[33m";
+var ANSI_PALE_YELLOW2 = "\x1B[38;5;227m";
+var ANSI_BRIGHT_GREEN2 = "\x1B[92m";
+var ANSI_BRIGHT_RED2 = "\x1B[91m";
+var ANSI_PURPLE2 = "\x1B[35m";
+function shouldUseColor6() {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+function normalizeText2(value) {
+  return String(value || "").toLowerCase();
+}
+function isEnglandName2(name) {
+  const n = normalizeText2(name);
+  return n === "england" || n === "eng";
+}
+function highlightEngland2(name) {
+  if (!shouldUseColor6() || !isEnglandName2(name)) return name;
+  return `${ANSI_PURPLE2}${name}${ANSI_RESET6}`;
+}
+function teamPlainLabel(team) {
   return team?.shortName || team?.name || "TBC";
+}
+function teamId(team) {
+  return String(team?.id || "");
+}
+function isFinishedMatch(event) {
+  return String(event.status || "") === "PostEvent";
+}
+function isLiveMatch(event) {
+  const status = String(event.status || "");
+  return status !== "PreEvent" && status !== "PostEvent";
+}
+function isDrawResult(event) {
+  const result = normalizeText2(event.matchSummary?.resultString);
+  return result.includes("draw") || result.includes("tied");
+}
+function totalRuns(team) {
+  return asInningsList(team).reduce((sum, innings) => sum + (innings.runs ?? 0), 0);
+}
+function teamMatchRole(event, side) {
+  const homeTeam = event.participants?.homeTeam;
+  const awayTeam = event.participants?.awayTeam;
+  const team = side === "home" ? homeTeam : awayTeam;
+  const status = String(event.status || "");
+  if (status === "PreEvent") return null;
+  if (!homeTeam || !awayTeam) return null;
+  if (isFinishedMatch(event)) {
+    if (isDrawResult(event)) return "draw";
+    const winnerId = String(event.winnerTeamId || "");
+    if (!winnerId) return null;
+    return teamId(team) === winnerId ? "win" : "loss";
+  }
+  if (!isLiveMatch(event)) return null;
+  const homeRuns = totalRuns(homeTeam);
+  const awayRuns = totalRuns(awayTeam);
+  if (homeRuns === awayRuns) return "draw";
+  const ahead = homeRuns > awayRuns ? "home" : "away";
+  return side === ahead ? "win" : "loss";
+}
+function colorTeamName2(name, role, isLive) {
+  if (isEnglandName2(name)) return highlightEngland2(name);
+  if (!shouldUseColor6()) return name;
+  if (role === "win") return `${isLive ? ANSI_DARK_GREEN2 : ANSI_BRIGHT_GREEN2}${name}${ANSI_RESET6}`;
+  if (role === "loss") return `${isLive ? ANSI_DARK_RED2 : ANSI_BRIGHT_RED2}${name}${ANSI_RESET6}`;
+  return `${isLive ? ANSI_DARK_YELLOW2 : ANSI_PALE_YELLOW2}${name}${ANSI_RESET6}`;
+}
+function coloredTeamLabel(team, event, side) {
+  const name = teamPlainLabel(team);
+  const role = teamMatchRole(event, side);
+  if (!role) return highlightEngland2(name);
+  return colorTeamName2(name, role, isLiveMatch(event));
+}
+function teamLabel2(team) {
+  return teamPlainLabel(team);
 }
 function asInningsList(team) {
   const innings = team?.innings;
@@ -16089,8 +16687,8 @@ function inningsScore(innings) {
   const declared = innings.isDeclared ? "d" : "";
   return `${innings.runs}/${wickets}${declared}${overs}`;
 }
-function inningsLine(team, innings, index) {
-  const label = teamLabel2(team);
+function inningsLine(team, innings, index, event, side) {
+  const label = coloredTeamLabel(team, event, side);
   const suffix = index > 0 ? ` (Inns ${index + 1})` : "";
   if (!innings) return `${label}${suffix}: -`;
   const score = inningsScore(innings);
@@ -16108,10 +16706,20 @@ function inningsStartTime(innings) {
   const ts = new Date(raw).getTime();
   return Number.isNaN(ts) ? null : ts;
 }
-function orderedInningsLines(homeTeam, awayTeam) {
+function orderedInningsLines(homeTeam, awayTeam, event) {
   const entries = [
-    ...asInningsList(homeTeam).map((innings, idx) => ({ team: homeTeam, innings, localIndex: idx })),
-    ...asInningsList(awayTeam).map((innings, idx) => ({ team: awayTeam, innings, localIndex: idx }))
+    ...asInningsList(homeTeam).map((innings, idx) => ({
+      team: homeTeam,
+      innings,
+      localIndex: idx,
+      side: "home"
+    })),
+    ...asInningsList(awayTeam).map((innings, idx) => ({
+      team: awayTeam,
+      innings,
+      localIndex: idx,
+      side: "away"
+    }))
   ];
   if (entries.length === 0) {
     return ["  -"];
@@ -16130,10 +16738,9 @@ function orderedInningsLines(homeTeam, awayTeam) {
     if (a.localIndex !== b.localIndex) return a.localIndex - b.localIndex;
     return teamLabel2(a.team).localeCompare(teamLabel2(b.team));
   });
-  return entries.map((entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex)}`);
-}
-function normalizeText2(value) {
-  return String(value || "").toLowerCase();
+  return entries.map(
+    (entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex, event, entry.side)}`
+  );
 }
 function competitionLabel2(secondary, event) {
   return secondary.displayLabel || event.tournamentName || event.eventGroupingLabel || "Other";
@@ -16159,16 +16766,18 @@ function multiDayLabel(event, selectedYmd) {
     return "";
   }
   if (selectedDate < startDate || selectedDate > endDate) return "";
-  const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS3) + 1;
+  const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS5) + 1;
   return `Day ${dayNumber}`;
 }
 function fixtureHeaderLine(event, ymd) {
   const homeTeam = event.participants?.homeTeam;
   const awayTeam = event.participants?.awayTeam;
   const dayLabel = multiDayLabel(event, ymd);
+  const home = coloredTeamLabel(homeTeam, event, "home");
+  const away = coloredTeamLabel(awayTeam, event, "away");
   return [
     event.startTime || "??:??",
-    `${teamLabel2(homeTeam)} vs ${teamLabel2(awayTeam)}`,
+    `${home} vs ${away}`,
     event.groundShortName || "-",
     dayLabel || "-",
     event.matchSummary?.resultString || "-"
@@ -16197,7 +16806,7 @@ function cricketStatusSectionLines(data, ymd) {
         const homeTeam = event.participants?.homeTeam;
         const awayTeam = event.participants?.awayTeam;
         lines.push(fixtureHeaderLine(event, ymd));
-        lines.push(...orderedInningsLines(homeTeam, awayTeam));
+        lines.push(...orderedInningsLines(homeTeam, awayTeam, event));
         lines.push("");
       }
     }
@@ -16244,11 +16853,6 @@ function moneyRemaining(now = /* @__PURE__ */ new Date()) {
   } catch {
     return null;
   }
-}
-function datesSectionLabel(now = /* @__PURE__ */ new Date()) {
-  const remaining = moneyRemaining(now);
-  if (remaining == null) return "dates (-)";
-  return `dates (${remaining})`;
 }
 
 // lib/commands.ts
@@ -16321,11 +16925,11 @@ async function fetchWfhStatus() {
     return null;
   }
 }
-var UK_TZ5 = "Europe/London";
+var UK_TZ6 = "Europe/London";
 function houseSectionLabel(now, wfh) {
   const weekday = now.toLocaleDateString("en-GB", {
     weekday: "long",
-    timeZone: UK_TZ5
+    timeZone: UK_TZ6
   }).toLowerCase();
   if (weekday === "saturday" || weekday === "sunday") {
     return "house (weekend)";
@@ -16337,22 +16941,22 @@ function houseSectionLabel(now, wfh) {
 }
 
 // lib/wApi.ts
-var import_strip_ansi = __toESM(require_strip_ansi());
-var import_string_width = __toESM(require_string_width());
+var import_strip_ansi2 = __toESM(require_strip_ansi());
+var import_string_width3 = __toESM(require_string_width());
 var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
 var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
-var ANSI_RESET5 = "\x1B[0m";
-var ANSI_GREEN4 = "\x1B[32m";
-var ANSI_YELLOW4 = "\x1B[33m";
-var ANSI_ORANGE4 = "\x1B[38;5;208m";
-var ANSI_RED4 = "\x1B[31m";
+var ANSI_RESET7 = "\x1B[0m";
+var ANSI_GREEN5 = "\x1B[32m";
+var ANSI_YELLOW5 = "\x1B[33m";
+var ANSI_ORANGE5 = "\x1B[38;5;208m";
+var ANSI_RED5 = "\x1B[31m";
 var HEAVY_RAIN_WORDING = /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 var LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
-function visibleLength2(value) {
-  return (0, import_string_width.default)((0, import_strip_ansi.default)(value));
+function visibleLength3(value) {
+  return (0, import_string_width3.default)((0, import_strip_ansi2.default)(value));
 }
 function emojiTerminalDisplayWidth(value) {
-  return visibleLength2((0, import_strip_ansi.default)(value).replace(/\uFE0F/g, ""));
+  return visibleLength3((0, import_strip_ansi2.default)(value).replace(/\uFE0F/g, ""));
 }
 function asRecord2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -16425,12 +17029,12 @@ function formatWeatherDisplay(weatherTypeText, enhancedWeatherDescription) {
   }
   return { icon: "", description };
 }
-function shouldUseColor5() {
+function shouldUseColor7() {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
-function colorize4(value, color) {
-  if (!shouldUseColor5()) return value;
-  return `${color}${value}${ANSI_RESET5}`;
+function colorize5(value, color) {
+  if (!shouldUseColor7()) return value;
+  return `${color}${value}${ANSI_RESET7}`;
 }
 function formatMaxTemp(value) {
   return formatTemperatureText(value, { scale: "max" });
@@ -16441,16 +17045,16 @@ function formatMinTemp(value) {
 function formatRain(value) {
   if (value == null) return "?%";
   const text = `${value}%`;
-  const colored = value > 80 ? colorize4(text, ANSI_RED4) : value >= 50 ? colorize4(text, ANSI_ORANGE4) : value >= 25 ? colorize4(text, ANSI_YELLOW4) : colorize4(text, ANSI_GREEN4);
+  const colored = value > 80 ? colorize5(text, ANSI_RED5) : value >= 50 ? colorize5(text, ANSI_ORANGE5) : value >= 25 ? colorize5(text, ANSI_YELLOW5) : colorize5(text, ANSI_GREEN5);
   return colored;
 }
 function formatWindSpeed(value) {
   if (value == null) return "?mph";
   const text = `${value}mph`;
-  if (value > 40) return colorize4(text, ANSI_RED4);
-  if (value >= 20) return colorize4(text, ANSI_ORANGE4);
-  if (value >= 10) return colorize4(text, ANSI_YELLOW4);
-  return colorize4(text, ANSI_GREEN4);
+  if (value > 40) return colorize5(text, ANSI_RED5);
+  if (value >= 20) return colorize5(text, ANSI_ORANGE5);
+  if (value >= 10) return colorize5(text, ANSI_YELLOW5);
+  return colorize5(text, ANSI_GREEN5);
 }
 function formatDisplayDate(localDate) {
   if (!localDate) return "unknown-date";
@@ -16516,10 +17120,10 @@ function formatPollen(report) {
 function cellWidthForTable(colIdx, value, colWidthFns) {
   const fn = colWidthFns?.[colIdx];
   if (fn) return fn(value);
-  return visibleLength2(value);
+  return visibleLength3(value);
 }
-function makeAsciiTable2(headers, rows, forcedWidths, colWidthFns) {
-  const padCell = (value, colIdx, width) => {
+function makeAsciiTable3(headers, rows, forcedWidths, colWidthFns) {
+  const padCell2 = (value, colIdx, width) => {
     const vw = cellWidthForTable(colIdx, value, colWidthFns);
     const padCount = width - vw;
     return padCount > 0 ? `${value}${" ".repeat(padCount)}` : value;
@@ -16534,7 +17138,7 @@ function makeAsciiTable2(headers, rows, forcedWidths, colWidthFns) {
     return max;
   });
   const border = `+${widths.map((w) => "-".repeat(w + 2)).join("+")}+`;
-  const renderRow = (cells) => `| ${cells.map((cell, i) => padCell(cell || "", i, widths[i])).join(" | ")} |`;
+  const renderRow = (cells) => `| ${cells.map((cell, i) => padCell2(cell || "", i, widths[i])).join(" | ")} |`;
   const lines = [border, renderRow(headers), border];
   for (const row of rows) {
     lines.push(renderRow(row));
@@ -16542,13 +17146,31 @@ function makeAsciiTable2(headers, rows, forcedWidths, colWidthFns) {
   lines.push(border);
   return lines;
 }
+function formatWeatherUpdatedLabel(lastUpdated) {
+  if (!lastUpdated || lastUpdated === "unknown") return "unknown";
+  const d = new Date(lastUpdated);
+  if (Number.isNaN(d.getTime())) return lastUpdated;
+  const time3 = d.toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const date5 = d.toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
+  return `${time3}, ${date5}`;
+}
 async function buildFullWeatherLines(data, requestedPostcode) {
   const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
   const lastUpdated = data.lastUpdated || "unknown";
   const reports = (data.forecasts || []).map((f) => f.summary?.report).filter((r) => Boolean(r));
   const lines = [
-    `Weather for ${location}`,
-    `Last updated: ${lastUpdated}`,
+    `=== Weather (${location}, updated ${formatWeatherUpdatedLabel(lastUpdated)}) ===`,
     ""
   ];
   if (reports.length === 0) {
@@ -16570,25 +17192,25 @@ async function buildFullWeatherLines(data, requestedPostcode) {
   const tomorrowHourlyRows = rowsForDate(tomorrowDate);
   const allHourlyRows = [...tomorrowHourlyRows, ...todayHourlyRows];
   const minTempColWidth = Math.max(
-    visibleLength2("Min"),
-    ...dayRows.map((r) => visibleLength2(r[3] || ""))
+    visibleLength3("Min"),
+    ...dayRows.map((r) => visibleLength3(r[3] || ""))
   );
   const maxTempColWidth = Math.max(
-    visibleLength2("Max"),
-    ...dayRows.map((r) => visibleLength2(r[4] || ""))
+    visibleLength3("Max"),
+    ...dayRows.map((r) => visibleLength3(r[4] || ""))
   );
   const tempWidth = Math.max(
-    visibleLength2("Temp"),
+    visibleLength3("Temp"),
     minTempColWidth,
     maxTempColWidth,
-    ...allHourlyRows.map((r) => visibleLength2(r[3] || ""))
+    ...allHourlyRows.map((r) => visibleLength3(r[3] || ""))
   );
   const sharedWidths = {
     dateOrTime: Math.max(
-      visibleLength2("Date"),
-      visibleLength2("Time"),
-      ...dayRows.map((r) => visibleLength2(r[0] || "")),
-      ...allHourlyRows.map((r) => visibleLength2(r[0] || ""))
+      visibleLength3("Date"),
+      visibleLength3("Time"),
+      ...dayRows.map((r) => visibleLength3(r[0] || "")),
+      ...allHourlyRows.map((r) => visibleLength3(r[0] || ""))
     ),
     icon: Math.max(
       emojiTerminalDisplayWidth("Ic"),
@@ -16596,19 +17218,19 @@ async function buildFullWeatherLines(data, requestedPostcode) {
       ...allHourlyRows.map((r) => emojiTerminalDisplayWidth(r[1] || ""))
     ),
     weather: Math.max(
-      visibleLength2("Weather"),
-      ...dayRows.map((r) => visibleLength2(r[2] || "")),
-      ...allHourlyRows.map((r) => visibleLength2(r[2] || ""))
+      visibleLength3("Weather"),
+      ...dayRows.map((r) => visibleLength3(r[2] || "")),
+      ...allHourlyRows.map((r) => visibleLength3(r[2] || ""))
     ),
     rain: Math.max(
-      visibleLength2("Rain"),
-      ...dayRows.map((r) => visibleLength2(r[5] || "")),
-      ...allHourlyRows.map((r) => visibleLength2(r[4] || ""))
+      visibleLength3("Rain"),
+      ...dayRows.map((r) => visibleLength3(r[5] || "")),
+      ...allHourlyRows.map((r) => visibleLength3(r[4] || ""))
     ),
     wind: Math.max(
-      visibleLength2("Wind"),
-      ...dayRows.map((r) => visibleLength2(r[6] || "")),
-      ...allHourlyRows.map((r) => visibleLength2(r[5] || ""))
+      visibleLength3("Wind"),
+      ...dayRows.map((r) => visibleLength3(r[6] || "")),
+      ...allHourlyRows.map((r) => visibleLength3(r[5] || ""))
     )
   };
   const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
@@ -16623,7 +17245,7 @@ async function buildFullWeatherLines(data, requestedPostcode) {
   const appendHourlySection = (date5, rows) => {
     if (!date5 || rows.length === 0) return;
     lines.push(`Hourly forecast for ${formatDisplayDate(date5)}`);
-    lines.push(...makeAsciiTable2(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
+    lines.push(...makeAsciiTable3(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
     lines.push("");
   };
   appendHourlySection(tomorrowDate, tomorrowHourlyRows);
@@ -16640,7 +17262,7 @@ async function buildFullWeatherLines(data, requestedPostcode) {
     ]];
     lines.push(`Today extras (${formatDisplayDate(todayDate)})`);
     lines.push(
-      ...makeAsciiTable2(
+      ...makeAsciiTable3(
         ["Pollen", "Sunrise", "Sunset", "Day length", "Moon"],
         extrasRows,
         void 0,
@@ -16659,12 +17281,17 @@ async function buildFullWeatherLines(data, requestedPostcode) {
     sharedWidths.rain,
     sharedWidths.wind
   ];
-  lines.push(...makeAsciiTable2(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
+  lines.push(...makeAsciiTable3(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
   return lines;
+}
+function withWeatherPanelCountdown(lines, countdown) {
+  if (!countdown || lines.length === 0) return lines;
+  const title = lines[0].replace(/ ===$/, `, Solar in ${countdown.seconds}, n) ===`);
+  return [title, ...lines.slice(1)];
 }
 
 // lib/terminal.ts
-var import_string_width2 = __toESM(require_string_width());
+var import_string_width4 = __toESM(require_string_width());
 var ANSI_ENTER_ALTERNATE_SCREEN = "\x1B[?1049h";
 var ANSI_LEAVE_ALTERNATE_SCREEN = "\x1B[?1049l";
 var ANSI_CLEAR_SCREEN = "\x1B[2J";
@@ -16673,18 +17300,18 @@ var ANSI_ERASE_TO_END = "\x1B[J";
 var ANSI_HIDE_CURSOR = "\x1B[?25l";
 var ANSI_SHOW_CURSOR = "\x1B[?25h";
 var ANSI_REGEX3 = /\x1b\[[0-9;]*m/g;
-function visibleLength3(value) {
-  return (0, import_string_width2.default)(value.replace(ANSI_REGEX3, ""));
+function visibleLength4(value) {
+  return (0, import_string_width4.default)(value.replace(ANSI_REGEX3, ""));
 }
 function truncateToWidth(line, maxWidth) {
   const plain = line.replace(ANSI_REGEX3, "");
-  if ((0, import_string_width2.default)(plain) <= maxWidth) return line;
+  if ((0, import_string_width4.default)(plain) <= maxWidth) return line;
   let result = "";
   let width = 0;
   try {
     const segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" });
     for (const { segment } of segmenter.segment(plain)) {
-      const segmentWidth = (0, import_string_width2.default)(segment);
+      const segmentWidth = (0, import_string_width4.default)(segment);
       if (width + segmentWidth > maxWidth) break;
       result += segment;
       width += segmentWidth;
@@ -16724,6 +17351,22 @@ function isWeatherWideTerminal(leftOuter, weatherInner) {
   const columns = process.stdout.columns ?? 80;
   return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
 }
+function isMobileStatusTerminal(statusInnerWidth, calendarInnerWidth, weatherLines, solarLines) {
+  const calInner = calendarInnerWidth ?? statusInnerWidth;
+  const leftOuter = Math.max(boxOuterWidth(statusInnerWidth), boxOuterWidth(calInner));
+  const layoutLines = [...weatherLines || [], ...solarLines || []];
+  const weatherContent = layoutLines.reduce(
+    (max, line) => Math.max(max, visibleLength4(line)),
+    0
+  );
+  const weatherInner = Math.max(statusInnerWidth, weatherContent);
+  return !isWeatherWideTerminal(leftOuter, weatherInner);
+}
+function statusBoxInnerWidth(preferredInnerWidth) {
+  const columns = process.stdout.columns ?? 80;
+  const maxInner = Math.max(columns - 4, 20);
+  return Math.min(preferredInnerWidth, maxInner);
+}
 function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullHeight = false) {
   const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
   if (calendarLines.length <= maxCalendarContent) {
@@ -16762,7 +17405,7 @@ function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullH
   return fitted;
 }
 function padVisible(line, width) {
-  const len = visibleLength3(line);
+  const len = visibleLength4(line);
   return len >= width ? line : `${line}${" ".repeat(width - len)}`;
 }
 function boxLines(lines, innerWidth) {
@@ -16771,7 +17414,7 @@ function boxLines(lines, innerWidth) {
   const bottom = `\u2514${"\u2500".repeat(innerWidth + 2)}\u2518`;
   const body = lines.map((line) => {
     const fitted = truncateToWidth(line, innerWidth);
-    const padding = innerWidth - visibleLength3(fitted);
+    const padding = innerWidth - visibleLength4(fitted);
     return `\u2502 ${fitted}${" ".repeat(padding)} \u2502`;
   });
   return [top, ...body, bottom];
@@ -16802,7 +17445,7 @@ function stackBoxesVertically(boxes) {
 function weatherBoxInnerWidth(weatherLines, statusInnerWidth, leftOuter, includeSportsColumn, sportsInnerWidth) {
   const columns = process.stdout.columns ?? 80;
   const contentWidth = weatherLines.reduce(
-    (max, line) => Math.max(max, visibleLength3(line)),
+    (max, line) => Math.max(max, visibleLength4(line)),
     0
   );
   const sportsOuter = includeSportsColumn ? WIDE_LAYOUT_GAP + boxOuterWidth(sportsInnerWidth) : 0;
@@ -16828,9 +17471,42 @@ function writeFullscreenScreen(lines) {
   }
   process.stdout.write(ANSI_ERASE_TO_END);
 }
+function middlePanelReady(lines, marker) {
+  return Boolean(lines && lines.length > 0 && lines[0]?.startsWith(marker));
+}
+function resolveMiddlePanelLines(panels) {
+  const { weatherLines, solarLines, middleDisplay } = panels;
+  const hasWeather = middlePanelReady(weatherLines, "=== Weather");
+  const hasSolar = middlePanelReady(solarLines, "=== Solar");
+  if (!hasWeather && !hasSolar) return null;
+  if (!hasSolar) return weatherLines;
+  if (!hasWeather) return solarLines;
+  return middleDisplay === "solar" ? solarLines : weatherLines;
+}
+function middlePanelLayoutLines(panels) {
+  const lines = [];
+  if (middlePanelReady(panels.weatherLines, "=== Weather")) {
+    lines.push(...panels.weatherLines);
+  }
+  if (middlePanelReady(panels.solarLines, "=== Solar")) {
+    lines.push(...panels.solarLines);
+  }
+  return lines;
+}
+function maxFootballBodyLines(innerWidth, otherPanelLines, terminalRows = process.stdout.rows ?? 24) {
+  const panelHeaderRows = 2;
+  const boxBorderRows = 2;
+  const otherBoxRows = otherPanelLines && otherPanelLines.length > 0 ? boxLines(otherPanelLines, innerWidth).length : 0;
+  return Math.max(1, terminalRows - boxBorderRows - panelHeaderRows - otherBoxRows);
+}
 function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
-  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines } = panels;
+  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines, solarLines, middleDisplay, sportsDisplay } = panels;
   const calInner = calendarInnerWidth ?? innerWidth;
+  const middleLayoutLines = middlePanelLayoutLines(panels);
+  if (isMobileStatusTerminal(innerWidth, calInner, weatherLines, solarLines)) {
+    writeFullscreenScreen(boxLines(statusLines, statusBoxInnerWidth(innerWidth)));
+    return;
+  }
   const statusBox = boxLines(statusLines, innerWidth);
   const leftStack = [statusBox];
   if (calendarLines && calendarLines.length > 0) {
@@ -16841,16 +17517,17 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
   }
   const leftOuter = Math.max(boxOuterWidth(innerWidth), boxOuterWidth(calInner));
   const leftColumn = stackBoxesVertically(leftStack);
-  const hasWeather = Boolean(weatherLines && weatherLines.length > 0);
+  const middleLines = resolveMiddlePanelLines(panels);
+  const hasMiddle = Boolean(middleLines && middleLines.length > 0);
   const hasSports = Boolean(
     cricLines && cricLines.length > 0 || footyLines && footyLines.length > 0
   );
-  if (!hasWeather) {
+  if (!hasMiddle) {
     writeFullscreenScreen(leftColumn);
     return;
   }
   const weatherInner = weatherBoxInnerWidth(
-    weatherLines,
+    middleLayoutLines.length > 0 ? middleLayoutLines : middleLines,
     innerWidth,
     leftOuter,
     hasSports,
@@ -16859,23 +17536,24 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
   const showSports = hasSports && isSportsWideTerminal(leftOuter, weatherInner, innerWidth);
   const showWeatherMiddle = isWeatherWideTerminal(leftOuter, weatherInner);
   if (!showWeatherMiddle) {
-    const narrowStack = [...leftStack];
-    narrowStack.push(boxLines(weatherLines, weatherInner));
-    writeFullscreenScreen(stackBoxesVertically(narrowStack));
+    writeFullscreenScreen(leftColumn);
     return;
   }
-  const columns = [leftColumn, boxLines(weatherLines, weatherInner)];
+  const columns = [leftColumn, boxLines(middleLines, weatherInner)];
   const outerWidths = [leftOuter, boxOuterWidth(weatherInner)];
   if (showSports) {
     const sportsStack = [];
-    if (cricLines && cricLines.length > 0) {
+    const show = sportsDisplay ?? "both";
+    if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
       sportsStack.push(boxLines(cricLines, innerWidth));
     }
-    if (footyLines && footyLines.length > 0) {
+    if ((show === "both" || show === "footy") && footyLines && footyLines.length > 0) {
       sportsStack.push(boxLines(footyLines, innerWidth));
     }
-    columns.push(stackBoxesVertically(sportsStack));
-    outerWidths.push(boxOuterWidth(innerWidth));
+    if (sportsStack.length > 0) {
+      columns.push(stackBoxesVertically(sportsStack));
+      outerWidths.push(boxOuterWidth(innerWidth));
+    }
   }
   writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths, WIDE_LAYOUT_GAP));
 }
@@ -16966,8 +17644,9 @@ ${prompt}`);
 }
 
 // status.ts
-var UK_TZ6 = "Europe/London";
+var UK_TZ7 = "Europe/London";
 var TICK_MS = 1e3;
+var PANEL_ALTERNATE_MS = 15e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
 var SOLAR_POWER_REFRESH_MS = 10 * 60 * 1e3;
 var TEMP_REFRESH_MS = 10 * 60 * 1e3;
@@ -16990,7 +17669,7 @@ function formatTime(now) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: UK_TZ6
+    timeZone: UK_TZ7
   });
 }
 function formatDate(now) {
@@ -16999,48 +17678,86 @@ function formatDate(now) {
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: UK_TZ6
+    timeZone: UK_TZ7
   });
 }
 function formatSolarYieldLine(solarYield) {
-  return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
-}
-function formatSolarPowerLine(powerNow, powerAvg, now) {
-  const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
-  const avgText = powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg);
-  const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  return `solar: ${nowText} // avg (${hourLabel}): ${avgText}`;
+  return `Solar Yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
 function formatHouseTempsLine(downstairsTemp, shedTemp) {
   const kitchen = formatTemperatureText(downstairsTemp, { fractionDigits: 0, unknownText: "-" });
   const shed = formatTemperatureText(shedTemp, { fractionDigits: 0, unknownText: "-" });
-  return `temp: ${kitchen} (kitchen) // ${shed} (shed)`;
+  return `Temp: ${kitchen} (Kitchen) // ${shed} (Shed)`;
+}
+function statusBoxTitle(now) {
+  const date5 = formatDate(now);
+  const remaining = moneyRemaining(now);
+  const money = remaining == null ? "-" : String(remaining);
+  return `=== Status (${date5}) // ${money} ===`;
+}
+function capitalizeHouseSection(label) {
+  return label.replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+function capitalizeGasLine(line) {
+  return line.replace(/^today gas:/i, "Today Gas:").replace(/, tomorrow gas:/i, ", Tomorrow Gas:");
+}
+function capitalizeBdayLine(line) {
+  return line.replace(/: today /i, ": Today ").replace(/\(in /gi, "(In ").replace(/, turns /i, ", Turns ");
+}
+function capitalizeElectricityLines(lines) {
+  return lines.map(
+    (line) => line.replace("| day ", "| Day ").replace("| today ", "| Today ").replace("| tomorrow ", "| Tomorrow ")
+  );
 }
 function sectionDivider(name) {
   return `\u2500\u2500 ${name} \u2500\u2500`;
 }
 function sectionBreak(name) {
-  return ["", sectionDivider(name)];
+  return [sectionDivider(name)];
 }
 function buildStatusLines(state) {
   const now = state.now;
   return [
-    ...sectionBreak(datesSectionLabel(now)),
-    `time: ${formatTime(now)}, ${formatDate(now)}`,
-    ...upcomingBdaySectionLines(state.bdayConfig, now),
-    ...sectionBreak("solar"),
+    statusBoxTitle(now),
+    "",
+    `Time: ${formatTime(now)}`,
+    ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
+    ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
-    ...sectionBreak(houseSectionLabel(now, state.wfh)),
+    formatSolarStatusPowerLine(
+      state.powerNow,
+      state.powerHourAvg,
+      now,
+      state.yieldAverages
+    ),
+    ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
-    state.houseOcto.gas.line,
-    ...state.houseOcto.electricityLines,
+    capitalizeGasLine(state.houseOcto.gas.line),
+    ...capitalizeElectricityLines(state.houseOcto.electricityLines),
     "",
     statusShortcutFooter()
   ];
 }
-function buildSportsPanelLines(title, lines) {
-  return ["", sectionDivider(title), ...lines];
+function isWeatherPanelReady(lines) {
+  return lines.length > 0 && lines[0].startsWith("=== Weather");
+}
+function isSolarPanelReady(lines) {
+  return lines.length > 0 && lines[0].startsWith("=== Solar");
+}
+var SPORTS_PANEL_NAMES = {
+  cric: "Cricket",
+  footy: "Football"
+};
+function sportsPanelHasContent(lines) {
+  if (lines.length === 0 || lines[0] === "-" || lines[0] === "none") return false;
+  if (lines.length === 1 && lines[0] === "none today") return false;
+  return true;
+}
+function buildSportsPanelLines(panel, lines, countdown) {
+  const title = SPORTS_PANEL_NAMES[panel];
+  const heading = countdown ? `=== ${title} (${SPORTS_PANEL_NAMES[countdown.next]} in ${countdown.seconds}, n) ===` : sectionDivider(title);
+  const body = [heading, "", ...lines];
+  return body;
 }
 async function loadFullWeatherLines(location) {
   const data = await fetchBbcWeatherAggregated(location);
@@ -17080,9 +17797,12 @@ function writeDisplay(statusLines, fullscreen, panels = {}) {
 async function loadSolarSnapshot(dayKey, now) {
   try {
     const data = await fetchSolarData();
-    return solarSnapshotFromData(data, dayKey, now);
+    return {
+      ...solarSnapshotFromData(data, dayKey, now),
+      yieldAverages: yieldAveragesFromData(data)
+    };
   } catch {
-    return { yield: null, powerNow: null, powerHourAvg: null };
+    return { yield: null, powerNow: null, powerHourAvg: null, yieldAverages: null };
   }
 }
 function tempsFromData(data) {
@@ -17168,7 +17888,8 @@ async function printOnce() {
       shedTemp: temps.shedTemp,
       solarYield: solar.yield,
       powerNow: solar.powerNow,
-      powerHourAvg: solar.powerHourAvg
+      powerHourAvg: solar.powerHourAvg,
+      yieldAverages: solar.yieldAverages
     }),
     false,
     {
@@ -17188,6 +17909,9 @@ function handleStatusKey(key) {
   if (key.char === "q") {
     return "quit";
   }
+  if (key.char === "n") {
+    return "flip-next";
+  }
   return statusShortcutForKey(key.char);
 }
 async function runLive() {
@@ -17202,6 +17926,7 @@ async function runLive() {
   let solarYield = null;
   let powerNow = null;
   let powerHourAvg = null;
+  let yieldAverages = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
@@ -17210,6 +17935,11 @@ async function runLive() {
   let calendarData = null;
   let cricLines = ["-"];
   let footyLines = ["-"];
+  let solarData = null;
+  let sportsAlternatePhase = "cric";
+  let lastSportsAlternateAt = Date.now();
+  let middleAlternatePhase = "weather";
+  let lastMiddleAlternateAt = Date.now();
   let runningCommand = false;
   let timer;
   let disableRawInput;
@@ -17223,7 +17953,8 @@ async function runLive() {
     shedTemp,
     solarYield,
     powerNow,
-    powerHourAvg
+    powerHourAvg,
+    yieldAverages
   });
   const render = () => {
     const state = displayState();
@@ -17237,12 +17968,89 @@ async function runLive() {
       maxCalendarContentLines(statusLines.length, true),
       calendarWidth
     ) : null;
+    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
+    const fittedFootyLines = fitFootballStatusLines(
+      footyLines,
+      maxFootballBodyLines(boxWidth, null)
+    );
+    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
+    const hasCric = sportsPanelHasContent(cricLines);
+    const hasFooty = sportsPanelHasContent(fittedFootyLines);
+    let sportsDisplay = "both";
+    let sportsSwitchCountdown;
+    if (hasCric && hasFooty) {
+      const nowMs = Date.now();
+      if (nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
+        sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+        lastSportsAlternateAt = nowMs;
+      }
+      sportsDisplay = sportsAlternatePhase;
+      const secondsLeft = Math.max(
+        0,
+        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1e3)
+      );
+      sportsSwitchCountdown = {
+        seconds: secondsLeft,
+        next: sportsAlternatePhase === "cric" ? "footy" : "cric"
+      };
+    } else if (hasCric) {
+      sportsDisplay = "cric";
+      sportsAlternatePhase = "cric";
+      lastSportsAlternateAt = Date.now();
+    } else if (hasFooty) {
+      sportsDisplay = "footy";
+      sportsAlternatePhase = "footy";
+      lastSportsAlternateAt = Date.now();
+    } else {
+      sportsAlternatePhase = "cric";
+      lastSportsAlternateAt = Date.now();
+    }
+    const cricPanel = sportsDisplay === "cric" && sportsSwitchCountdown ? buildSportsPanelLines("cric", cricLines, sportsSwitchCountdown) : baseCricPanel;
+    const footyPanel = sportsDisplay === "footy" && sportsSwitchCountdown ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown) : baseFootyPanel;
+    const baseWeatherPanel = fullWeatherLines;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
+    const canAlternateMiddle = isWeatherPanelReady(baseWeatherPanel) && isSolarPanelReady(baseSolarPanel);
+    let middleDisplay = "weather";
+    let middleSwitchCountdown;
+    if (canAlternateMiddle) {
+      const nowMs = Date.now();
+      if (nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
+        middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
+        lastMiddleAlternateAt = nowMs;
+      }
+      middleDisplay = middleAlternatePhase;
+      const secondsLeft = Math.max(
+        0,
+        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastMiddleAlternateAt)) / 1e3)
+      );
+      middleSwitchCountdown = {
+        seconds: secondsLeft,
+        next: middleAlternatePhase === "weather" ? "solar" : "weather"
+      };
+    } else {
+      middleAlternatePhase = "weather";
+      lastMiddleAlternateAt = Date.now();
+      if (isSolarPanelReady(baseSolarPanel) && !isWeatherPanelReady(baseWeatherPanel)) {
+        middleDisplay = "solar";
+      }
+    }
+    const weatherPanel = middleDisplay === "weather" && middleSwitchCountdown ? withWeatherPanelCountdown(baseWeatherPanel, {
+      seconds: middleSwitchCountdown.seconds,
+      next: "solar"
+    }) : baseWeatherPanel;
+    const solarPanel = middleDisplay === "solar" && middleSwitchCountdown && solarData ? buildSolarPanelLines(solarData, {
+      seconds: middleSwitchCountdown.seconds,
+      next: "weather"
+    }) : baseSolarPanel;
     writeDisplay(statusLines, true, {
       calendarLines,
       calendarInnerWidth: calendarWidth,
-      weatherLines: fullWeatherLines.length > 0 ? fullWeatherLines : null,
-      cricLines: buildSportsPanelLines("cric", cricLines),
-      footyLines: buildSportsPanelLines("footy", footyLines)
+      weatherLines: isWeatherPanelReady(weatherPanel) ? weatherPanel : null,
+      solarLines: isSolarPanelReady(solarPanel) ? solarPanel : null,
+      middleDisplay,
+      cricLines: cricPanel,
+      footyLines: footyPanel,
+      sportsDisplay
     });
   };
   const refreshWeather = async () => {
@@ -17274,12 +18082,29 @@ async function runLive() {
     render();
     timer = setInterval(tick, TICK_MS);
   };
+  const flipRotatingPanels = () => {
+    const nowMs = Date.now();
+    if (sportsPanelHasContent(cricLines) && sportsPanelHasContent(footyLines)) {
+      sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+      lastSportsAlternateAt = nowMs;
+    }
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
+    if (isWeatherPanelReady(fullWeatherLines) && isSolarPanelReady(baseSolarPanel)) {
+      middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
+      lastMiddleAlternateAt = nowMs;
+    }
+    render();
+  };
   const onKeys = (keys) => {
     if (runningCommand) return;
     for (const key of keys) {
       const action = handleStatusKey(key);
       if (action === "quit") {
         stop();
+        return;
+      }
+      if (action === "flip-next") {
+        flipRotatingPanels();
         return;
       }
       if (action) {
@@ -17305,6 +18130,8 @@ async function runLive() {
   lastGasRefreshAt = startedAt;
   try {
     const data = await fetchSolarData();
+    solarData = data;
+    yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
@@ -17340,8 +18167,10 @@ async function runLive() {
       if (needYieldRefresh || needPowerRefresh) {
         try {
           const data = await fetchSolarData();
+          solarData = data;
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
+            yieldAverages = yieldAveragesFromData(data);
             lastSolarYieldRefreshAt = nowMs;
           }
           if (needPowerRefresh) {

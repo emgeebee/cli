@@ -136,8 +136,6 @@ var require_string_width = __commonJS({
 // solar.ts
 var solar_exports = {};
 module.exports = __toCommonJS(solar_exports);
-var import_strip_ansi = __toESM(require_strip_ansi());
-var import_string_width = __toESM(require_string_width());
 
 // node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -14758,7 +14756,9 @@ function parsePowerDateTimeKey(key) {
   return ukWallTimeToDate(year, month, day, hour, minute);
 }
 
-// solar.ts
+// lib/solarView.ts
+var import_strip_ansi = __toESM(require_strip_ansi());
+var import_string_width = __toESM(require_string_width());
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var HOUR_MS = 60 * 60 * 1e3;
 var DAILY_YIELD_DAYS = 28;
@@ -14775,12 +14775,6 @@ var ANSI_GREEN2 = "\x1B[32m";
 var ANSI_YELLOW2 = "\x1B[33m";
 var ANSI_ORANGE2 = "\x1B[38;5;208m";
 var ANSI_RED2 = "\x1B[31m";
-function usage() {
-  console.log("Usage:");
-  console.log("  solar");
-  console.log("");
-  console.log("Shows solar daily yield, rolling averages, and a power graph.");
-}
 function parseDateKey(key) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
   if (!match) return null;
@@ -14873,7 +14867,9 @@ function makeAsciiTable(headers, rows) {
   );
   const border = `+-${widths.map((width) => "-".repeat(width)).join("-+-")}-+`;
   const headerLine = `| ${headers.map((header, idx) => padCell(header, widths[idx])).join(" | ")} |`;
-  const body = rows.map((row) => `| ${row.map((value, idx) => padCell(value || "", widths[idx])).join(" | ")} |`);
+  const body = rows.map(
+    (row) => `| ${row.map((value, idx) => padCell(value || "", widths[idx])).join(" | ")} |`
+  );
   return [border, headerLine, border, ...body, border];
 }
 function normalizeDailyYield(data) {
@@ -14888,6 +14884,17 @@ function normalizePowerAvgReadings(data) {
 function normalizePowerNow(data) {
   const value = data.powerNow?.value;
   return value != null && Number.isFinite(value) ? value : null;
+}
+function joinAsciiTables(left, right, gap = 3) {
+  const gapStr = " ".repeat(gap);
+  const maxLeft = left.reduce((max, line) => Math.max(max, visibleLength(line)), 0);
+  const rows = Math.max(left.length, right.length);
+  return Array.from({ length: rows }, (_, index) => {
+    const leftLine = left[index] ?? "";
+    const rightLine = right[index] ?? "";
+    const padding = maxLeft - visibleLength(leftLine);
+    return `${leftLine}${" ".repeat(padding)}${gapStr}${rightLine}`;
+  });
 }
 function buildPowerRows(powerNow, powerAvgReadings) {
   const latestAvg = powerAvgReadings.at(-1);
@@ -14916,7 +14923,7 @@ function buildDailyYieldRows(yields) {
   }
   return rows;
 }
-function buildAverageRows(yields) {
+function yieldAveragesFromYields(yields) {
   const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
   const todayKey = dayKeyUK();
   return AVERAGE_WINDOWS.map((days) => {
@@ -14926,12 +14933,15 @@ function buildAverageRows(yields) {
       if (value != null) values.push(value);
     }
     const average = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-    return [
-      `${days} days`,
-      average == null ? "-" : formatColoredKwh(average),
-      `${values.length}/${days}`
-    ];
+    return { days, average, samples: values.length };
   });
+}
+function buildAverageRows(yields) {
+  return yieldAveragesFromYields(yields).map(({ days, average, samples }) => [
+    `${days} days`,
+    average == null ? "-" : formatColoredKwh(average),
+    `${samples}/${days}`
+  ]);
 }
 function buildHourlyPowerSeries(readings) {
   const latestHour = startOfUkHour(Date.now());
@@ -14992,6 +15002,48 @@ function renderPowerGraph(readings) {
   lines.push(`        ${labelChars.join("")}`);
   return lines;
 }
+function buildSolarViewBody(data) {
+  const yields = normalizeDailyYield(data);
+  const powerNow = normalizePowerNow(data);
+  const powerAvgReadings = normalizePowerAvgReadings(data);
+  const lines = [];
+  lines.push("Daily Yield (Last 4 Weeks)");
+  lines.push(...makeAsciiTable(["Date", "Yield"], buildDailyYieldRows(yields)));
+  lines.push("");
+  lines.push("Power");
+  lines.push(
+    ...joinAsciiTables(
+      makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings)),
+      makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields))
+    )
+  );
+  lines.push("");
+  lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
+  lines.push(...renderPowerGraph(powerAvgReadings));
+  return lines;
+}
+function buildSolarCliLines(data) {
+  return [
+    "Solar",
+    `Source: ${SOLAR_API_URL}`,
+    "",
+    ...buildSolarViewBody(data).map((line) => {
+      if (line === "Daily Yield (Last 4 Weeks)") return "Daily yield (last 4 weeks)";
+      if (line.startsWith("Power Graph")) {
+        return `Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`;
+      }
+      return line;
+    })
+  ];
+}
+
+// solar.ts
+function usage() {
+  console.log("Usage:");
+  console.log("  solar");
+  console.log("");
+  console.log("Shows solar daily yield, rolling averages, and a power graph.");
+}
 async function main() {
   try {
     const args = process.argv.slice(2);
@@ -15003,29 +15055,7 @@ async function main() {
       throw new Error("solar does not take arguments.");
     }
     const data = await fetchSolarData();
-    const yields = normalizeDailyYield(data);
-    const powerNow = normalizePowerNow(data);
-    const powerAvgReadings = normalizePowerAvgReadings(data);
-    console.log("Solar");
-    console.log(`Source: ${SOLAR_API_URL}`);
-    console.log("");
-    console.log("Daily yield (last 4 weeks)");
-    for (const line of makeAsciiTable(["Date", "Yield"], buildDailyYieldRows(yields))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log("Average daily yield");
-    for (const line of makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log("Power");
-    for (const line of makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings))) {
-      console.log(line);
-    }
-    console.log("");
-    console.log(`Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`);
-    for (const line of renderPowerGraph(powerAvgReadings)) {
+    for (const line of buildSolarCliLines(data)) {
       console.log(line);
     }
   } catch (error51) {

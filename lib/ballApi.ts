@@ -1,4 +1,5 @@
 import { fetchBbcJson, toYmd } from "../bbc";
+import { matchEventLines } from "./ballEvents";
 
 type JsonRecord = Record<string, unknown>;
 type ScoreValue = string | number | null | undefined;
@@ -14,6 +15,17 @@ type ApiTeamName = {
   fullName?: string;
 };
 
+type ApiActionDetail = {
+  type?: string;
+  timeLabel?: { value?: string };
+};
+
+type ApiPlayerAction = {
+  playerName?: string;
+  actionType?: string;
+  actions?: ApiActionDetail[];
+};
+
 type ApiTeam = {
   id?: string;
   key?: string;
@@ -24,6 +36,7 @@ type ApiTeam = {
   scores?: ApiScoreContainer;
   runningScores?: ApiScoreContainer;
   score?: ScoreValue;
+  actions?: ApiPlayerAction[];
 };
 
 type ApiParticipant = {
@@ -110,6 +123,21 @@ type NormalizedEvent = ApiEvent & {
   participants: ApiParticipant[];
 };
 
+const COMPETITION_ORDER = [
+  "FIFA World Cup",
+  "Premier League",
+  "FA Cup",
+  "League Cup",
+  "UEFA Champions League",
+  "UEFA Europa League",
+  "Championship",
+  "League One",
+  "Scottish Premiership",
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const STATUS_FORWARD_DAYS = 59;
+
 const COMPETITION_ALLOWLIST = new Set([
   "premierleague",
   "championship",
@@ -134,10 +162,13 @@ const BBC_BASE_URL =
 const ANSI_RESET = "\x1b[0m";
 const ANSI_DARK_GREEN = "\x1b[32m";
 const ANSI_DARK_RED = "\x1b[31m";
+const ANSI_DARK_YELLOW = "\x1b[33m";
+const ANSI_PALE_YELLOW = "\x1b[38;5;227m";
 const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_BG_CLARET = "\x1b[48;5;88m";
 const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
+const ANSI_PURPLE = "\x1b[35m";
 const ANSI_BLUE = "\x1b[94m";
 
 const urlForDaysGames = (today: string, end: string, start: string): string =>
@@ -169,6 +200,16 @@ function highlightAstonVilla(name: string): string {
   return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET}`;
 }
 
+function isEnglandName(name: string): boolean {
+  const n = normalizeText(name);
+  return n === "england" || n === "eng";
+}
+
+function highlightEngland(name: string): string {
+  if (!shouldUseColor() || !isEnglandName(name)) return name;
+  return `${ANSI_PURPLE}${name}${ANSI_RESET}`;
+}
+
 function teamLabel(team: ApiTeam | undefined): string {
   const base = (
     team?.name?.shortName ||
@@ -179,7 +220,7 @@ function teamLabel(team: ApiTeam | undefined): string {
     team?.key ||
     "unknown-team"
   );
-  return highlightAstonVilla(base);
+  return highlightEngland(highlightAstonVilla(base));
 }
 
 function competitionLabel(event: ApiEvent): string {
@@ -258,17 +299,17 @@ function scoreNumber(score: string | null): number | null {
 
 function colorTeamName(name: string, role: "win" | "loss" | "draw", isLive: boolean): string {
   if (isAstonVillaName(name)) return highlightAstonVilla(name);
+  if (isEnglandName(name)) return highlightEngland(name);
   if (!shouldUseColor()) return name;
-  if (role === "win") return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET}`;
-  if (role === "loss") return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET}`;
-  return name;
+  if (role === "win") return `${isLive ? ANSI_DARK_GREEN : ANSI_BRIGHT_GREEN}${name}${ANSI_RESET}`;
+  if (role === "loss") return `${isLive ? ANSI_DARK_RED : ANSI_BRIGHT_RED}${name}${ANSI_RESET}`;
+  return `${isLive ? ANSI_DARK_YELLOW : ANSI_PALE_YELLOW}${name}${ANSI_RESET}`;
 }
 
 function fixtureLine(event: NormalizedEvent): string {
   const home = teamLabel(event.homeTeam);
   const away = teamLabel(event.awayTeam);
   const statusLabel = event.eventStatusNote || event.statusText || "scheduled";
-  const competitionTag = competitionLabel(event);
   const homeScore = teamScore(event.homeTeam, event);
   const awayScore = teamScore(event.awayTeam, event);
   const hasScore = homeScore != null && awayScore != null;
@@ -276,20 +317,26 @@ function fixtureLine(event: NormalizedEvent): string {
   const time = eventTime(event);
   const isScheduled = normalizeText(statusLabel) === "scheduled";
   const liveStatusLabel = shouldUseColor() && isLive ? `${ANSI_BLUE}${statusLabel}${ANSI_RESET}` : statusLabel;
-  const suffix = `(${competitionTag}) ${isScheduled ? "" : `(${liveStatusLabel})`}`.trim();
+  const suffix = isScheduled ? "" : `(${liveStatusLabel})`;
+  const suffixWithSpace = suffix ? ` ${suffix}` : "";
 
   if (isResultState(event) && hasScore) {
     const homeN = scoreNumber(homeScore);
     const awayN = scoreNumber(awayScore);
     let homeDisplay = home;
     let awayDisplay = away;
-    if (homeN != null && awayN != null && homeN !== awayN) {
-      homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
-      awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+    if (homeN != null && awayN != null) {
+      if (homeN === awayN && (isLive || isFinishedState(event))) {
+        homeDisplay = colorTeamName(home, "draw", isLive);
+        awayDisplay = colorTeamName(away, "draw", isLive);
+      } else if (homeN !== awayN) {
+        homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
+        awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+      }
     }
-    return `${time} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay} ${suffix}`.trim();
+    return `${time} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay}${suffixWithSpace}`.trim();
   }
-  return `${time} ${home} vs ${away} ${suffix}`.trim();
+  return `${time} ${home} vs ${away}${suffixWithSpace}`.trim();
 }
 
 function normalizeEvent(raw: ApiEvent): NormalizedEvent {
@@ -390,14 +437,162 @@ export async function fetchTodayFootballFixtures(ymd: string): Promise<Normalize
   return (await fetchMatchData(url, ymd)).filter(competitionAllowed);
 }
 
-export function footballStatusSectionLines(events: NormalizedEvent[]): string[] {
-  if (events.length === 0) return ["none today"];
-  return [...events]
-    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-    .map((event) => fixtureLine(event));
+function statusDayRows(todayYmd: string): { relative: string; ymd: string }[] {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayYmd);
+  if (!m) return [{ relative: "today", ymd: todayYmd }];
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const today = new Date(Date.UTC(y, mo, d));
+  const rows: { relative: string; ymd: string }[] = [
+    { relative: "yesterday", ymd: toYmd(new Date(today.getTime() - DAY_MS)) },
+    { relative: "today", ymd: todayYmd },
+    { relative: "tomorrow", ymd: toYmd(new Date(today.getTime() + DAY_MS)) },
+  ];
+  for (let offset = 2; offset <= STATUS_FORWARD_DAYS; offset += 1) {
+    rows.push({
+      relative: "",
+      ymd: toYmd(new Date(today.getTime() + offset * DAY_MS)),
+    });
+  }
+  return rows;
 }
 
-export async function loadFootballStatusLines(ymd: string): Promise<string[]> {
-  const events = await fetchTodayFootballFixtures(ymd);
-  return footballStatusSectionLines(events);
+function isFootballDayHeading(line: string): boolean {
+  return line.startsWith("== ") && line.endsWith(" ==");
+}
+
+function splitFootballDaySections(lines: string[]): string[][] {
+  const sections: string[][] = [];
+  let current: string[] = [];
+  for (const line of lines) {
+    if (isFootballDayHeading(line)) {
+      if (current.length > 0) sections.push(current);
+      current = [line];
+      continue;
+    }
+    if (line === "" && current.length === 0) continue;
+    current.push(line);
+  }
+  if (current.length > 0) sections.push(current);
+  return sections;
+}
+
+export function fitFootballStatusLines(lines: string[], maxContentLines: number): string[] {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+
+  const sections = splitFootballDaySections(lines);
+  const fitted: string[] = [];
+  for (const section of sections) {
+    const needed = section.length + (fitted.length > 0 ? 1 : 0);
+    if (fitted.length + needed > maxContentLines) break;
+    if (fitted.length > 0) fitted.push("");
+    fitted.push(...section);
+  }
+  return fitted.length > 0 ? fitted : lines.slice(0, maxContentLines);
+}
+
+function formatStatusDayHeading(relative: string, ymd: string): string {
+  if (relative === "yesterday") return "== Yesterday ==";
+  if (relative === "today") return "== Today ==";
+  if (relative === "tomorrow") return "== Tomorrow ==";
+  return `== ${formatYmdLondonShort(ymd)} ==`;
+}
+
+function formatYmdLondonShort(dayYmd: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayYmd);
+  if (!m) return dayYmd;
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const date = new Date(Date.UTC(y, mo, d, 12, 0, 0));
+  const weekday = date.toLocaleDateString("en-GB", {
+    weekday: "short",
+    timeZone: "Europe/London",
+  });
+  return `${weekday} ${String(d).padStart(2, "0")}/${String(mo + 1).padStart(2, "0")}`;
+}
+
+function eventLondonYmd(event: NormalizedEvent): string {
+  const d = new Date(event.startTime || event.startDateTime);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+}
+
+async function fetchFootballFixturesRange(startYmd: string, endYmd: string): Promise<NormalizedEvent[]> {
+  const today = toYmd(new Date());
+  const url = urlForDaysGames(today, endYmd, startYmd);
+  return (await fetchMatchData(url, today)).filter(competitionAllowed);
+}
+
+function groupedFootballLines(events: NormalizedEvent[]): string[] {
+  const groups = new Map<string, NormalizedEvent[]>();
+  for (const event of events) {
+    const key = competitionLabel(event);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(event);
+  }
+
+  const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
+    const ai = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a));
+    const bi = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b));
+    const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    if (aRank !== bRank) return bRank - aRank;
+    return b.localeCompare(a);
+  });
+
+  const lines: string[] = [];
+  for (const [competition, list] of sortedGroups) {
+    list.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    lines.push(competition);
+    for (const event of list) {
+      lines.push(`- ${fixtureLine(event)}`);
+      if (isResultState(event)) {
+        lines.push(...matchEventLines(event.homeTeam, event.awayTeam, "    "));
+      }
+    }
+  }
+  return lines;
+}
+
+export function footballStatusSectionLines(events: NormalizedEvent[]): string[] {
+  if (events.length === 0) return ["none"];
+  return groupedFootballLines(events);
+}
+
+function footballStatusLinesFromDays(
+  days: { relative: string; ymd: string }[],
+  eventsByDay: Map<string, NormalizedEvent[]>,
+): string[] {
+  const lines: string[] = [];
+  let anyEvents = false;
+
+  for (const { relative, ymd } of days) {
+    const dayEvents = eventsByDay.get(ymd) || [];
+    if (dayEvents.length === 0) continue;
+    anyEvents = true;
+    if (lines.length > 0) lines.push("");
+    lines.push(formatStatusDayHeading(relative, ymd));
+    lines.push(...groupedFootballLines(dayEvents));
+  }
+
+  return anyEvents ? lines : ["none"];
+}
+
+export async function loadFootballStatusLines(todayYmd: string): Promise<string[]> {
+  const days = statusDayRows(todayYmd);
+  const events = await fetchFootballFixturesRange(days[0].ymd, days[days.length - 1].ymd);
+
+  const eventsByDay = new Map<string, NormalizedEvent[]>();
+  for (const day of days) eventsByDay.set(day.ymd, []);
+
+  for (const event of events) {
+    const ymd = eventLondonYmd(event);
+    const bucket = eventsByDay.get(ymd);
+    if (bucket) bucket.push(event);
+  }
+
+  return footballStatusLinesFromDays(days, eventsByDay);
 }

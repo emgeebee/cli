@@ -2,6 +2,7 @@
 
 import { fetchBbcJson, toYmd } from "./bbc";
 import { getConfigPath, readPhoneCliConfig } from "./config";
+import { matchEventLines } from "./lib/ballEvents";
 
 type JsonRecord = Record<string, unknown>;
 type FixtureOptions = {
@@ -37,6 +38,17 @@ type ApiTeamName = {
   fullName?: string;
 };
 
+type ApiActionDetail = {
+  type?: string;
+  timeLabel?: { value?: string };
+};
+
+type ApiPlayerAction = {
+  playerName?: string;
+  actionType?: string;
+  actions?: ApiActionDetail[];
+};
+
 type ApiTeam = {
   id?: string;
   key?: string;
@@ -47,6 +59,7 @@ type ApiTeam = {
   scores?: ApiScoreContainer;
   runningScores?: ApiScoreContainer;
   score?: ScoreValue;
+  actions?: ApiPlayerAction[];
 };
 
 type ApiParticipant = {
@@ -174,11 +187,14 @@ const PL_RAPID_HOST = "premier-league-standings1.p.rapidapi.com";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_DARK_GREEN = "\x1b[32m";
 const ANSI_DARK_RED = "\x1b[31m";
+const ANSI_DARK_YELLOW = "\x1b[33m";
+const ANSI_PALE_YELLOW = "\x1b[38;5;227m";
 const ANSI_BRIGHT_GREEN = "\x1b[92m";
 const ANSI_BRIGHT_RED = "\x1b[91m";
 const ANSI_CLARET = "\x1b[38;5;88m";
 const ANSI_BG_CLARET = "\x1b[48;5;88m";
 const ANSI_VILLA_BLUE = "\x1b[38;5;39m";
+const ANSI_PURPLE = "\x1b[35m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_BLUE = "\x1b[94m";
 const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
@@ -384,7 +400,7 @@ function teamLabel(team: ApiTeam | undefined): string {
     team?.key ||
     "unknown-team"
   );
-  return highlightAstonVilla(base);
+  return highlightEngland(highlightAstonVilla(base));
 }
 
 function isAstonVillaName(name: string): boolean {
@@ -395,6 +411,16 @@ function isAstonVillaName(name: string): boolean {
 function highlightAstonVilla(name: string): string {
   if (!shouldUseColor() || !isAstonVillaName(name)) return name;
   return `${ANSI_BG_CLARET}${ANSI_VILLA_BLUE}AVFC${ANSI_RESET}`;
+}
+
+function isEnglandName(name: string): boolean {
+  const n = normalizeText(name);
+  return n === "england" || n === "eng";
+}
+
+function highlightEngland(name: string): string {
+  if (!shouldUseColor() || !isEnglandName(name)) return name;
+  return `${ANSI_PURPLE}${name}${ANSI_RESET}`;
 }
 
 function competitionLabel(event: ApiEvent): string {
@@ -458,10 +484,11 @@ function scoreNumber(score: string | null): number | null {
 
 function colorTeamName(name: string, role: "win" | "loss" | "draw", isLive: boolean): string {
   if (isAstonVillaName(name)) return highlightAstonVilla(name);
+  if (isEnglandName(name)) return highlightEngland(name);
   if (!shouldUseColor()) return name;
-  if (role === "win") return `${isLive ? ANSI_BRIGHT_GREEN : ANSI_DARK_GREEN}${name}${ANSI_RESET}`;
-  if (role === "loss") return `${isLive ? ANSI_BRIGHT_RED : ANSI_DARK_RED}${name}${ANSI_RESET}`;
-  return name;
+  if (role === "win") return `${isLive ?  ANSI_DARK_GREEN : ANSI_BRIGHT_GREEN}${name}${ANSI_RESET}`;
+  if (role === "loss") return `${isLive ? ANSI_DARK_RED : ANSI_BRIGHT_RED}${name}${ANSI_RESET}`;
+  return `${isLive ?  ANSI_DARK_YELLOW : ANSI_PALE_YELLOW}${name}${ANSI_RESET}`;
 }
 
 function fixtureLine(event: NormalizedEvent, options: FixtureOptions = {}): string {
@@ -490,9 +517,14 @@ function fixtureLine(event: NormalizedEvent, options: FixtureOptions = {}): stri
     const awayN = scoreNumber(awayScore);
     let homeDisplay = home;
     let awayDisplay = away;
-    if (homeN != null && awayN != null && homeN !== awayN) {
-      homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
-      awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+    if (homeN != null && awayN != null) {
+      if (homeN === awayN && (isLive || isFinishedState(event))) {
+        homeDisplay = colorTeamName(home, "draw", isLive);
+        awayDisplay = colorTeamName(away, "draw", isLive);
+      } else if (homeN !== awayN) {
+        homeDisplay = colorTeamName(home, homeN > awayN ? "win" : "loss", isLive);
+        awayDisplay = colorTeamName(away, awayN > homeN ? "win" : "loss", isLive);
+      }
     }
     return `${datePrefix}${timeDisplay} ${homeDisplay} ${homeScore}-${awayScore} ${awayDisplay}${suffixWithSpace}`;
   }
@@ -576,6 +608,13 @@ function printTeamCompetitionSummary(events: NormalizedEvent[], teamUrn: string)
   }
 }
 
+function printFixtureEvents(event: NormalizedEvent): void {
+  if (!isResultState(event)) return;
+  for (const line of matchEventLines(event.homeTeam, event.awayTeam)) {
+    console.log(line);
+  }
+}
+
 function printGroupedFixtures(
   events: NormalizedEvent[],
   heading: string,
@@ -609,6 +648,7 @@ function printGroupedFixtures(
     console.log(`${competition}`);
     for (const event of list) {
       console.log(`- ${fixtureLine(event, options)}`);
+      printFixtureEvents(event);
     }
   }
 }
@@ -631,6 +671,7 @@ function printFlatFixtures(
   );
   for (const event of sorted) {
     console.log(`- ${fixtureLine(event, options)}`);
+    printFixtureEvents(event);
   }
 }
 

@@ -256,7 +256,7 @@ export function buildStatusCalendarLines(
 ): string[] {
   const calendarWidth = innerWidth ?? statusCalendarInnerWidth();
   const legend = buildCalendarLegendLine();
-  const lines: string[] = [padRightVisible(legend, calendarWidth)];
+  const lines: string[] = ["=== Dates ===", "", padRightVisible(legend, calendarWidth)];
   for (let i = 0; i < months.length; i += STATUS_CALENDAR_COLUMNS) {
     const rowMonths = months.slice(i, i + STATUS_CALENDAR_COLUMNS).map(({ year, month }) =>
       buildCalendarLines(year, month, today, colors),

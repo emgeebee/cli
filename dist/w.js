@@ -14961,13 +14961,31 @@ function makeAsciiTable(headers, rows, forcedWidths, colWidthFns) {
   lines.push(border);
   return lines;
 }
+function formatWeatherUpdatedLabel(lastUpdated) {
+  if (!lastUpdated || lastUpdated === "unknown") return "unknown";
+  const d = new Date(lastUpdated);
+  if (Number.isNaN(d.getTime())) return lastUpdated;
+  const time3 = d.toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const date5 = d.toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
+  return `${time3}, ${date5}`;
+}
 async function buildFullWeatherLines(data, requestedPostcode) {
   const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
   const lastUpdated = data.lastUpdated || "unknown";
   const reports = (data.forecasts || []).map((f) => f.summary?.report).filter((r) => Boolean(r));
   const lines = [
-    `Weather for ${location}`,
-    `Last updated: ${lastUpdated}`,
+    `=== Weather (${location}, updated ${formatWeatherUpdatedLabel(lastUpdated)}) ===`,
     ""
   ];
   if (reports.length === 0) {

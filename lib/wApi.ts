@@ -314,6 +314,26 @@ export function maxVisibleLineWidth(lines: string[]): number {
   return lines.reduce((max, line) => Math.max(max, visibleLength(line)), 0);
 }
 
+function formatWeatherUpdatedLabel(lastUpdated: string): string {
+  if (!lastUpdated || lastUpdated === "unknown") return "unknown";
+  const d = new Date(lastUpdated);
+  if (Number.isNaN(d.getTime())) return lastUpdated;
+  const time = d.toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const date = d.toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return `${time}, ${date}`;
+}
+
 export async function buildFullWeatherLines(
   data: WeatherResponse,
   requestedPostcode: string,
@@ -325,8 +345,7 @@ export async function buildFullWeatherLines(
     .filter((r): r is DailyReport => Boolean(r));
 
   const lines: string[] = [
-    `Weather for ${location}`,
-    `Last updated: ${lastUpdated}`,
+    `=== Weather (${location}, updated ${formatWeatherUpdatedLabel(lastUpdated)}) ===`,
     "",
   ];
 
@@ -455,4 +474,13 @@ export async function buildFullWeatherLines(
   ];
   lines.push(...makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
   return lines;
+}
+
+export function withWeatherPanelCountdown(
+  lines: string[],
+  countdown?: { seconds: number; next: "solar" },
+): string[] {
+  if (!countdown || lines.length === 0) return lines;
+  const title = lines[0].replace(/ ===$/, `, Solar in ${countdown.seconds}, n) ===`);
+  return [title, ...lines.slice(1)];
 }

@@ -13,6 +13,7 @@ type CricketInnings = {
 };
 
 type CricketTeam = {
+  id?: string;
   name?: string;
   shortName?: string;
   innings?: CricketInnings | CricketInnings[] | null;
@@ -23,9 +24,16 @@ type CricketParticipants = {
   awayTeam?: CricketTeam;
 };
 
+type CricketMatchSummary = {
+  resultString?: string;
+  winnerTeamName?: string;
+};
+
 type CricketEvent = {
   startDateTime?: string;
   startTime?: string;
+  status?: string;
+  winnerTeamId?: string;
   tournamentName?: string;
   eventGroupingLabel?: string;
   groundShortName?: string;
@@ -33,9 +41,7 @@ type CricketEvent = {
     startDate?: string;
     endDate?: string;
   };
-  matchSummary?: {
-    resultString?: string;
-  };
+  matchSummary?: CricketMatchSummary;
   participants?: CricketParticipants;
 };
 
@@ -56,9 +62,108 @@ const CRICKET_BASE_URL =
   "https://web-cdn.api.bbci.co.uk/wc-poll-data/container/sport-data-scores-fixtures";
 const CRICKET_URN = "urn:bbc:sportsdata:cricket:tournament-collection:collated";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ANSI_RESET = "\x1b[0m";
+const ANSI_DARK_GREEN = "\x1b[32m";
+const ANSI_DARK_RED = "\x1b[31m";
+const ANSI_DARK_YELLOW = "\x1b[33m";
+const ANSI_PALE_YELLOW = "\x1b[38;5;227m";
+const ANSI_BRIGHT_GREEN = "\x1b[92m";
+const ANSI_BRIGHT_RED = "\x1b[91m";
+const ANSI_PURPLE = "\x1b[35m";
+
+function shouldUseColor(): boolean {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+
+function normalizeText(value: string | undefined): string {
+  return String(value || "").toLowerCase();
+}
+
+function isEnglandName(name: string): boolean {
+  const n = normalizeText(name);
+  return n === "england" || n === "eng";
+}
+
+function highlightEngland(name: string): string {
+  if (!shouldUseColor() || !isEnglandName(name)) return name;
+  return `${ANSI_PURPLE}${name}${ANSI_RESET}`;
+}
+
+function teamPlainLabel(team: CricketTeam | undefined): string {
+  return team?.shortName || team?.name || "TBC";
+}
+
+function teamId(team: CricketTeam | undefined): string {
+  return String(team?.id || "");
+}
+
+function isFinishedMatch(event: CricketEvent): boolean {
+  return String(event.status || "") === "PostEvent";
+}
+
+function isLiveMatch(event: CricketEvent): boolean {
+  const status = String(event.status || "");
+  return status !== "PreEvent" && status !== "PostEvent";
+}
+
+function isDrawResult(event: CricketEvent): boolean {
+  const result = normalizeText(event.matchSummary?.resultString);
+  return result.includes("draw") || result.includes("tied");
+}
+
+function totalRuns(team: CricketTeam | undefined): number {
+  return asInningsList(team).reduce((sum, innings) => sum + (innings.runs ?? 0), 0);
+}
+
+function teamMatchRole(
+  event: CricketEvent,
+  side: "home" | "away",
+): "win" | "loss" | "draw" | null {
+  const homeTeam = event.participants?.homeTeam;
+  const awayTeam = event.participants?.awayTeam;
+  const team = side === "home" ? homeTeam : awayTeam;
+  const status = String(event.status || "");
+
+  if (status === "PreEvent") return null;
+  if (!homeTeam || !awayTeam) return null;
+
+  if (isFinishedMatch(event)) {
+    if (isDrawResult(event)) return "draw";
+    const winnerId = String(event.winnerTeamId || "");
+    if (!winnerId) return null;
+    return teamId(team) === winnerId ? "win" : "loss";
+  }
+
+  if (!isLiveMatch(event)) return null;
+
+  const homeRuns = totalRuns(homeTeam);
+  const awayRuns = totalRuns(awayTeam);
+  if (homeRuns === awayRuns) return "draw";
+  const ahead = homeRuns > awayRuns ? "home" : "away";
+  return side === ahead ? "win" : "loss";
+}
+
+function colorTeamName(name: string, role: "win" | "loss" | "draw", isLive: boolean): string {
+  if (isEnglandName(name)) return highlightEngland(name);
+  if (!shouldUseColor()) return name;
+  if (role === "win") return `${isLive ? ANSI_DARK_GREEN : ANSI_BRIGHT_GREEN}${name}${ANSI_RESET}`;
+  if (role === "loss") return `${isLive ? ANSI_DARK_RED : ANSI_BRIGHT_RED}${name}${ANSI_RESET}`;
+  return `${isLive ? ANSI_DARK_YELLOW : ANSI_PALE_YELLOW}${name}${ANSI_RESET}`;
+}
+
+function coloredTeamLabel(
+  team: CricketTeam | undefined,
+  event: CricketEvent,
+  side: "home" | "away",
+): string {
+  const name = teamPlainLabel(team);
+  const role = teamMatchRole(event, side);
+  if (!role) return highlightEngland(name);
+  return colorTeamName(name, role, isLiveMatch(event));
+}
 
 function teamLabel(team: CricketTeam | undefined): string {
-  return team?.shortName || team?.name || "TBC";
+  return teamPlainLabel(team);
 }
 
 function asInningsList(team: CricketTeam | undefined): CricketInnings[] {
@@ -79,8 +184,10 @@ function inningsLine(
   team: CricketTeam | undefined,
   innings: CricketInnings | undefined,
   index: number,
+  event: CricketEvent,
+  side: "home" | "away",
 ): string {
-  const label = teamLabel(team);
+  const label = coloredTeamLabel(team, event, side);
   const suffix = index > 0 ? ` (Inns ${index + 1})` : "";
   if (!innings) return `${label}${suffix}: -`;
   const score = inningsScore(innings);
@@ -91,6 +198,7 @@ type TeamInningsLine = {
   team: CricketTeam | undefined;
   innings: CricketInnings;
   localIndex: number;
+  side: "home" | "away";
 };
 
 function inningsOrder(innings: CricketInnings): number | null {
@@ -113,10 +221,21 @@ function inningsStartTime(innings: CricketInnings): number | null {
 function orderedInningsLines(
   homeTeam: CricketTeam | undefined,
   awayTeam: CricketTeam | undefined,
+  event: CricketEvent,
 ): string[] {
   const entries: TeamInningsLine[] = [
-    ...asInningsList(homeTeam).map((innings, idx) => ({ team: homeTeam, innings, localIndex: idx })),
-    ...asInningsList(awayTeam).map((innings, idx) => ({ team: awayTeam, innings, localIndex: idx })),
+    ...asInningsList(homeTeam).map((innings, idx) => ({
+      team: homeTeam,
+      innings,
+      localIndex: idx,
+      side: "home" as const,
+    })),
+    ...asInningsList(awayTeam).map((innings, idx) => ({
+      team: awayTeam,
+      innings,
+      localIndex: idx,
+      side: "away" as const,
+    })),
   ];
 
   if (entries.length === 0) {
@@ -140,11 +259,9 @@ function orderedInningsLines(
     return teamLabel(a.team).localeCompare(teamLabel(b.team));
   });
 
-  return entries.map((entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex)}`);
-}
-
-function normalizeText(value: string | undefined): string {
-  return String(value || "").toLowerCase();
+  return entries.map(
+    (entry) => `  ${inningsLine(entry.team, entry.innings, entry.localIndex, event, entry.side)}`,
+  );
 }
 
 function competitionLabel(secondary: CricketSecondaryGroup, event: CricketEvent): string {
@@ -210,9 +327,11 @@ function fixtureHeaderLine(event: CricketEvent, ymd: string): string {
   const homeTeam = event.participants?.homeTeam;
   const awayTeam = event.participants?.awayTeam;
   const dayLabel = multiDayLabel(event, ymd);
+  const home = coloredTeamLabel(homeTeam, event, "home");
+  const away = coloredTeamLabel(awayTeam, event, "away");
   return [
     event.startTime || "??:??",
-    `${teamLabel(homeTeam)} vs ${teamLabel(awayTeam)}`,
+    `${home} vs ${away}`,
     event.groundShortName || "-",
     dayLabel || "-",
     event.matchSummary?.resultString || "-",
@@ -245,7 +364,7 @@ export function cricketStatusSectionLines(data: CricketResponse, ymd: string): s
         const homeTeam = event.participants?.homeTeam;
         const awayTeam = event.participants?.awayTeam;
         lines.push(fixtureHeaderLine(event, ymd));
-        lines.push(...orderedInningsLines(homeTeam, awayTeam));
+        lines.push(...orderedInningsLines(homeTeam, awayTeam, event));
         lines.push("");
       }
     }

@@ -10,13 +10,17 @@ import {
   currentHourPowerAvgWatts,
   fetchSolarData,
   formatColoredKwh,
-  formatColoredWattsPrecise,
-  formatUkHourLabel,
   powerNowWatts,
   todayYieldKwh,
   ukHourStartMs,
   type SolarResponse,
 } from "./lib/solarApi";
+import {
+  buildSolarPanelLines,
+  formatSolarStatusPowerLine,
+  yieldAveragesFromData,
+  type YieldAverage,
+} from "./lib/solarView";
 import {
   fetchTemperatureHistory,
   latestRoomTemp,
@@ -37,9 +41,9 @@ import {
   statusCalendarInnerWidth,
   type StatusCalendarData,
 } from "./lib/calApi";
-import { loadFootballStatusLines } from "./lib/ballApi";
+import { fitFootballStatusLines, loadFootballStatusLines } from "./lib/ballApi";
 import { loadCricketStatusLines } from "./lib/cricApi";
-import { datesSectionLabel } from "./lib/moneyApi";
+import { moneyRemaining } from "./lib/moneyApi";
 import {
   runStatusShortcut,
   statusShortcutFooter,
@@ -48,10 +52,11 @@ import {
   type StatusShortcut,
 } from "./lib/commands";
 import { fetchWfhStatus, houseSectionLabel } from "./lib/wfhApi";
-import { buildFullWeatherLines, type WeatherResponse } from "./lib/wApi";
+import { buildFullWeatherLines, withWeatherPanelCountdown, type WeatherResponse } from "./lib/wApi";
 import {
   enterFullscreen,
   leaveFullscreen,
+  maxFootballBodyLines,
   maxCalendarContentLines,
   type FullscreenPanelLines,
   writeFullscreenLines,
@@ -65,6 +70,7 @@ import {
 
 const UK_TZ = "Europe/London";
 const TICK_MS = 1000;
+const PANEL_ALTERNATE_MS = 15_000;
 const SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1000;
 const SOLAR_POWER_REFRESH_MS = 10 * 60 * 1000;
 const TEMP_REFRESH_MS = 10 * 60 * 1000;
@@ -104,24 +110,46 @@ function formatDate(now: Date): string {
 }
 
 function formatSolarYieldLine(solarYield: number | null): string {
-  return `solar yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
-}
-
-function formatSolarPowerLine(
-  powerNow: number | null,
-  powerAvg: number | null,
-  now: Date,
-): string {
-  const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
-  const avgText = powerAvg == null ? "-" : formatColoredWattsPrecise(powerAvg);
-  const hourLabel = formatUkHourLabel(ukHourStartMs(now));
-  return `solar: ${nowText} // avg (${hourLabel}): ${avgText}`;
+  return `Solar Yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
 }
 
 function formatHouseTempsLine(downstairsTemp: number | null, shedTemp: number | null): string {
   const kitchen = formatTemperatureText(downstairsTemp, { fractionDigits: 0, unknownText: "-" });
   const shed = formatTemperatureText(shedTemp, { fractionDigits: 0, unknownText: "-" });
-  return `temp: ${kitchen} (kitchen) // ${shed} (shed)`;
+  return `Temp: ${kitchen} (Kitchen) // ${shed} (Shed)`;
+}
+
+function statusBoxTitle(now: Date): string {
+  const date = formatDate(now);
+  const remaining = moneyRemaining(now);
+  const money = remaining == null ? "-" : String(remaining);
+  return `=== Status (${date}) // ${money} ===`;
+}
+
+function capitalizeHouseSection(label: string): string {
+  return label.replace(/\b[a-z]/g, (char) => char.toUpperCase());
+}
+
+function capitalizeGasLine(line: string): string {
+  return line
+    .replace(/^today gas:/i, "Today Gas:")
+    .replace(/, tomorrow gas:/i, ", Tomorrow Gas:");
+}
+
+function capitalizeBdayLine(line: string): string {
+  return line
+    .replace(/: today /i, ": Today ")
+    .replace(/\(in /gi, "(In ")
+    .replace(/, turns /i, ", Turns ");
+}
+
+function capitalizeElectricityLines(lines: string[]): string[] {
+  return lines.map((line) =>
+    line
+      .replace("| day ", "| Day ")
+      .replace("| today ", "| Today ")
+      .replace("| tomorrow ", "| Tomorrow "),
+  );
 }
 
 function sectionDivider(name: string): string {
@@ -129,7 +157,7 @@ function sectionDivider(name: string): string {
 }
 
 function sectionBreak(name: string): string[] {
-  return ["", sectionDivider(name)];
+  return [sectionDivider(name)];
 }
 
 type GasSnapshot = {
@@ -152,29 +180,64 @@ type StatusDisplayState = {
   solarYield: number | null;
   powerNow: number | null;
   powerHourAvg: number | null;
+  yieldAverages: YieldAverage[] | null;
 };
 
 function buildStatusLines(state: StatusDisplayState): string[] {
   const now = state.now;
 
   return [
-    ...sectionBreak(datesSectionLabel(now)),
-    `time: ${formatTime(now)}, ${formatDate(now)}`,
-    ...upcomingBdaySectionLines(state.bdayConfig, now),
-    ...sectionBreak("solar"),
+    statusBoxTitle(now),
+    "",
+    `Time: ${formatTime(now)}`,
+    ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
+    ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
-    formatSolarPowerLine(state.powerNow, state.powerHourAvg, now),
-    ...sectionBreak(houseSectionLabel(now, state.wfh)),
+    formatSolarStatusPowerLine(
+      state.powerNow,
+      state.powerHourAvg,
+      now,
+      state.yieldAverages,
+    ),
+    ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
-    state.houseOcto.gas.line,
-    ...state.houseOcto.electricityLines,
+    capitalizeGasLine(state.houseOcto.gas.line),
+    ...capitalizeElectricityLines(state.houseOcto.electricityLines),
     "",
     statusShortcutFooter(),
   ];
 }
 
-function buildSportsPanelLines(title: string, lines: string[]): string[] {
-  return ["", sectionDivider(title), ...lines];
+function isWeatherPanelReady(lines: string[]): boolean {
+  return lines.length > 0 && lines[0].startsWith("=== Weather");
+}
+
+function isSolarPanelReady(lines: string[]): boolean {
+  return lines.length > 0 && lines[0].startsWith("=== Solar");
+}
+
+const SPORTS_PANEL_NAMES: Record<"cric" | "footy", string> = {
+  cric: "Cricket",
+  footy: "Football",
+};
+
+function sportsPanelHasContent(lines: string[]): boolean {
+  if (lines.length === 0 || lines[0] === "-" || lines[0] === "none") return false;
+  if (lines.length === 1 && lines[0] === "none today") return false;
+  return true;
+}
+
+function buildSportsPanelLines(
+  panel: "cric" | "footy",
+  lines: string[],
+  countdown?: { seconds: number; next: "cric" | "footy" },
+): string[] {
+  const title = SPORTS_PANEL_NAMES[panel];
+  const heading = countdown
+    ? `=== ${title} (${SPORTS_PANEL_NAMES[countdown.next]} in ${countdown.seconds}, n) ===`
+    : sectionDivider(title);
+  const body = [heading, "", ...lines];
+  return body;
 }
 
 async function loadFullWeatherLines(location: string): Promise<string[]> {
@@ -227,12 +290,16 @@ async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
   yield: number | null;
   powerNow: number | null;
   powerHourAvg: number | null;
+  yieldAverages: YieldAverage[] | null;
 }> {
   try {
     const data = await fetchSolarData();
-    return solarSnapshotFromData(data, dayKey, now);
+    return {
+      ...solarSnapshotFromData(data, dayKey, now),
+      yieldAverages: yieldAveragesFromData(data),
+    };
   } catch {
-    return { yield: null, powerNow: null, powerHourAvg: null };
+    return { yield: null, powerNow: null, powerHourAvg: null, yieldAverages: null };
   }
 }
 
@@ -337,6 +404,7 @@ async function printOnce(): Promise<void> {
       solarYield: solar.yield,
       powerNow: solar.powerNow,
       powerHourAvg: solar.powerHourAvg,
+      yieldAverages: solar.yieldAverages,
     }),
     false,
     {
@@ -347,7 +415,7 @@ async function printOnce(): Promise<void> {
   );
 }
 
-function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | null {
+function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | null {
   if (key.type === "ctrl-c") {
     return "quit";
   }
@@ -356,6 +424,9 @@ function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | null {
   }
   if (key.char === "q") {
     return "quit";
+  }
+  if (key.char === "n") {
+    return "flip-next";
   }
   return statusShortcutForKey(key.char);
 }
@@ -372,6 +443,7 @@ async function runLive(): Promise<void> {
   let solarYield: number | null = null;
   let powerNow: number | null = null;
   let powerHourAvg: number | null = null;
+  let yieldAverages: YieldAverage[] | null = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
@@ -380,6 +452,11 @@ async function runLive(): Promise<void> {
   let calendarData: StatusCalendarData | null = null;
   let cricLines: string[] = ["-"];
   let footyLines: string[] = ["-"];
+  let solarData: SolarResponse | null = null;
+  let sportsAlternatePhase: "cric" | "footy" = "cric";
+  let lastSportsAlternateAt = Date.now();
+  let middleAlternatePhase: "weather" | "solar" = "weather";
+  let lastMiddleAlternateAt = Date.now();
   let runningCommand = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
@@ -395,6 +472,7 @@ async function runLive(): Promise<void> {
     solarYield,
     powerNow,
     powerHourAvg,
+    yieldAverages,
   });
 
   const render = (): void => {
@@ -411,12 +489,104 @@ async function runLive(): Promise<void> {
           calendarWidth,
         )
       : null;
+    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
+    const fittedFootyLines = fitFootballStatusLines(
+      footyLines,
+      maxFootballBodyLines(boxWidth, null),
+    );
+    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
+    const hasCric = sportsPanelHasContent(cricLines);
+    const hasFooty = sportsPanelHasContent(fittedFootyLines);
+    let sportsDisplay: "cric" | "footy" | "both" = "both";
+    let sportsSwitchCountdown: { seconds: number; next: "cric" | "footy" } | undefined;
+    if (hasCric && hasFooty) {
+      const nowMs = Date.now();
+      if (nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
+        sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+        lastSportsAlternateAt = nowMs;
+      }
+      sportsDisplay = sportsAlternatePhase;
+      const secondsLeft = Math.max(
+        0,
+        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1000),
+      );
+      sportsSwitchCountdown = {
+        seconds: secondsLeft,
+        next: sportsAlternatePhase === "cric" ? "footy" : "cric",
+      };
+    } else if (hasCric) {
+      sportsDisplay = "cric";
+      sportsAlternatePhase = "cric";
+      lastSportsAlternateAt = Date.now();
+    } else if (hasFooty) {
+      sportsDisplay = "footy";
+      sportsAlternatePhase = "footy";
+      lastSportsAlternateAt = Date.now();
+    } else {
+      sportsAlternatePhase = "cric";
+      lastSportsAlternateAt = Date.now();
+    }
+    const cricPanel =
+      sportsDisplay === "cric" && sportsSwitchCountdown
+        ? buildSportsPanelLines("cric", cricLines, sportsSwitchCountdown)
+        : baseCricPanel;
+    const footyPanel =
+      sportsDisplay === "footy" && sportsSwitchCountdown
+        ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown)
+        : baseFootyPanel;
+
+    const baseWeatherPanel = fullWeatherLines;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
+    const canAlternateMiddle =
+      isWeatherPanelReady(baseWeatherPanel) && isSolarPanelReady(baseSolarPanel);
+    let middleDisplay: "weather" | "solar" = "weather";
+    let middleSwitchCountdown: { seconds: number; next: "weather" | "solar" } | undefined;
+    if (canAlternateMiddle) {
+      const nowMs = Date.now();
+      if (nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
+        middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
+        lastMiddleAlternateAt = nowMs;
+      }
+      middleDisplay = middleAlternatePhase;
+      const secondsLeft = Math.max(
+        0,
+        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastMiddleAlternateAt)) / 1000),
+      );
+      middleSwitchCountdown = {
+        seconds: secondsLeft,
+        next: middleAlternatePhase === "weather" ? "solar" : "weather",
+      };
+    } else {
+      middleAlternatePhase = "weather";
+      lastMiddleAlternateAt = Date.now();
+      if (isSolarPanelReady(baseSolarPanel) && !isWeatherPanelReady(baseWeatherPanel)) {
+        middleDisplay = "solar";
+      }
+    }
+    const weatherPanel =
+      middleDisplay === "weather" && middleSwitchCountdown
+        ? withWeatherPanelCountdown(baseWeatherPanel, {
+            seconds: middleSwitchCountdown.seconds,
+            next: "solar",
+          })
+        : baseWeatherPanel;
+    const solarPanel =
+      middleDisplay === "solar" && middleSwitchCountdown && solarData
+        ? buildSolarPanelLines(solarData, {
+            seconds: middleSwitchCountdown.seconds,
+            next: "weather",
+          })
+        : baseSolarPanel;
+
     writeDisplay(statusLines, true, {
       calendarLines,
       calendarInnerWidth: calendarWidth,
-      weatherLines: fullWeatherLines.length > 0 ? fullWeatherLines : null,
-      cricLines: buildSportsPanelLines("cric", cricLines),
-      footyLines: buildSportsPanelLines("footy", footyLines),
+      weatherLines: isWeatherPanelReady(weatherPanel) ? weatherPanel : null,
+      solarLines: isSolarPanelReady(solarPanel) ? solarPanel : null,
+      middleDisplay,
+      cricLines: cricPanel,
+      footyLines: footyPanel,
+      sportsDisplay,
     });
   };
 
@@ -454,12 +624,30 @@ async function runLive(): Promise<void> {
     timer = setInterval(tick, TICK_MS);
   };
 
+  const flipRotatingPanels = (): void => {
+    const nowMs = Date.now();
+    if (sportsPanelHasContent(cricLines) && sportsPanelHasContent(footyLines)) {
+      sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+      lastSportsAlternateAt = nowMs;
+    }
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
+    if (isWeatherPanelReady(fullWeatherLines) && isSolarPanelReady(baseSolarPanel)) {
+      middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
+      lastMiddleAlternateAt = nowMs;
+    }
+    render();
+  };
+
   const onKeys = (keys: TerminalKey[]): void => {
     if (runningCommand) return;
     for (const key of keys) {
       const action = handleStatusKey(key);
       if (action === "quit") {
         stop();
+        return;
+      }
+      if (action === "flip-next") {
+        flipRotatingPanels();
         return;
       }
       if (action) {
@@ -488,6 +676,8 @@ async function runLive(): Promise<void> {
 
   try {
     const data = await fetchSolarData();
+    solarData = data;
+    yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
@@ -528,8 +718,10 @@ async function runLive(): Promise<void> {
       if (needYieldRefresh || needPowerRefresh) {
         try {
           const data = await fetchSolarData();
+          solarData = data;
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
+            yieldAverages = yieldAveragesFromData(data);
             lastSolarYieldRefreshAt = nowMs;
           }
           if (needPowerRefresh) {

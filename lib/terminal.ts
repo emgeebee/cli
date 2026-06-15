@@ -100,6 +100,29 @@ export function isWeatherWideTerminal(
   return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
 }
 
+export function isMobileStatusTerminal(
+  statusInnerWidth: number,
+  calendarInnerWidth?: number,
+  weatherLines?: string[] | null,
+  solarLines?: string[] | null,
+): boolean {
+  const calInner = calendarInnerWidth ?? statusInnerWidth;
+  const leftOuter = Math.max(boxOuterWidth(statusInnerWidth), boxOuterWidth(calInner));
+  const layoutLines = [...(weatherLines || []), ...(solarLines || [])];
+  const weatherContent = layoutLines.reduce(
+    (max, line) => Math.max(max, visibleLength(line)),
+    0,
+  );
+  const weatherInner = Math.max(statusInnerWidth, weatherContent);
+  return !isWeatherWideTerminal(leftOuter, weatherInner);
+}
+
+function statusBoxInnerWidth(preferredInnerWidth: number): number {
+  const columns = process.stdout.columns ?? 80;
+  const maxInner = Math.max(columns - 4, 20);
+  return Math.min(preferredInnerWidth, maxInner);
+}
+
 function fitCalendarContentLines(
   calendarLines: string[],
   statusContentLineCount: number,
@@ -262,15 +285,65 @@ export type FullscreenPanelLines = {
   calendarLines?: string[] | null;
   calendarInnerWidth?: number;
   weatherLines?: string[] | null;
+  solarLines?: string[] | null;
+  middleDisplay?: "weather" | "solar";
+  sportsDisplay?: "cric" | "footy" | "both";
 };
+
+function middlePanelReady(lines: string[] | null | undefined, marker: string): boolean {
+  return Boolean(lines && lines.length > 0 && lines[0]?.startsWith(marker));
+}
+
+function resolveMiddlePanelLines(panels: FullscreenPanelLines): string[] | null {
+  const { weatherLines, solarLines, middleDisplay } = panels;
+  const hasWeather = middlePanelReady(weatherLines, "=== Weather");
+  const hasSolar = middlePanelReady(solarLines, "=== Solar");
+  if (!hasWeather && !hasSolar) return null;
+  if (!hasSolar) return weatherLines!;
+  if (!hasWeather) return solarLines!;
+  return middleDisplay === "solar" ? solarLines! : weatherLines!;
+}
+
+function middlePanelLayoutLines(panels: FullscreenPanelLines): string[] {
+  const lines: string[] = [];
+  if (middlePanelReady(panels.weatherLines, "=== Weather")) {
+    lines.push(...panels.weatherLines!);
+  }
+  if (middlePanelReady(panels.solarLines, "=== Solar")) {
+    lines.push(...panels.solarLines!);
+  }
+  return lines;
+}
+
+export function maxFootballBodyLines(
+  innerWidth: number,
+  otherPanelLines: string[] | null,
+  terminalRows = process.stdout.rows ?? 24,
+): number {
+  const panelHeaderRows = 2;
+  const boxBorderRows = 2;
+  const otherBoxRows =
+    otherPanelLines && otherPanelLines.length > 0
+      ? boxLines(otherPanelLines, innerWidth).length
+      : 0;
+  return Math.max(1, terminalRows - boxBorderRows - panelHeaderRows - otherBoxRows);
+}
 
 export function writeFullscreenLines(
   statusLines: string[],
   innerWidth: number,
   panels: FullscreenPanelLines = {},
 ): void {
-  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines } = panels;
+  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines, solarLines, middleDisplay, sportsDisplay } =
+    panels;
   const calInner = calendarInnerWidth ?? innerWidth;
+  const middleLayoutLines = middlePanelLayoutLines(panels);
+
+  if (isMobileStatusTerminal(innerWidth, calInner, weatherLines, solarLines)) {
+    writeFullscreenScreen(boxLines(statusLines, statusBoxInnerWidth(innerWidth)));
+    return;
+  }
+
   const statusBox = boxLines(statusLines, innerWidth);
   const leftStack: string[][] = [statusBox];
 
@@ -284,18 +357,19 @@ export function writeFullscreenLines(
   const leftOuter = Math.max(boxOuterWidth(innerWidth), boxOuterWidth(calInner));
   const leftColumn = stackBoxesVertically(leftStack);
 
-  const hasWeather = Boolean(weatherLines && weatherLines.length > 0);
+  const middleLines = resolveMiddlePanelLines(panels);
+  const hasMiddle = Boolean(middleLines && middleLines.length > 0);
   const hasSports = Boolean(
     (cricLines && cricLines.length > 0) || (footyLines && footyLines.length > 0),
   );
 
-  if (!hasWeather) {
+  if (!hasMiddle) {
     writeFullscreenScreen(leftColumn);
     return;
   }
 
   const weatherInner = weatherBoxInnerWidth(
-    weatherLines!,
+    middleLayoutLines.length > 0 ? middleLayoutLines : middleLines!,
     innerWidth,
     leftOuter,
     hasSports,
@@ -305,25 +379,26 @@ export function writeFullscreenLines(
   const showWeatherMiddle = isWeatherWideTerminal(leftOuter, weatherInner);
 
   if (!showWeatherMiddle) {
-    const narrowStack = [...leftStack];
-    narrowStack.push(boxLines(weatherLines!, weatherInner));
-    writeFullscreenScreen(stackBoxesVertically(narrowStack));
+    writeFullscreenScreen(leftColumn);
     return;
   }
 
-  const columns: string[][] = [leftColumn, boxLines(weatherLines!, weatherInner)];
+  const columns: string[][] = [leftColumn, boxLines(middleLines!, weatherInner)];
   const outerWidths = [leftOuter, boxOuterWidth(weatherInner)];
 
   if (showSports) {
     const sportsStack: string[][] = [];
-    if (cricLines && cricLines.length > 0) {
+    const show = sportsDisplay ?? "both";
+    if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
       sportsStack.push(boxLines(cricLines, innerWidth));
     }
-    if (footyLines && footyLines.length > 0) {
+    if ((show === "both" || show === "footy") && footyLines && footyLines.length > 0) {
       sportsStack.push(boxLines(footyLines, innerWidth));
     }
-    columns.push(stackBoxesVertically(sportsStack));
-    outerWidths.push(boxOuterWidth(innerWidth));
+    if (sportsStack.length > 0) {
+      columns.push(stackBoxesVertically(sportsStack));
+      outerWidths.push(boxOuterWidth(innerWidth));
+    }
   }
 
   writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths, WIDE_LAYOUT_GAP));
