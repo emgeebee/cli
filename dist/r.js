@@ -3526,14 +3526,14 @@ var require_emoji_regex = __commonJS({
 var require_string_width = __commonJS({
   "node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js"(exports2, module2) {
     "use strict";
-    var stripAnsi2 = require_strip_ansi();
+    var stripAnsi3 = require_strip_ansi();
     var isFullwidthCodePoint = require_is_fullwidth_code_point();
     var emojiRegex = require_emoji_regex();
     var stringWidth2 = (string4) => {
       if (typeof string4 !== "string" || string4.length === 0) {
         return 0;
       }
-      string4 = stripAnsi2(string4);
+      string4 = stripAnsi3(string4);
       if (string4.length === 0) {
         return 0;
       }
@@ -18710,6 +18710,22 @@ var normalizeOptionalValue = (value) => {
 
 // lib/terminal.ts
 var import_string_width = __toESM(require_string_width());
+var import_strip_ansi = __toESM(require_strip_ansi());
+
+// lib/commands.ts
+var STATUS_SHORTCUTS = [
+  { key: "s", label: "solar", cmd: "solar" },
+  { key: "w", label: "weather", cmd: "w" },
+  { key: "o", label: "octo", cmd: "octo" },
+  { key: "f", label: "footy", cmd: "ball" },
+  { key: "d", label: "dates", cmd: "cal" },
+  { key: "b", label: "bdays", cmd: "bday" }
+];
+var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
+  STATUS_SHORTCUTS.map((shortcut) => [shortcut.key, shortcut])
+);
+
+// lib/terminal.ts
 var getTerminalWidth = () => {
   const columns = process.stdout.columns;
   if (columns === void 0) {
@@ -18765,8 +18781,8 @@ var createTextStyler = (enabled) => ({
   success: (value) => applyCode(value, getAnsiRgbCode(PALETTE.green), enabled),
   warning: (value) => applyCode(value, getAnsiRgbCode(PALETTE.amber), enabled)
 });
-var stripAnsi = (value) => value.replaceAll(ANSI_PATTERN, "");
-var visibleWidth = (value) => Array.from(stripAnsi(value)).length;
+var stripAnsi2 = (value) => value.replaceAll(ANSI_PATTERN, "");
+var visibleWidth = (value) => Array.from(stripAnsi2(value)).length;
 var padVisibleEnd = (value, width) => `${value}${" ".repeat(Math.max(0, width - visibleWidth(value)))}`;
 var padVisibleStart = (value, width) => `${" ".repeat(Math.max(0, width - visibleWidth(value)))}${value}`;
 var chunkWord = (value, size) => {
@@ -18859,7 +18875,7 @@ var runCommand = async (commandName, options, handler, formatText) => {
       joinAligned,
       padVisibleEnd,
       padVisibleStart,
-      stripAnsi,
+      stripAnsi: stripAnsi2,
       style: createTextStyler(colorEnabled),
       visibleWidth,
       wrapText

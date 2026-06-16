@@ -14575,18 +14575,66 @@ async function toggleWfhStatus() {
   return status;
 }
 
-// cmd.ts
-var BASE_URL = "http://api.emgeebee.buzz:1880";
-var COMMANDS = {
-  slon: { room: "shed", device: "lights", state: "on" },
-  slof: { room: "shed", device: "lights", state: "off" },
-  smon: { room: "shed", device: "music", state: "on" },
-  smof: { room: "shed", device: "music", state: "off" },
-  shon: { room: "shed", device: "heater", state: "on" },
-  shof: { room: "shed", device: "heater", state: "off" },
-  blon: { room: "bedroom", device: "lights", state: "on" },
-  blof: { room: "bedroom", device: "lights", state: "off" }
+// lib/cmdApi.ts
+var CMD_BASE_URL = "http://api.emgeebee.buzz:1880";
+var COMMAND_CODES = {
+  "shed:lights:on": "slon",
+  "shed:lights:off": "slof",
+  "shed:music:on": "smon",
+  "shed:music:off": "smof",
+  "shed:heater:on": "shon",
+  "shed:heater:off": "shof",
+  "bedroom:lights:on": "blon",
+  "bedroom:lights:off": "blof"
 };
+var LEGACY_COMMANDS = Object.fromEntries(
+  Object.entries(COMMAND_CODES).map(([key, code]) => {
+    const [room, device, state] = key.split(":");
+    return [code, { room, device, state }];
+  })
+);
+var ROOM_LABELS = {
+  shed: "shed",
+  bedroom: "bedroom"
+};
+var DEVICE_LABELS = {
+  lights: "lights",
+  music: "music",
+  heater: "heater"
+};
+function cmdCodeFor(target) {
+  return COMMAND_CODES[`${target.room}:${target.device}:${target.state}`] ?? null;
+}
+function legacyCmdTarget(code) {
+  return LEGACY_COMMANDS[code.toLowerCase()] ?? null;
+}
+function formatCmdTarget(target) {
+  return `${ROOM_LABELS[target.room]} ${DEVICE_LABELS[target.device]} ${target.state}`;
+}
+async function triggerCmdTarget(target) {
+  const code = cmdCodeFor(target);
+  if (!code) {
+    throw new Error(`Unsupported command: ${formatCmdTarget(target)}`);
+  }
+  const postCount = code === "slof" ? 2 : 1;
+  const url2 = `${CMD_BASE_URL}/api/trigger-${target.room}-${target.device}/${target.state}`;
+  for (let attempt = 0; attempt < postCount; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 5e3));
+    }
+    const response = await fetch(url2, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status})`);
+    }
+  }
+  return `Triggered ${formatCmdTarget(target)}`;
+}
+async function triggerWfhToggle() {
+  const wfh = await toggleWfhStatus();
+  return { message: formatWfhLine(wfh), wfh };
+}
+
+// cmd.ts
 function usage() {
   console.log("Usage:");
   console.log("  cmd <command>");
@@ -14616,29 +14664,18 @@ async function main() {
   }
   const code = args[0].toLowerCase();
   if (code === "wfh") {
-    const wfh = await toggleWfhStatus();
-    console.log(formatWfhLine(wfh));
+    const { message } = await triggerWfhToggle();
+    console.log(message);
     return;
   }
-  const target = COMMANDS[code];
+  const target = legacyCmdTarget(code);
   if (!target) {
     console.error(`Unknown command: ${args[0]}`);
     console.error("");
     usage();
     process.exit(1);
   }
-  const postCount = code === "slof" ? 2 : 1;
-  const url2 = `${BASE_URL}/api/trigger-${target.room}-${target.device}/${target.state}`;
-  for (let attempt = 0; attempt < postCount; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 5e3));
-    }
-    const response = await fetch(url2, { method: "POST" });
-    if (!response.ok) {
-      throw new Error(`Request failed (${response.status}) for ${url2}`);
-    }
-  }
-  console.log(`Triggered ${target.room} ${target.device} ${target.state}`);
+  console.log(await triggerCmdTarget(target));
 }
 main().catch((error51) => {
   const message = error51 instanceof Error ? error51.message : String(error51);

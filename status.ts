@@ -38,16 +38,29 @@ import { readBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib
 import {
   buildStatusCalendarLines,
   loadStatusCalendarData,
-  statusCalendarInnerWidth,
   type StatusCalendarData,
 } from "./lib/calApi";
 import { fitFootballStatusLines, loadFootballStatusLines } from "./lib/ballApi";
 import { loadCricketStatusLines } from "./lib/cricApi";
+import {
+  buildCmdMenuLines,
+  CMD_MENU_INNER_WIDTH,
+  deviceForKey,
+  isWfhMenuKey,
+  roomForKey,
+  stateForKey,
+  triggerCmdTarget,
+  triggerWfhToggle,
+  type CmdDevice,
+  type CmdMenuSelection,
+  type CmdMenuStep,
+  type CmdRoom,
+  type CmdState,
+} from "./lib/cmdApi";
 import { moneyRemaining } from "./lib/moneyApi";
 import {
   runStatusShortcut,
   statusShortcutFooter,
-  statusShortcutFooterWidth,
   statusShortcutForKey,
   type StatusShortcut,
 } from "./lib/commands";
@@ -56,9 +69,15 @@ import { buildFullWeatherLines, withWeatherPanelCountdown, type WeatherResponse 
 import {
   enterFullscreen,
   leaveFullscreen,
-  maxFootballBodyLines,
   maxCalendarContentLines,
+  maxCompactPanelBodyLines,
+  resolveStatusLayoutTier,
+  shouldStackCalendarUnderStatus,
+  statusLayoutInnerWidth,
+  writeCenteredBox,
+  type CompactRotatePanel,
   type FullscreenPanelLines,
+  type StatusLayoutTier,
   writeFullscreenLines,
 } from "./lib/terminal";
 import {
@@ -80,7 +99,7 @@ function usage(): void {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, q to quit.");
+  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, c cmd menu, p pause, n next, q quit.");
   console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
@@ -221,20 +240,92 @@ const SPORTS_PANEL_NAMES: Record<"cric" | "footy", string> = {
   footy: "Football",
 };
 
+const COMPACT_PANEL_LABELS: Record<CompactRotatePanel, string> = {
+  weather: "Weather",
+  solar: "Solar",
+  cric: "Cricket",
+  footy: "Football",
+  calendar: "Dates",
+};
+
+function buildCompactRotationPool(
+  stackCalendar: boolean,
+  calendarLines: string[] | null,
+  hasWeather: boolean,
+  hasSolar: boolean,
+  hasCric: boolean,
+  hasFooty: boolean,
+): CompactRotatePanel[] {
+  const pool: CompactRotatePanel[] = [];
+  if (!stackCalendar && calendarLines && calendarLines.length > 0) pool.push("calendar");
+  if (hasWeather) pool.push("weather");
+  if (hasFooty) pool.push("footy");
+  if (hasCric) pool.push("cric");
+  if (hasSolar) pool.push("solar");
+  return pool;
+}
+
+function rotationNextLabel(next: string, seconds: number, paused: boolean): string {
+  return paused ? `${next} paused` : `${next} in ${seconds}`;
+}
+
+function withCompactPanelCountdown(
+  lines: string[],
+  countdown?: { seconds: number; next: CompactRotatePanel; paused?: boolean },
+): string[] {
+  if (!countdown || lines.length === 0) return lines;
+  const label = COMPACT_PANEL_LABELS[countdown.next];
+  const suffix = rotationNextLabel(label, countdown.seconds, countdown.paused ?? false);
+  const line = lines[0];
+  if (line.startsWith("── ") && line.endsWith(" ──")) {
+    const name = line.slice(3, -3);
+    return [`── ${name} (${suffix}, n) ──`, ...lines.slice(1)];
+  }
+  const title = line.replace(/ ===$/, ` (${suffix}, n) ===`);
+  return [title, ...lines.slice(1)];
+}
+
+function usesCompactRotation(tier: StatusLayoutTier): boolean {
+  return tier === "compact" || tier === "stacked" || tier === "twoColumn";
+}
+
+function isFootyPanelVisible(
+  tier: StatusLayoutTier,
+  hasFooty: boolean,
+  compactDisplay: CompactRotatePanel | undefined,
+  sportsDisplay: "cric" | "footy" | "both",
+): boolean {
+  if (!hasFooty) return false;
+  if (usesCompactRotation(tier)) {
+    return compactDisplay === "footy";
+  }
+  if (tier === "threeColumn") {
+    return sportsDisplay === "footy";
+  }
+  if (tier === "full") {
+    return sportsDisplay === "both" || sportsDisplay === "footy";
+  }
+  return false;
+}
+
 function sportsPanelHasContent(lines: string[]): boolean {
   if (lines.length === 0 || lines[0] === "-" || lines[0] === "none") return false;
   if (lines.length === 1 && lines[0] === "none today") return false;
   return true;
 }
 
+function cricketPanelAvailable(lines: string[]): boolean {
+  return lines.length > 0 && lines[0] !== "-";
+}
+
 function buildSportsPanelLines(
   panel: "cric" | "footy",
   lines: string[],
-  countdown?: { seconds: number; next: "cric" | "footy" },
+  countdown?: { seconds: number; next: "cric" | "footy"; paused?: boolean },
 ): string[] {
   const title = SPORTS_PANEL_NAMES[panel];
   const heading = countdown
-    ? `=== ${title} (${SPORTS_PANEL_NAMES[countdown.next]} in ${countdown.seconds}, n) ===`
+    ? `=== ${title} (${rotationNextLabel(SPORTS_PANEL_NAMES[countdown.next], countdown.seconds, countdown.paused ?? false)}, n) ===`
     : sectionDivider(title);
   const body = [heading, "", ...lines];
   return body;
@@ -263,7 +354,7 @@ function writeDisplay(
   panels: FullscreenPanelLines = {},
 ): void {
   if (fullscreen) {
-    writeFullscreenLines(statusLines, statusShortcutFooterWidth(), panels);
+    writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
     return;
   }
   for (const line of statusLines) {
@@ -415,7 +506,7 @@ async function printOnce(): Promise<void> {
   );
 }
 
-function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | null {
+function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "cmd-menu" | null {
   if (key.type === "ctrl-c") {
     return "quit";
   }
@@ -425,10 +516,75 @@ function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next
   if (key.char === "q") {
     return "quit";
   }
+  if (key.char === "c") {
+    return "cmd-menu";
+  }
   if (key.char === "n") {
     return "flip-next";
   }
+  if (key.char === "p") {
+    return "toggle-pause";
+  }
   return statusShortcutForKey(key.char);
+}
+
+type CmdMenuState =
+  | { active: false }
+  | { active: true; step: "top" }
+  | { active: true; step: "device"; room: CmdRoom }
+  | { active: true; step: "state"; room: CmdRoom; device: CmdDevice }
+  | { active: true; step: "running" }
+  | { active: true; step: "done"; message: string }
+  | { active: true; step: "error"; message: string };
+
+function cmdMenuSelection(state: CmdMenuState): CmdMenuSelection {
+  if (!state.active) return {};
+  if (state.step === "device" || state.step === "state") {
+    const selection: CmdMenuSelection = { room: state.room };
+    if (state.step === "state") {
+      selection.device = state.device;
+    }
+    return selection;
+  }
+  return {};
+}
+
+function renderCmdMenu(state: CmdMenuState): void {
+  if (!state.active) return;
+  const step: CmdMenuStep = state.step;
+  const message = state.step === "done" || state.step === "error" ? state.message : undefined;
+  writeCenteredBox(buildCmdMenuLines(step, cmdMenuSelection(state), message), CMD_MENU_INNER_WIDTH);
+}
+
+async function runCmdMenuAction(
+  room: CmdRoom,
+  device: CmdDevice,
+  state: CmdState,
+  onUpdate: (next: CmdMenuState) => void,
+): Promise<void> {
+  onUpdate({ active: true, step: "running" });
+  try {
+    const message = await triggerCmdTarget({ room, device, state });
+    onUpdate({ active: true, step: "done", message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    onUpdate({ active: true, step: "error", message });
+  }
+}
+
+async function runCmdMenuWfh(
+  onUpdate: (next: CmdMenuState) => void,
+  onWfhChanged: (wfh: boolean) => void,
+): Promise<void> {
+  onUpdate({ active: true, step: "running" });
+  try {
+    const { message, wfh } = await triggerWfhToggle();
+    onWfhChanged(wfh);
+    onUpdate({ active: true, step: "done", message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    onUpdate({ active: true, step: "error", message });
+  }
 }
 
 async function runLive(): Promise<void> {
@@ -457,6 +613,13 @@ async function runLive(): Promise<void> {
   let lastSportsAlternateAt = Date.now();
   let middleAlternatePhase: "weather" | "solar" = "weather";
   let lastMiddleAlternateAt = Date.now();
+  let compactRotatePhase: CompactRotatePanel = "weather";
+  let lastCompactRotateAt = Date.now();
+  let rotationPaused = false;
+  let rotationPausedAt = 0;
+  let footyPanelWasVisible: boolean | null = null;
+  let footyRefreshGeneration = 0;
+  let cmdMenuState: CmdMenuState = { active: false };
   let runningCommand = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
@@ -476,9 +639,13 @@ async function runLive(): Promise<void> {
   });
 
   const render = (): void => {
+    if (cmdMenuState.active) {
+      renderCmdMenu(cmdMenuState);
+      return;
+    }
+
     const state = displayState();
-    const boxWidth = statusShortcutFooterWidth();
-    const calendarWidth = statusCalendarInnerWidth();
+    const panelWidth = statusLayoutInnerWidth();
     const statusLines = buildStatusLines(state);
     const calendarLines = calendarData
       ? buildStatusCalendarLines(
@@ -486,64 +653,133 @@ async function runLive(): Promise<void> {
           state.now,
           calendarData.colors,
           maxCalendarContentLines(statusLines.length, true),
-          calendarWidth,
+          panelWidth,
         )
       : null;
-    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
-    const fittedFootyLines = fitFootballStatusLines(
-      footyLines,
-      maxFootballBodyLines(boxWidth, null),
+
+    const baseWeatherPanel = fullWeatherLines;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, undefined, panelWidth) : [];
+    const hasWeather = isWeatherPanelReady(baseWeatherPanel);
+    const hasSolar = isSolarPanelReady(baseSolarPanel);
+    const hasCric = cricketPanelAvailable(cricLines);
+    const hasFootyRaw = sportsPanelHasContent(footyLines);
+    const stackCalendar =
+      shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
+
+    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
+      calendarLines,
+      calendarInnerWidth: panelWidth,
+      weatherLines: hasWeather ? baseWeatherPanel : null,
+      solarLines: hasSolar ? baseSolarPanel : null,
+      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+      footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null,
+    });
+
+    const maxFootyLines = maxCompactPanelBodyLines(
+      tier,
+      panelWidth,
+      statusLines,
+      calendarLines,
+      stackCalendar,
+      panelWidth,
     );
-    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
-    const hasCric = sportsPanelHasContent(cricLines);
+    const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
-    let sportsDisplay: "cric" | "footy" | "both" = "both";
-    let sportsSwitchCountdown: { seconds: number; next: "cric" | "footy" } | undefined;
-    if (hasCric && hasFooty) {
-      const nowMs = Date.now();
-      if (nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
-        sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
-        lastSportsAlternateAt = nowMs;
+    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
+    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
+
+    const compactPool = buildCompactRotationPool(
+      stackCalendar,
+      calendarLines,
+      hasWeather,
+      hasSolar,
+      hasCric,
+      hasFooty,
+    );
+    let compactDisplay: CompactRotatePanel | undefined;
+    let compactSwitchCountdown:
+      | { seconds: number; next: CompactRotatePanel; paused?: boolean }
+      | undefined;
+    if (usesCompactRotation(tier) && compactPool.length > 0) {
+      if (!compactPool.includes(compactRotatePhase)) {
+        compactRotatePhase = compactPool[0];
       }
-      sportsDisplay = sportsAlternatePhase;
-      const secondsLeft = Math.max(
-        0,
-        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1000),
-      );
-      sportsSwitchCountdown = {
-        seconds: secondsLeft,
-        next: sportsAlternatePhase === "cric" ? "footy" : "cric",
-      };
-    } else if (hasCric) {
-      sportsDisplay = "cric";
-      sportsAlternatePhase = "cric";
-      lastSportsAlternateAt = Date.now();
-    } else if (hasFooty) {
-      sportsDisplay = "footy";
-      sportsAlternatePhase = "footy";
-      lastSportsAlternateAt = Date.now();
-    } else {
-      sportsAlternatePhase = "cric";
-      lastSportsAlternateAt = Date.now();
+      if (compactPool.length > 1) {
+        const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+        if (!rotationPaused && nowMs - lastCompactRotateAt >= PANEL_ALTERNATE_MS) {
+          const index = compactPool.indexOf(compactRotatePhase);
+          compactRotatePhase = compactPool[(index + 1) % compactPool.length];
+          lastCompactRotateAt = nowMs;
+        }
+        compactDisplay = compactRotatePhase;
+        const secondsLeft = Math.max(
+          0,
+          Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastCompactRotateAt)) / 1000),
+        );
+        const nextIndex = (compactPool.indexOf(compactRotatePhase) + 1) % compactPool.length;
+        compactSwitchCountdown = {
+          seconds: secondsLeft,
+          next: compactPool[nextIndex],
+          paused: rotationPaused,
+        };
+      } else {
+        compactDisplay = compactPool[0];
+      }
     }
+
+    let sportsDisplay: "cric" | "footy" | "both" = "both";
+    let sportsSwitchCountdown:
+      | { seconds: number; next: "cric" | "footy"; paused?: boolean }
+      | undefined;
+    if (tier === "threeColumn") {
+      if (hasCric && hasFooty) {
+        const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+        if (!rotationPaused && nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
+          sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+          lastSportsAlternateAt = nowMs;
+        }
+        sportsDisplay = sportsAlternatePhase;
+        const secondsLeft = Math.max(
+          0,
+          Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1000),
+        );
+        sportsSwitchCountdown = {
+          seconds: secondsLeft,
+          next: sportsAlternatePhase === "cric" ? "footy" : "cric",
+          paused: rotationPaused,
+        };
+      } else if (hasCric) {
+        sportsDisplay = "cric";
+      } else if (hasFooty) {
+        sportsDisplay = "footy";
+      }
+    } else if (tier === "full") {
+      if (hasCric && hasFooty) {
+        sportsDisplay = "both";
+      } else if (hasCric) {
+        sportsDisplay = "cric";
+      } else if (hasFooty) {
+        sportsDisplay = "footy";
+      }
+    }
+
     const cricPanel =
-      sportsDisplay === "cric" && sportsSwitchCountdown
+      tier === "threeColumn" && sportsDisplay === "cric" && sportsSwitchCountdown
         ? buildSportsPanelLines("cric", cricLines, sportsSwitchCountdown)
         : baseCricPanel;
     const footyPanel =
-      sportsDisplay === "footy" && sportsSwitchCountdown
+      tier === "threeColumn" && sportsDisplay === "footy" && sportsSwitchCountdown
         ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown)
         : baseFootyPanel;
 
-    const baseWeatherPanel = fullWeatherLines;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
-    const canAlternateMiddle =
-      isWeatherPanelReady(baseWeatherPanel) && isSolarPanelReady(baseSolarPanel);
+    const canAlternateMiddle = hasWeather && hasSolar;
     let middleDisplay: "weather" | "solar" = "weather";
-    let middleSwitchCountdown: { seconds: number; next: "weather" | "solar" } | undefined;
-    if (canAlternateMiddle) {
-      const nowMs = Date.now();
-      if (nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
+    let middleSwitchCountdown:
+      | { seconds: number; next: "weather" | "solar"; paused?: boolean }
+      | undefined;
+    if (tier === "threeColumn" && canAlternateMiddle) {
+      const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+      if (!rotationPaused && nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
         middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
         lastMiddleAlternateAt = nowMs;
       }
@@ -555,39 +791,63 @@ async function runLive(): Promise<void> {
       middleSwitchCountdown = {
         seconds: secondsLeft,
         next: middleAlternatePhase === "weather" ? "solar" : "weather",
+        paused: rotationPaused,
       };
-    } else {
-      middleAlternatePhase = "weather";
-      lastMiddleAlternateAt = Date.now();
-      if (isSolarPanelReady(baseSolarPanel) && !isWeatherPanelReady(baseWeatherPanel)) {
-        middleDisplay = "solar";
-      }
+    } else if (hasSolar && !hasWeather) {
+      middleDisplay = "solar";
     }
+
     const weatherPanel =
-      middleDisplay === "weather" && middleSwitchCountdown
+      tier === "threeColumn" && middleDisplay === "weather" && middleSwitchCountdown
         ? withWeatherPanelCountdown(baseWeatherPanel, {
             seconds: middleSwitchCountdown.seconds,
             next: "solar",
+            paused: middleSwitchCountdown.paused,
           })
         : baseWeatherPanel;
     const solarPanel =
-      middleDisplay === "solar" && middleSwitchCountdown && solarData
+      tier === "threeColumn" && middleDisplay === "solar" && middleSwitchCountdown && solarData
         ? buildSolarPanelLines(solarData, {
             seconds: middleSwitchCountdown.seconds,
             next: "weather",
-          })
+            paused: middleSwitchCountdown.paused,
+          }, panelWidth)
         : baseSolarPanel;
 
+    const compactCountdown = compactSwitchCountdown;
+    const panelLines = (
+      panel: CompactRotatePanel,
+      lines: string[],
+      allowWide: boolean,
+    ): string[] | null => {
+      if (!lines.length) return null;
+      if (usesCompactRotation(tier)) {
+        if (compactDisplay !== panel) return null;
+        return withCompactPanelCountdown(lines, compactCountdown);
+      }
+      if (!allowWide) return null;
+      return lines;
+    };
+
     writeDisplay(statusLines, true, {
+      layoutTier: tier,
+      stackCalendar,
+      compactDisplay,
       calendarLines,
-      calendarInnerWidth: calendarWidth,
-      weatherLines: isWeatherPanelReady(weatherPanel) ? weatherPanel : null,
-      solarLines: isSolarPanelReady(solarPanel) ? solarPanel : null,
-      middleDisplay,
-      cricLines: cricPanel,
-      footyLines: footyPanel,
-      sportsDisplay,
+      calendarInnerWidth: panelWidth,
+      weatherLines: panelLines("weather", weatherPanel, tier === "full" || tier === "threeColumn"),
+      solarLines: panelLines("solar", solarPanel, tier === "full" || tier === "threeColumn"),
+      middleDisplay: tier === "threeColumn" ? middleDisplay : undefined,
+      cricLines: panelLines("cric", cricPanel, tier === "full" || tier === "threeColumn"),
+      footyLines: panelLines("footy", footyPanel, tier === "full" || tier === "threeColumn"),
+      sportsDisplay: tier === "threeColumn" || tier === "full" ? sportsDisplay : undefined,
     });
+
+    const footyVisible = isFootyPanelVisible(tier, hasFooty, compactDisplay, sportsDisplay);
+    if (footyVisible && footyPanelWasVisible === false) {
+      void refreshFootball(trackedDate);
+    }
+    footyPanelWasVisible = footyVisible;
   };
 
   const refreshWeather = async (): Promise<void> => {
@@ -596,6 +856,20 @@ async function runLive(): Promise<void> {
 
   const refreshCalendar = async (now: Date): Promise<void> => {
     calendarData = await loadStatusCalendarData(now);
+  };
+
+  const refreshFootball = async (ymd: string): Promise<void> => {
+    const generation = ++footyRefreshGeneration;
+    try {
+      const lines = await loadFootballStatusLines(ymd);
+      if (generation !== footyRefreshGeneration) return;
+      footyLines = lines;
+      render();
+    } catch {
+      if (generation !== footyRefreshGeneration) return;
+      footyLines = ["-"];
+      render();
+    }
   };
 
   const refreshSports = async (ymd: string): Promise<void> => {
@@ -624,14 +898,149 @@ async function runLive(): Promise<void> {
     timer = setInterval(tick, TICK_MS);
   };
 
+  const closeCmdMenu = (): void => {
+    cmdMenuState = { active: false };
+    render();
+  };
+
+  const openCmdMenu = (): void => {
+    cmdMenuState = { active: true, step: "top" };
+    render();
+  };
+
+  const handleCmdMenuKey = (key: TerminalKey): void => {
+    if (!cmdMenuState.active) return;
+
+    if (key.type === "ctrl-c" || key.type === "escape") {
+      closeCmdMenu();
+      return;
+    }
+
+    if (cmdMenuState.step === "running") {
+      return;
+    }
+
+    if (cmdMenuState.step === "done" || cmdMenuState.step === "error") {
+      if (key.type === "char" || key.type === "enter") {
+        closeCmdMenu();
+      }
+      return;
+    }
+
+    if (key.type !== "char") return;
+
+    if (key.char === "q") {
+      closeCmdMenu();
+      return;
+    }
+
+    if (cmdMenuState.step === "top") {
+      if (isWfhMenuKey(key.char)) {
+        void runCmdMenuWfh(
+          (next) => {
+            cmdMenuState = next;
+            render();
+          },
+          (nextWfh) => {
+            wfh = nextWfh;
+          },
+        );
+        return;
+      }
+      const room = roomForKey(key.char);
+      if (!room) return;
+      cmdMenuState = { active: true, step: "device", room };
+      render();
+      return;
+    }
+
+    if (cmdMenuState.step === "device") {
+      const device = deviceForKey(key.char, cmdMenuState.room);
+      if (!device) return;
+      cmdMenuState = {
+        active: true,
+        step: "state",
+        room: cmdMenuState.room,
+        device,
+      };
+      render();
+      return;
+    }
+
+    const state = stateForKey(key.char);
+    if (!state) return;
+    const { room, device } = cmdMenuState;
+    void runCmdMenuAction(room, device, state, (next) => {
+      cmdMenuState = next;
+      render();
+    });
+  };
+
+  const toggleRotationPause = (): void => {
+    if (rotationPaused) {
+      const pausedDuration = Date.now() - rotationPausedAt;
+      lastCompactRotateAt += pausedDuration;
+      lastSportsAlternateAt += pausedDuration;
+      lastMiddleAlternateAt += pausedDuration;
+      rotationPaused = false;
+    } else {
+      rotationPausedAt = Date.now();
+      rotationPaused = true;
+    }
+    render();
+  };
+
   const flipRotatingPanels = (): void => {
     const nowMs = Date.now();
-    if (sportsPanelHasContent(cricLines) && sportsPanelHasContent(footyLines)) {
+    if (rotationPaused) {
+      rotationPausedAt = nowMs;
+    }
+    const state = displayState();
+    const panelWidth = statusLayoutInnerWidth();
+    const statusLines = buildStatusLines(state);
+    const calendarLines = calendarData
+      ? buildStatusCalendarLines(
+          calendarData.months,
+          state.now,
+          calendarData.colors,
+          maxCalendarContentLines(statusLines.length, true),
+          panelWidth,
+        )
+      : null;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, undefined, panelWidth) : [];
+    const hasWeather = isWeatherPanelReady(fullWeatherLines);
+    const hasSolar = isSolarPanelReady(baseSolarPanel);
+    const hasCric = cricketPanelAvailable(cricLines);
+    const hasFooty = sportsPanelHasContent(footyLines);
+    const stackCalendar =
+      shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
+    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
+      calendarLines,
+      calendarInnerWidth: panelWidth,
+      weatherLines: hasWeather ? fullWeatherLines : null,
+      solarLines: hasSolar ? baseSolarPanel : null,
+      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+      footyLines: hasFooty ? buildSportsPanelLines("footy", footyLines) : null,
+    });
+    const compactPool = buildCompactRotationPool(
+      stackCalendar,
+      calendarLines,
+      hasWeather,
+      hasSolar,
+      hasCric,
+      hasFooty,
+    );
+
+    if (usesCompactRotation(tier) && compactPool.length > 1) {
+      const index = compactPool.indexOf(compactRotatePhase);
+      compactRotatePhase = compactPool[(index + 1) % compactPool.length];
+      lastCompactRotateAt = nowMs;
+    }
+    if (tier === "threeColumn" && hasCric && hasFooty) {
       sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
       lastSportsAlternateAt = nowMs;
     }
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
-    if (isWeatherPanelReady(fullWeatherLines) && isSolarPanelReady(baseSolarPanel)) {
+    if (tier === "threeColumn" && hasWeather && hasSolar) {
       middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
       lastMiddleAlternateAt = nowMs;
     }
@@ -641,13 +1050,25 @@ async function runLive(): Promise<void> {
   const onKeys = (keys: TerminalKey[]): void => {
     if (runningCommand) return;
     for (const key of keys) {
+      if (cmdMenuState.active) {
+        handleCmdMenuKey(key);
+        return;
+      }
       const action = handleStatusKey(key);
       if (action === "quit") {
         stop();
         return;
       }
+      if (action === "cmd-menu") {
+        openCmdMenu();
+        return;
+      }
       if (action === "flip-next") {
         flipRotatingPanels();
+        return;
+      }
+      if (action === "toggle-pause") {
+        toggleRotationPause();
         return;
       }
       if (action) {

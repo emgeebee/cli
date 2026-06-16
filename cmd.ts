@@ -1,25 +1,10 @@
 #!/usr/bin/env node
 
-import { formatWfhLine, toggleWfhStatus } from "./lib/wfhApi";
-
-const BASE_URL = "http://api.emgeebee.buzz:1880";
-
-type CommandTarget = {
-  room: "shed" | "bedroom";
-  device: "lights" | "music" | "heater";
-  state: "on" | "off";
-};
-
-const COMMANDS: Record<string, CommandTarget> = {
-  slon: { room: "shed", device: "lights", state: "on" },
-  slof: { room: "shed", device: "lights", state: "off" },
-  smon: { room: "shed", device: "music", state: "on" },
-  smof: { room: "shed", device: "music", state: "off" },
-  shon: { room: "shed", device: "heater", state: "on" },
-  shof: { room: "shed", device: "heater", state: "off" },
-  blon: { room: "bedroom", device: "lights", state: "on" },
-  blof: { room: "bedroom", device: "lights", state: "off" },
-};
+import {
+  legacyCmdTarget,
+  triggerCmdTarget,
+  triggerWfhToggle,
+} from "./lib/cmdApi";
 
 function usage(): void {
   console.log("Usage:");
@@ -52,12 +37,12 @@ async function main(): Promise<void> {
 
   const code = args[0].toLowerCase();
   if (code === "wfh") {
-    const wfh = await toggleWfhStatus();
-    console.log(formatWfhLine(wfh));
+    const { message } = await triggerWfhToggle();
+    console.log(message);
     return;
   }
 
-  const target = COMMANDS[code];
+  const target = legacyCmdTarget(code);
   if (!target) {
     console.error(`Unknown command: ${args[0]}`);
     console.error("");
@@ -65,20 +50,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const postCount = code === "slof" ? 2 : 1;
-  const url = `${BASE_URL}/api/trigger-${target.room}-${target.device}/${target.state}`;
-
-  for (let attempt = 0; attempt < postCount; attempt++) {
-    if (attempt > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
-    const response = await fetch(url, { method: "POST" });
-    if (!response.ok) {
-      throw new Error(`Request failed (${response.status}) for ${url}`);
-    }
-  }
-
-  console.log(`Triggered ${target.room} ${target.device} ${target.state}`);
+  console.log(await triggerCmdTarget(target));
 }
 
 main().catch((error: unknown) => {

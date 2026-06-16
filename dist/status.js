@@ -100,14 +100,14 @@ var require_emoji_regex = __commonJS({
 var require_string_width = __commonJS({
   "node_modules/.pnpm/string-width@4.2.3/node_modules/string-width/index.js"(exports2, module2) {
     "use strict";
-    var stripAnsi3 = require_strip_ansi();
+    var stripAnsi4 = require_strip_ansi();
     var isFullwidthCodePoint = require_is_fullwidth_code_point();
     var emojiRegex = require_emoji_regex();
     var stringWidth5 = (string4) => {
       if (typeof string4 !== "string" || string4.length === 0) {
         return 0;
       }
-      string4 = stripAnsi3(string4);
+      string4 = stripAnsi4(string4);
       if (string4.length === 0) {
         return 0;
       }
@@ -15106,18 +15106,31 @@ function powerRowForValue(value) {
     )
   );
 }
-function renderPowerGraph(readings) {
+var POWER_GRAPH_LABEL_PREFIX_WIDTH = 8;
+var POWER_GRAPH_COLUMN_WIDTH = 2;
+function maxPowerGraphColumns(maxLineWidth) {
+  if (maxLineWidth == null) return POWER_HISTORY_HOURS;
+  return Math.max(
+    1,
+    Math.floor((maxLineWidth - POWER_GRAPH_LABEL_PREFIX_WIDTH) / POWER_GRAPH_COLUMN_WIDTH)
+  );
+}
+function renderPowerGraph(readings, maxLineWidth) {
   const { firstHour, series } = buildHourlyPowerSeries(readings);
   const values = series.filter((value) => value != null);
   if (values.length === 0) {
     return [`No power readings in the last ${POWER_HISTORY_HOURS} available hours.`];
   }
+  const maxColumns = maxPowerGraphColumns(maxLineWidth);
+  const startCol = Math.max(0, series.length - maxColumns);
+  const displaySeries = series.slice(startCol);
+  const displayFirstHour = firstHour + startCol * HOUR_MS;
   const grid = Array.from(
     { length: POWER_CHART_HEIGHT },
-    () => Array.from({ length: series.length }, () => "  ")
+    () => Array.from({ length: displaySeries.length }, () => "  ")
   );
-  for (let col = 0; col < series.length; col += 1) {
-    const value = series[col];
+  for (let col = 0; col < displaySeries.length; col += 1) {
+    const value = displaySeries[col];
     if (value == null) continue;
     grid[powerRowForValue(value)][col] = formatColoredPowerPoint(value);
   }
@@ -15126,10 +15139,10 @@ function renderPowerGraph(readings) {
     const labelValue = POWER_CHART_MAX_W - row * POWER_CHART_STEP_W;
     lines.push(`${formatWatts(labelValue).padStart(6)} |${grid[row].join("")}`);
   }
-  lines.push(`       +${"-".repeat(series.length * 2)}`);
-  const labelChars = Array(series.length * 2).fill(" ");
-  for (let col = 0; col < series.length; col += 6) {
-    const label = formatHourLabel(firstHour + col * HOUR_MS);
+  lines.push(`       +${"-".repeat(displaySeries.length * 2)}`);
+  const labelChars = Array(displaySeries.length * 2).fill(" ");
+  for (let col = 0; col < displaySeries.length; col += 6) {
+    const label = formatHourLabel(displayFirstHour + col * HOUR_MS);
     const pos = col * 2;
     for (let idx = 0; idx < label.length && pos + idx < labelChars.length; idx += 1) {
       labelChars[pos + idx] = label[idx] || " ";
@@ -15138,7 +15151,7 @@ function renderPowerGraph(readings) {
   lines.push(`        ${labelChars.join("")}`);
   return lines;
 }
-function buildSolarViewBody(data) {
+function buildSolarViewBody(data, maxLineWidth) {
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
@@ -15155,12 +15168,12 @@ function buildSolarViewBody(data) {
   );
   lines.push("");
   lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
-  lines.push(...renderPowerGraph(powerAvgReadings));
+  lines.push(...renderPowerGraph(powerAvgReadings, maxLineWidth));
   return lines;
 }
-function buildSolarPanelLines(data, countdown) {
-  const title = countdown ? `=== Solar (Weather in ${countdown.seconds}, n) ===` : "=== Solar ===";
-  return [title, "", ...buildSolarViewBody(data)];
+function buildSolarPanelLines(data, countdown, maxLineWidth) {
+  const title = countdown ? countdown.paused ? "=== Solar (Weather paused, n) ===" : `=== Solar (Weather in ${countdown.seconds}, n) ===` : "=== Solar ===";
+  return [title, "", ...buildSolarViewBody(data, maxLineWidth)];
 }
 function formatSolarStatusPowerLines(powerNow, powerHourAvg, now, yieldAverages) {
   const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
@@ -16784,6 +16797,32 @@ function fixtureHeaderLine(event, ymd) {
     event.matchSummary?.resultString || "-"
   ].join(" | ");
 }
+var STATUS_CRICKET_PAD_DAYS = 7;
+function shiftYmd(ymd, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const date5 = new Date(Date.UTC(y, mo, d));
+  date5.setUTCDate(date5.getUTCDate() + days);
+  return date5.toISOString().slice(0, 10);
+}
+function eventActiveOnDate(event, ymd) {
+  const start = event.matchDateSummary?.startDate;
+  const end = event.matchDateSummary?.endDate;
+  if (start && end && ymd >= start && ymd <= end) return true;
+  if (start && !end && start === ymd) return true;
+  const raw = event.startDateTime;
+  if (!raw) return false;
+  const date5 = new Date(raw);
+  if (Number.isNaN(date5.getTime())) return false;
+  return date5.toLocaleDateString("en-CA", { timeZone: "Europe/London" }) === ymd;
+}
+async function fetchCricketRange(startYmd, endYmd, todayYmd) {
+  const url2 = `${CRICKET_BASE_URL}?selectedEndDate=${endYmd}&selectedStartDate=${startYmd}&todayDate=${todayYmd}&urn=${encodeURIComponent(CRICKET_URN)}`;
+  return fetchBbcJson(url2, todayYmd, "cricket");
+}
 function cricketStatusSectionLines(data, ymd) {
   const lines = [];
   let matchCount = 0;
@@ -16795,7 +16834,7 @@ function cricketStatusSectionLines(data, ymd) {
         return aTime - bTime;
       });
       const allowedEvents = events.filter(
-        (event) => isAllowedCompetition(competitionLabel2(secondary, event))
+        (event) => isAllowedCompetition(competitionLabel2(secondary, event)) && eventActiveOnDate(event, ymd)
       );
       if (allowedEvents.length === 0) continue;
       if (lines.length > 0) {
@@ -16820,13 +16859,209 @@ function cricketStatusSectionLines(data, ymd) {
   }
   return lines;
 }
-async function fetchTodayCricket(ymd) {
-  const url2 = `${CRICKET_BASE_URL}?selectedEndDate=${ymd}&selectedStartDate=${ymd}&todayDate=${ymd}&urn=${encodeURIComponent(CRICKET_URN)}`;
-  return fetchBbcJson(url2, ymd, "cricket");
+async function loadCricketStatusLines(todayYmd) {
+  const startYmd = shiftYmd(todayYmd, -STATUS_CRICKET_PAD_DAYS);
+  const endYmd = shiftYmd(todayYmd, STATUS_CRICKET_PAD_DAYS);
+  const data = await fetchCricketRange(startYmd, endYmd, todayYmd);
+  return cricketStatusSectionLines(data, todayYmd);
 }
-async function loadCricketStatusLines(ymd) {
-  const data = await fetchTodayCricket(ymd);
-  return cricketStatusSectionLines(data, ymd);
+
+// lib/wfhApi.ts
+var WFH_API_URL = "http://emgeebee.buzz:1880/api/wfh";
+var WfhResponseSchema = external_exports.object({
+  wfh: external_exports.preprocess((value) => {
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return value;
+  }, external_exports.boolean())
+});
+async function fetchWfhStatus() {
+  try {
+    const response = await fetch(WFH_API_URL, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return WfhResponseSchema.parse(await response.json()).wfh;
+  } catch {
+    return null;
+  }
+}
+var UK_TZ6 = "Europe/London";
+function formatWfhLine(wfh) {
+  if (wfh == null) return "wfh: -";
+  return `wfh: ${wfh ? "yes" : "no"}`;
+}
+function houseSectionLabel(now, wfh) {
+  const weekday = now.toLocaleDateString("en-GB", {
+    weekday: "long",
+    timeZone: UK_TZ6
+  }).toLowerCase();
+  if (weekday === "saturday" || weekday === "sunday") {
+    return "house (weekend)";
+  }
+  if (wfh === true) {
+    return "house (WFH)";
+  }
+  return "house (office)";
+}
+async function toggleWfhStatus() {
+  const response = await fetch(WFH_API_URL, { method: "PUT" });
+  if (!response.ok) {
+    throw new Error(`WFH toggle failed (${response.status})`);
+  }
+  const status = await fetchWfhStatus();
+  if (status == null) {
+    throw new Error("WFH toggle succeeded but status could not be read");
+  }
+  return status;
+}
+
+// lib/cmdApi.ts
+var CMD_BASE_URL = "http://api.emgeebee.buzz:1880";
+var COMMAND_CODES = {
+  "shed:lights:on": "slon",
+  "shed:lights:off": "slof",
+  "shed:music:on": "smon",
+  "shed:music:off": "smof",
+  "shed:heater:on": "shon",
+  "shed:heater:off": "shof",
+  "bedroom:lights:on": "blon",
+  "bedroom:lights:off": "blof"
+};
+var LEGACY_COMMANDS = Object.fromEntries(
+  Object.entries(COMMAND_CODES).map(([key, code]) => {
+    const [room, device, state] = key.split(":");
+    return [code, { room, device, state }];
+  })
+);
+var ROOM_LABELS = {
+  shed: "shed",
+  bedroom: "bedroom"
+};
+var DEVICE_LABELS = {
+  lights: "lights",
+  music: "music",
+  heater: "heater"
+};
+var DEVICE_KEYS = {
+  lights: "l",
+  music: "m",
+  heater: "h"
+};
+var ROOM_DEVICES = {
+  shed: ["lights", "music", "heater"],
+  bedroom: ["lights"]
+};
+var CMD_MENU_INNER_WIDTH = 34;
+function cmdCodeFor(target) {
+  return COMMAND_CODES[`${target.room}:${target.device}:${target.state}`] ?? null;
+}
+function devicesForRoom(room) {
+  return ROOM_DEVICES[room];
+}
+function roomForKey(key) {
+  if (key === "s") return "shed";
+  if (key === "b") return "bedroom";
+  return null;
+}
+function isWfhMenuKey(key) {
+  return key === "w";
+}
+function deviceForKey(key, room) {
+  for (const device of devicesForRoom(room)) {
+    if (DEVICE_KEYS[device] === key) return device;
+  }
+  return null;
+}
+function stateForKey(key) {
+  if (key === "o") return "on";
+  if (key === "f") return "off";
+  return null;
+}
+function formatCmdTarget(target) {
+  return `${ROOM_LABELS[target.room]} ${DEVICE_LABELS[target.device]} ${target.state}`;
+}
+async function triggerCmdTarget(target) {
+  const code = cmdCodeFor(target);
+  if (!code) {
+    throw new Error(`Unsupported command: ${formatCmdTarget(target)}`);
+  }
+  const postCount = code === "slof" ? 2 : 1;
+  const url2 = `${CMD_BASE_URL}/api/trigger-${target.room}-${target.device}/${target.state}`;
+  for (let attempt = 0; attempt < postCount; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 5e3));
+    }
+    const response = await fetch(url2, { method: "POST" });
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status})`);
+    }
+  }
+  return `Triggered ${formatCmdTarget(target)}`;
+}
+async function triggerWfhToggle() {
+  const wfh = await toggleWfhStatus();
+  return { message: formatWfhLine(wfh), wfh };
+}
+function buildCmdMenuLines(step, selection, message) {
+  if (step === "running") {
+    return ["=== Commands ===", "", "Running...", ""];
+  }
+  if (step === "done" || step === "error") {
+    return ["=== Commands ===", "", message ?? "", "", "any key  back"];
+  }
+  if (step === "top") {
+    return [
+      "=== Commands ===",
+      "",
+      "  w  work from home",
+      "",
+      "Room:",
+      "  s  shed",
+      "  b  bedroom",
+      "",
+      "q  cancel"
+    ];
+  }
+  const room = selection.room;
+  if (!room) {
+    return ["=== Commands ===", "", "Room missing", "", "q  cancel"];
+  }
+  if (step === "device") {
+    const deviceLines = devicesForRoom(room).map(
+      (device2) => `  ${DEVICE_KEYS[device2]}  ${DEVICE_LABELS[device2]}`
+    );
+    return [
+      "=== Commands ===",
+      "",
+      `Room: ${ROOM_LABELS[room]}`,
+      "",
+      "Device:",
+      ...deviceLines,
+      "",
+      "q  cancel"
+    ];
+  }
+  const device = selection.device;
+  if (!device) {
+    return ["=== Commands ===", "", "Device missing", "", "q  cancel"];
+  }
+  return [
+    "=== Commands ===",
+    "",
+    `Room: ${ROOM_LABELS[room]}`,
+    `Device: ${DEVICE_LABELS[device]}`,
+    "",
+    "State:",
+    "  o  on",
+    "  f  off",
+    "",
+    "q  cancel"
+  ];
 }
 
 // lib/moneyApi.ts
@@ -16874,7 +17109,6 @@ var STATUS_SHORTCUTS = [
   { key: "s", label: "solar", cmd: "solar" },
   { key: "w", label: "weather", cmd: "w" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "c", label: "cric", cmd: "cric" },
   { key: "f", label: "footy", cmd: "ball" },
   { key: "d", label: "dates", cmd: "cal" },
   { key: "b", label: "bdays", cmd: "bday" }
@@ -16887,7 +17121,7 @@ function statusShortcutForKey(key) {
 }
 function statusShortcutFooter() {
   const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
-  return `${shortcuts}  q:quit`;
+  return `${shortcuts}  c:cmd  q:quit`;
 }
 function statusShortcutFooterWidth() {
   return statusShortcutFooter().length;
@@ -16900,45 +17134,6 @@ function runStatusShortcut(shortcut) {
     description: shortcut.label,
     extraArgs: shortcut.extraArgs
   });
-}
-
-// lib/wfhApi.ts
-var WFH_API_URL = "http://emgeebee.buzz:1880/api/wfh";
-var WfhResponseSchema = external_exports.object({
-  wfh: external_exports.preprocess((value) => {
-    if (value === "true") return true;
-    if (value === "false") return false;
-    return value;
-  }, external_exports.boolean())
-});
-async function fetchWfhStatus() {
-  try {
-    const response = await fetch(WFH_API_URL, {
-      headers: {
-        Accept: "application/json"
-      }
-    });
-    if (!response.ok) {
-      return null;
-    }
-    return WfhResponseSchema.parse(await response.json()).wfh;
-  } catch {
-    return null;
-  }
-}
-var UK_TZ6 = "Europe/London";
-function houseSectionLabel(now, wfh) {
-  const weekday = now.toLocaleDateString("en-GB", {
-    weekday: "long",
-    timeZone: UK_TZ6
-  }).toLowerCase();
-  if (weekday === "saturday" || weekday === "sunday") {
-    return "house (weekend)";
-  }
-  if (wfh === true) {
-    return "house (WFH)";
-  }
-  return "house (office)";
 }
 
 // lib/wApi.ts
@@ -17287,12 +17482,14 @@ async function buildFullWeatherLines(data, requestedPostcode) {
 }
 function withWeatherPanelCountdown(lines, countdown) {
   if (!countdown || lines.length === 0) return lines;
-  const title = lines[0].replace(/ ===$/, `, Solar in ${countdown.seconds}, n) ===`);
+  const suffix = countdown.paused ? "Solar paused, n" : `Solar in ${countdown.seconds}, n`;
+  const title = lines[0].replace(/ ===$/, `, ${suffix}) ===`);
   return [title, ...lines.slice(1)];
 }
 
 // lib/terminal.ts
 var import_string_width4 = __toESM(require_string_width());
+var import_strip_ansi3 = __toESM(require_strip_ansi());
 var ANSI_ENTER_ALTERNATE_SCREEN = "\x1B[?1049h";
 var ANSI_LEAVE_ALTERNATE_SCREEN = "\x1B[?1049l";
 var ANSI_CLEAR_SCREEN = "\x1B[2J";
@@ -17300,27 +17497,56 @@ var ANSI_HOME = "\x1B[H";
 var ANSI_ERASE_TO_END = "\x1B[J";
 var ANSI_HIDE_CURSOR = "\x1B[?25l";
 var ANSI_SHOW_CURSOR = "\x1B[?25h";
-var ANSI_REGEX3 = /\x1b\[[0-9;]*m/g;
+var ANSI_SEQUENCE = /^\x1b\[[0-9;]*m/;
+var ANSI_RESET8 = "\x1B[0m";
 function visibleLength4(value) {
-  return (0, import_string_width4.default)(value.replace(ANSI_REGEX3, ""));
+  return (0, import_string_width4.default)((0, import_strip_ansi3.default)(value));
 }
-function truncateToWidth(line, maxWidth) {
-  const plain = line.replace(ANSI_REGEX3, "");
-  if ((0, import_string_width4.default)(plain) <= maxWidth) return line;
-  let result = "";
-  let width = 0;
+function nextGrapheme(value) {
   try {
     const segmenter = new Intl.Segmenter(void 0, { granularity: "grapheme" });
-    for (const { segment } of segmenter.segment(plain)) {
-      const segmentWidth = (0, import_string_width4.default)(segment);
-      if (width + segmentWidth > maxWidth) break;
-      result += segment;
-      width += segmentWidth;
-    }
-    return result;
+    return [...segmenter.segment(value)][0]?.segment ?? value[0] ?? "";
   } catch {
-    return plain.slice(0, maxWidth);
+    return value[0] ?? "";
   }
+}
+function truncateToWidth(line, maxWidth) {
+  if (visibleLength4(line) <= maxWidth) return line;
+  let index = 0;
+  let width = 0;
+  let result = "";
+  let usedAnsi = false;
+  while (index < line.length && width < maxWidth) {
+    const ansiMatch = line.slice(index).match(ANSI_SEQUENCE);
+    if (ansiMatch) {
+      result += ansiMatch[0];
+      if (ansiMatch[0] !== ANSI_RESET8) usedAnsi = true;
+      index += ansiMatch[0].length;
+      continue;
+    }
+    const grapheme = nextGrapheme((0, import_strip_ansi3.default)(line.slice(index)));
+    if (!grapheme) break;
+    const graphemeWidth = (0, import_string_width4.default)(grapheme);
+    if (width + graphemeWidth > maxWidth) break;
+    let remaining = grapheme.length;
+    while (remaining > 0 && index < line.length) {
+      const inlineAnsi = line.slice(index).match(ANSI_SEQUENCE);
+      if (inlineAnsi) {
+        result += inlineAnsi[0];
+        if (inlineAnsi[0] !== ANSI_RESET8) usedAnsi = true;
+        index += inlineAnsi[0].length;
+        continue;
+      }
+      result += line[index];
+      index += 1;
+      remaining -= 1;
+    }
+    width += graphemeWidth;
+  }
+  if (usedAnsi && !result.endsWith(ANSI_RESET8)) {
+    result += ANSI_RESET8;
+  }
+  return result;
 }
 function boxOuterWidth(innerWidth) {
   return innerWidth + 4;
@@ -17339,34 +17565,10 @@ function layoutWidth(outerWidths, gap = WIDE_LAYOUT_GAP) {
   if (outerWidths.length === 0) return 0;
   return outerWidths.reduce((sum, width) => sum + width, 0) + gap * (outerWidths.length - 1);
 }
-function isSportsWideTerminal(leftOuter, weatherInner, sportsInner) {
+function statusLayoutInnerWidth() {
   const columns = process.stdout.columns ?? 80;
-  const needed = layoutWidth([
-    leftOuter,
-    boxOuterWidth(weatherInner),
-    boxOuterWidth(sportsInner)
-  ]);
-  return columns >= needed;
-}
-function isWeatherWideTerminal(leftOuter, weatherInner) {
-  const columns = process.stdout.columns ?? 80;
-  return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
-}
-function isMobileStatusTerminal(statusInnerWidth, calendarInnerWidth, weatherLines, solarLines) {
-  const calInner = calendarInnerWidth ?? statusInnerWidth;
-  const leftOuter = Math.max(boxOuterWidth(statusInnerWidth), boxOuterWidth(calInner));
-  const layoutLines = [...weatherLines || [], ...solarLines || []];
-  const weatherContent = layoutLines.reduce(
-    (max, line) => Math.max(max, visibleLength4(line)),
-    0
-  );
-  const weatherInner = Math.max(statusInnerWidth, weatherContent);
-  return !isWeatherWideTerminal(leftOuter, weatherInner);
-}
-function statusBoxInnerWidth(preferredInnerWidth) {
-  const columns = process.stdout.columns ?? 80;
-  const maxInner = Math.max(columns - 4, 20);
-  return Math.min(preferredInnerWidth, maxInner);
+  const fixed = Math.max(statusCalendarInnerWidth(), statusShortcutFooterWidth());
+  return Math.min(fixed, Math.max(columns - 4, 20));
 }
 function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullHeight = false) {
   const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
@@ -17443,17 +17645,6 @@ function stackBoxesVertically(boxes) {
   }
   return rows;
 }
-function weatherBoxInnerWidth(weatherLines, statusInnerWidth, leftOuter, includeSportsColumn, sportsInnerWidth) {
-  const columns = process.stdout.columns ?? 80;
-  const contentWidth = weatherLines.reduce(
-    (max, line) => Math.max(max, visibleLength4(line)),
-    0
-  );
-  const sportsOuter = includeSportsColumn ? WIDE_LAYOUT_GAP + boxOuterWidth(sportsInnerWidth) : 0;
-  const availableOuter = columns - leftOuter - WIDE_LAYOUT_GAP - sportsOuter;
-  const maxInner = Math.max(statusInnerWidth, availableOuter - 4);
-  return Math.min(Math.max(contentWidth, statusInnerWidth), maxInner);
-}
 function enterFullscreen() {
   if (!process.stdout.isTTY) return;
   process.stdout.write(`${ANSI_ENTER_ALTERNATE_SCREEN}${ANSI_CLEAR_SCREEN}${ANSI_HOME}${ANSI_HIDE_CURSOR}`);
@@ -17471,6 +17662,71 @@ function writeFullscreenScreen(lines) {
 `);
   }
   process.stdout.write(ANSI_ERASE_TO_END);
+}
+function writeCenteredBox(lines, innerWidth) {
+  const box = boxLines(lines, innerWidth);
+  const columns = process.stdout.columns ?? 80;
+  const rows = process.stdout.rows ?? 24;
+  const centered = box.map((line) => {
+    const pad = Math.max(0, Math.floor((columns - visibleLength4(line)) / 2));
+    return `${" ".repeat(pad)}${line}`;
+  });
+  const topPad = Math.max(0, Math.floor((rows - centered.length) / 2));
+  writeFullscreenScreen([...Array(topPad).fill(""), ...centered]);
+}
+var MIN_CALENDAR_STACK_LINES = 4;
+function shouldStackCalendarUnderStatus(statusLineCount) {
+  return maxCalendarContentLines(statusLineCount, true) >= MIN_CALENDAR_STACK_LINES;
+}
+function resolveStatusLayoutTier(statusLineCount, innerWidth, panels) {
+  const columns = process.stdout.columns ?? 80;
+  const panelInner = panels.calendarInnerWidth ?? innerWidth;
+  const leftOuter = boxOuterWidth(panelInner);
+  const middleLayoutLines = middlePanelLayoutLines(panels);
+  const hasMiddle = middleLayoutLines.length > 0;
+  const hasSports = Boolean(
+    panels.cricLines && panels.cricLines.length > 0 || panels.footyLines && panels.footyLines.length > 0
+  );
+  if (!hasMiddle && !hasSports) {
+    return shouldStackCalendarUnderStatus(statusLineCount) ? "stacked" : "compact";
+  }
+  const sportsOuter = boxOuterWidth(panelInner);
+  const fourColWidth = layoutWidth([
+    leftOuter,
+    boxOuterWidth(panelInner),
+    boxOuterWidth(panelInner),
+    sportsOuter
+  ]);
+  const threeColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner), sportsOuter]);
+  const twoColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner)]);
+  if (hasMiddle && hasSports && columns >= fourColWidth) return "full";
+  if (hasMiddle && hasSports && columns >= threeColWidth) return "threeColumn";
+  if (columns >= twoColWidth && (hasMiddle || hasSports)) return "twoColumn";
+  return shouldStackCalendarUnderStatus(statusLineCount) ? "stacked" : "compact";
+}
+function maxRotatingPanelBodyLines(innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth) {
+  const terminalRows = process.stdout.rows ?? 24;
+  const panelInner = calendarInnerWidth ?? innerWidth;
+  let used = boxLines(statusLines, panelInner).length;
+  if (stackCalendar && calendarLines && calendarLines.length > 0) {
+    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+    if (calendarContent.length > 0) {
+      used += boxLines(calendarContent, panelInner).length;
+    }
+  }
+  return Math.max(1, terminalRows - used - 4);
+}
+function maxCompactPanelBodyLines(tier, innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth) {
+  if (tier === "twoColumn" || tier === "threeColumn" || tier === "full") {
+    return maxFootballBodyLines(innerWidth, null);
+  }
+  return maxRotatingPanelBodyLines(
+    innerWidth,
+    statusLines,
+    calendarLines,
+    stackCalendar,
+    calendarInnerWidth
+  );
 }
 function middlePanelReady(lines, marker) {
   return Boolean(lines && lines.length > 0 && lines[0]?.startsWith(marker));
@@ -17500,49 +17756,121 @@ function maxFootballBodyLines(innerWidth, otherPanelLines, terminalRows = proces
   const otherBoxRows = otherPanelLines && otherPanelLines.length > 0 ? boxLines(otherPanelLines, innerWidth).length : 0;
   return Math.max(1, terminalRows - boxBorderRows - panelHeaderRows - otherBoxRows);
 }
-function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
-  const { cricLines, footyLines, calendarLines, calendarInnerWidth, weatherLines, solarLines, middleDisplay, sportsDisplay } = panels;
-  const calInner = calendarInnerWidth ?? innerWidth;
-  const middleLayoutLines = middlePanelLayoutLines(panels);
-  if (isMobileStatusTerminal(innerWidth, calInner, weatherLines, solarLines)) {
-    writeFullscreenScreen(boxLines(statusLines, statusBoxInnerWidth(innerWidth)));
-    return;
+function resolveCompactPanelLines(panels) {
+  switch (panels.compactDisplay) {
+    case "weather":
+      return panels.weatherLines ?? null;
+    case "solar":
+      return panels.solarLines ?? null;
+    case "cric":
+      return panels.cricLines ?? null;
+    case "footy":
+      return panels.footyLines ?? null;
+    case "calendar":
+      return panels.calendarLines ?? null;
+    default:
+      return null;
   }
-  const statusBox = boxLines(statusLines, innerWidth);
+}
+function buildLeftColumn(statusLines, innerWidth, panels) {
+  const panelInner = panels.calendarInnerWidth ?? innerWidth;
+  const statusBox = boxLines(statusLines, panelInner);
   const leftStack = [statusBox];
-  if (calendarLines && calendarLines.length > 0) {
-    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+  const stackCalendar = panels.stackCalendar ?? shouldStackCalendarUnderStatus(statusLines.length);
+  if (stackCalendar && panels.calendarLines && panels.calendarLines.length > 0) {
+    const calendarContent = fitCalendarContentLines(
+      panels.calendarLines,
+      statusLines.length,
+      true
+    );
     if (calendarContent.length > 0) {
-      leftStack.push(boxLines(calendarContent, calInner));
+      leftStack.push(boxLines(calendarContent, panelInner));
     }
   }
-  const leftOuter = Math.max(boxOuterWidth(innerWidth), boxOuterWidth(calInner));
-  const leftColumn = stackBoxesVertically(leftStack);
-  const middleLines = resolveMiddlePanelLines(panels);
-  const hasMiddle = Boolean(middleLines && middleLines.length > 0);
+  return {
+    column: stackBoxesVertically(leftStack),
+    outer: boxOuterWidth(panelInner)
+  };
+}
+function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
+  const tier = panels.layoutTier ?? resolveStatusLayoutTier(statusLines.length, innerWidth, panels);
+  const stackCalendar = panels.stackCalendar ?? shouldStackCalendarUnderStatus(statusLines.length);
+  const { column: leftColumn, outer: leftOuter } = buildLeftColumn(statusLines, innerWidth, {
+    ...panels,
+    stackCalendar
+  });
+  if (tier === "compact" || tier === "stacked") {
+    const compactLines = resolveCompactPanelLines(panels);
+    if (compactLines && compactLines.length > 0) {
+      writeFullscreenScreen(
+        stackBoxesVertically([leftColumn, boxLines(compactLines, innerWidth)])
+      );
+      return;
+    }
+    writeFullscreenScreen(leftColumn);
+    return;
+  }
+  const { cricLines, footyLines, weatherLines, solarLines, middleDisplay, sportsDisplay } = panels;
+  const middleLayoutLines = middlePanelLayoutLines(panels);
+  const hasWeather = middlePanelReady(weatherLines, "=== Weather");
+  const hasSolar = middlePanelReady(solarLines, "=== Solar");
   const hasSports = Boolean(
     cricLines && cricLines.length > 0 || footyLines && footyLines.length > 0
   );
-  if (!hasMiddle) {
+  if (tier === "twoColumn") {
+    const compactLines = resolveCompactPanelLines(panels);
+    if (compactLines && compactLines.length > 0) {
+      writeFullscreenScreen(
+        joinBoxedColumnsVariable(
+          [leftColumn, boxLines(compactLines, innerWidth)],
+          [leftOuter, boxOuterWidth(innerWidth)]
+        )
+      );
+      return;
+    }
     writeFullscreenScreen(leftColumn);
     return;
   }
-  const weatherInner = weatherBoxInnerWidth(
-    middleLayoutLines.length > 0 ? middleLayoutLines : middleLines,
-    innerWidth,
-    leftOuter,
-    hasSports,
-    innerWidth
-  );
-  const showSports = hasSports && isSportsWideTerminal(leftOuter, weatherInner, innerWidth);
-  const showWeatherMiddle = isWeatherWideTerminal(leftOuter, weatherInner);
-  if (!showWeatherMiddle) {
+  if (tier === "full") {
+    const columns2 = [leftColumn];
+    const outerWidths2 = [leftOuter];
+    if (hasWeather && weatherLines) {
+      columns2.push(boxLines(weatherLines, innerWidth));
+      outerWidths2.push(boxOuterWidth(innerWidth));
+    }
+    if (hasSolar && solarLines) {
+      columns2.push(boxLines(solarLines, innerWidth));
+      outerWidths2.push(boxOuterWidth(innerWidth));
+    }
+    if (hasSports) {
+      const sportsStack = [];
+      if (cricLines && cricLines.length > 0) {
+        sportsStack.push(boxLines(cricLines, innerWidth));
+      }
+      if (footyLines && footyLines.length > 0) {
+        sportsStack.push(boxLines(footyLines, innerWidth));
+      }
+      if (sportsStack.length > 0) {
+        columns2.push(stackBoxesVertically(sportsStack));
+        outerWidths2.push(boxOuterWidth(innerWidth));
+      }
+    }
+    writeFullscreenScreen(joinBoxedColumnsVariable(columns2, outerWidths2));
+    return;
+  }
+  const middleLines = resolveMiddlePanelLines(panels);
+  const hasMiddle = Boolean(middleLines && middleLines.length > 0);
+  if (!hasMiddle && !hasSports) {
     writeFullscreenScreen(leftColumn);
     return;
   }
-  const columns = [leftColumn, boxLines(middleLines, weatherInner)];
-  const outerWidths = [leftOuter, boxOuterWidth(weatherInner)];
-  if (showSports) {
+  const columns = [leftColumn];
+  const outerWidths = [leftOuter];
+  if (hasMiddle && middleLines) {
+    columns.push(boxLines(middleLines, innerWidth));
+    outerWidths.push(boxOuterWidth(innerWidth));
+  }
+  if (hasSports) {
     const sportsStack = [];
     const show = sportsDisplay ?? "both";
     if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
@@ -17556,7 +17884,7 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
       outerWidths.push(boxOuterWidth(innerWidth));
     }
   }
-  writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths, WIDE_LAYOUT_GAP));
+  writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
 }
 
 // lib/terminalInput.ts
@@ -17656,7 +17984,7 @@ function usage() {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, q to quit.");
+  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, c cmd menu, p pause, n next, q quit.");
   console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
@@ -17749,14 +18077,64 @@ var SPORTS_PANEL_NAMES = {
   cric: "Cricket",
   footy: "Football"
 };
+var COMPACT_PANEL_LABELS = {
+  weather: "Weather",
+  solar: "Solar",
+  cric: "Cricket",
+  footy: "Football",
+  calendar: "Dates"
+};
+function buildCompactRotationPool(stackCalendar, calendarLines, hasWeather, hasSolar, hasCric, hasFooty) {
+  const pool = [];
+  if (!stackCalendar && calendarLines && calendarLines.length > 0) pool.push("calendar");
+  if (hasWeather) pool.push("weather");
+  if (hasFooty) pool.push("footy");
+  if (hasCric) pool.push("cric");
+  if (hasSolar) pool.push("solar");
+  return pool;
+}
+function rotationNextLabel(next, seconds, paused) {
+  return paused ? `${next} paused` : `${next} in ${seconds}`;
+}
+function withCompactPanelCountdown(lines, countdown) {
+  if (!countdown || lines.length === 0) return lines;
+  const label = COMPACT_PANEL_LABELS[countdown.next];
+  const suffix = rotationNextLabel(label, countdown.seconds, countdown.paused ?? false);
+  const line = lines[0];
+  if (line.startsWith("\u2500\u2500 ") && line.endsWith(" \u2500\u2500")) {
+    const name = line.slice(3, -3);
+    return [`\u2500\u2500 ${name} (${suffix}, n) \u2500\u2500`, ...lines.slice(1)];
+  }
+  const title = line.replace(/ ===$/, ` (${suffix}, n) ===`);
+  return [title, ...lines.slice(1)];
+}
+function usesCompactRotation(tier) {
+  return tier === "compact" || tier === "stacked" || tier === "twoColumn";
+}
+function isFootyPanelVisible(tier, hasFooty, compactDisplay, sportsDisplay) {
+  if (!hasFooty) return false;
+  if (usesCompactRotation(tier)) {
+    return compactDisplay === "footy";
+  }
+  if (tier === "threeColumn") {
+    return sportsDisplay === "footy";
+  }
+  if (tier === "full") {
+    return sportsDisplay === "both" || sportsDisplay === "footy";
+  }
+  return false;
+}
 function sportsPanelHasContent(lines) {
   if (lines.length === 0 || lines[0] === "-" || lines[0] === "none") return false;
   if (lines.length === 1 && lines[0] === "none today") return false;
   return true;
 }
+function cricketPanelAvailable(lines) {
+  return lines.length > 0 && lines[0] !== "-";
+}
 function buildSportsPanelLines(panel, lines, countdown) {
   const title = SPORTS_PANEL_NAMES[panel];
-  const heading = countdown ? `=== ${title} (${SPORTS_PANEL_NAMES[countdown.next]} in ${countdown.seconds}, n) ===` : sectionDivider(title);
+  const heading = countdown ? `=== ${title} (${rotationNextLabel(SPORTS_PANEL_NAMES[countdown.next], countdown.seconds, countdown.paused ?? false)}, n) ===` : sectionDivider(title);
   const body = [heading, "", ...lines];
   return body;
 }
@@ -17773,7 +18151,7 @@ function solarSnapshotFromData(data, dayKey, now) {
 }
 function writeDisplay(statusLines, fullscreen, panels = {}) {
   if (fullscreen) {
-    writeFullscreenLines(statusLines, statusShortcutFooterWidth(), panels);
+    writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
     return;
   }
   for (const line of statusLines) {
@@ -17910,10 +18288,54 @@ function handleStatusKey(key) {
   if (key.char === "q") {
     return "quit";
   }
+  if (key.char === "c") {
+    return "cmd-menu";
+  }
   if (key.char === "n") {
     return "flip-next";
   }
+  if (key.char === "p") {
+    return "toggle-pause";
+  }
   return statusShortcutForKey(key.char);
+}
+function cmdMenuSelection(state) {
+  if (!state.active) return {};
+  if (state.step === "device" || state.step === "state") {
+    const selection = { room: state.room };
+    if (state.step === "state") {
+      selection.device = state.device;
+    }
+    return selection;
+  }
+  return {};
+}
+function renderCmdMenu(state) {
+  if (!state.active) return;
+  const step = state.step;
+  const message = state.step === "done" || state.step === "error" ? state.message : void 0;
+  writeCenteredBox(buildCmdMenuLines(step, cmdMenuSelection(state), message), CMD_MENU_INNER_WIDTH);
+}
+async function runCmdMenuAction(room, device, state, onUpdate) {
+  onUpdate({ active: true, step: "running" });
+  try {
+    const message = await triggerCmdTarget({ room, device, state });
+    onUpdate({ active: true, step: "done", message });
+  } catch (error51) {
+    const message = error51 instanceof Error ? error51.message : String(error51);
+    onUpdate({ active: true, step: "error", message });
+  }
+}
+async function runCmdMenuWfh(onUpdate, onWfhChanged) {
+  onUpdate({ active: true, step: "running" });
+  try {
+    const { message, wfh } = await triggerWfhToggle();
+    onWfhChanged(wfh);
+    onUpdate({ active: true, step: "done", message });
+  } catch (error51) {
+    const message = error51 instanceof Error ? error51.message : String(error51);
+    onUpdate({ active: true, step: "error", message });
+  }
 }
 async function runLive() {
   const location = resolveDefaultLocation();
@@ -17941,6 +18363,13 @@ async function runLive() {
   let lastSportsAlternateAt = Date.now();
   let middleAlternatePhase = "weather";
   let lastMiddleAlternateAt = Date.now();
+  let compactRotatePhase = "weather";
+  let lastCompactRotateAt = Date.now();
+  let rotationPaused = false;
+  let rotationPausedAt = 0;
+  let footyPanelWasVisible = null;
+  let footyRefreshGeneration = 0;
+  let cmdMenuState = { active: false };
   let runningCommand = false;
   let timer;
   let disableRawInput;
@@ -17958,64 +18387,124 @@ async function runLive() {
     yieldAverages
   });
   const render = () => {
+    if (cmdMenuState.active) {
+      renderCmdMenu(cmdMenuState);
+      return;
+    }
     const state = displayState();
-    const boxWidth = statusShortcutFooterWidth();
-    const calendarWidth = statusCalendarInnerWidth();
+    const panelWidth = statusLayoutInnerWidth();
     const statusLines = buildStatusLines(state);
     const calendarLines = calendarData ? buildStatusCalendarLines(
       calendarData.months,
       state.now,
       calendarData.colors,
       maxCalendarContentLines(statusLines.length, true),
-      calendarWidth
+      panelWidth
     ) : null;
-    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
-    const fittedFootyLines = fitFootballStatusLines(
-      footyLines,
-      maxFootballBodyLines(boxWidth, null)
+    const baseWeatherPanel = fullWeatherLines;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth) : [];
+    const hasWeather = isWeatherPanelReady(baseWeatherPanel);
+    const hasSolar = isSolarPanelReady(baseSolarPanel);
+    const hasCric = cricketPanelAvailable(cricLines);
+    const hasFootyRaw = sportsPanelHasContent(footyLines);
+    const stackCalendar = shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
+    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
+      calendarLines,
+      calendarInnerWidth: panelWidth,
+      weatherLines: hasWeather ? baseWeatherPanel : null,
+      solarLines: hasSolar ? baseSolarPanel : null,
+      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+      footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null
+    });
+    const maxFootyLines = maxCompactPanelBodyLines(
+      tier,
+      panelWidth,
+      statusLines,
+      calendarLines,
+      stackCalendar,
+      panelWidth
     );
-    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
-    const hasCric = sportsPanelHasContent(cricLines);
+    const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
+    const baseCricPanel = buildSportsPanelLines("cric", cricLines);
+    const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
+    const compactPool = buildCompactRotationPool(
+      stackCalendar,
+      calendarLines,
+      hasWeather,
+      hasSolar,
+      hasCric,
+      hasFooty
+    );
+    let compactDisplay;
+    let compactSwitchCountdown;
+    if (usesCompactRotation(tier) && compactPool.length > 0) {
+      if (!compactPool.includes(compactRotatePhase)) {
+        compactRotatePhase = compactPool[0];
+      }
+      if (compactPool.length > 1) {
+        const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+        if (!rotationPaused && nowMs - lastCompactRotateAt >= PANEL_ALTERNATE_MS) {
+          const index = compactPool.indexOf(compactRotatePhase);
+          compactRotatePhase = compactPool[(index + 1) % compactPool.length];
+          lastCompactRotateAt = nowMs;
+        }
+        compactDisplay = compactRotatePhase;
+        const secondsLeft = Math.max(
+          0,
+          Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastCompactRotateAt)) / 1e3)
+        );
+        const nextIndex = (compactPool.indexOf(compactRotatePhase) + 1) % compactPool.length;
+        compactSwitchCountdown = {
+          seconds: secondsLeft,
+          next: compactPool[nextIndex],
+          paused: rotationPaused
+        };
+      } else {
+        compactDisplay = compactPool[0];
+      }
+    }
     let sportsDisplay = "both";
     let sportsSwitchCountdown;
-    if (hasCric && hasFooty) {
-      const nowMs = Date.now();
-      if (nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
-        sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
-        lastSportsAlternateAt = nowMs;
+    if (tier === "threeColumn") {
+      if (hasCric && hasFooty) {
+        const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+        if (!rotationPaused && nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
+          sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+          lastSportsAlternateAt = nowMs;
+        }
+        sportsDisplay = sportsAlternatePhase;
+        const secondsLeft = Math.max(
+          0,
+          Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1e3)
+        );
+        sportsSwitchCountdown = {
+          seconds: secondsLeft,
+          next: sportsAlternatePhase === "cric" ? "footy" : "cric",
+          paused: rotationPaused
+        };
+      } else if (hasCric) {
+        sportsDisplay = "cric";
+      } else if (hasFooty) {
+        sportsDisplay = "footy";
       }
-      sportsDisplay = sportsAlternatePhase;
-      const secondsLeft = Math.max(
-        0,
-        Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1e3)
-      );
-      sportsSwitchCountdown = {
-        seconds: secondsLeft,
-        next: sportsAlternatePhase === "cric" ? "footy" : "cric"
-      };
-    } else if (hasCric) {
-      sportsDisplay = "cric";
-      sportsAlternatePhase = "cric";
-      lastSportsAlternateAt = Date.now();
-    } else if (hasFooty) {
-      sportsDisplay = "footy";
-      sportsAlternatePhase = "footy";
-      lastSportsAlternateAt = Date.now();
-    } else {
-      sportsAlternatePhase = "cric";
-      lastSportsAlternateAt = Date.now();
+    } else if (tier === "full") {
+      if (hasCric && hasFooty) {
+        sportsDisplay = "both";
+      } else if (hasCric) {
+        sportsDisplay = "cric";
+      } else if (hasFooty) {
+        sportsDisplay = "footy";
+      }
     }
-    const cricPanel = sportsDisplay === "cric" && sportsSwitchCountdown ? buildSportsPanelLines("cric", cricLines, sportsSwitchCountdown) : baseCricPanel;
-    const footyPanel = sportsDisplay === "footy" && sportsSwitchCountdown ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown) : baseFootyPanel;
-    const baseWeatherPanel = fullWeatherLines;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
-    const canAlternateMiddle = isWeatherPanelReady(baseWeatherPanel) && isSolarPanelReady(baseSolarPanel);
+    const cricPanel = tier === "threeColumn" && sportsDisplay === "cric" && sportsSwitchCountdown ? buildSportsPanelLines("cric", cricLines, sportsSwitchCountdown) : baseCricPanel;
+    const footyPanel = tier === "threeColumn" && sportsDisplay === "footy" && sportsSwitchCountdown ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown) : baseFootyPanel;
+    const canAlternateMiddle = hasWeather && hasSolar;
     let middleDisplay = "weather";
     let middleSwitchCountdown;
-    if (canAlternateMiddle) {
-      const nowMs = Date.now();
-      if (nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
+    if (tier === "threeColumn" && canAlternateMiddle) {
+      const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+      if (!rotationPaused && nowMs - lastMiddleAlternateAt >= PANEL_ALTERNATE_MS) {
         middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
         lastMiddleAlternateAt = nowMs;
       }
@@ -18026,39 +18515,69 @@ async function runLive() {
       );
       middleSwitchCountdown = {
         seconds: secondsLeft,
-        next: middleAlternatePhase === "weather" ? "solar" : "weather"
+        next: middleAlternatePhase === "weather" ? "solar" : "weather",
+        paused: rotationPaused
       };
-    } else {
-      middleAlternatePhase = "weather";
-      lastMiddleAlternateAt = Date.now();
-      if (isSolarPanelReady(baseSolarPanel) && !isWeatherPanelReady(baseWeatherPanel)) {
-        middleDisplay = "solar";
-      }
+    } else if (hasSolar && !hasWeather) {
+      middleDisplay = "solar";
     }
-    const weatherPanel = middleDisplay === "weather" && middleSwitchCountdown ? withWeatherPanelCountdown(baseWeatherPanel, {
+    const weatherPanel = tier === "threeColumn" && middleDisplay === "weather" && middleSwitchCountdown ? withWeatherPanelCountdown(baseWeatherPanel, {
       seconds: middleSwitchCountdown.seconds,
-      next: "solar"
+      next: "solar",
+      paused: middleSwitchCountdown.paused
     }) : baseWeatherPanel;
-    const solarPanel = middleDisplay === "solar" && middleSwitchCountdown && solarData ? buildSolarPanelLines(solarData, {
+    const solarPanel = tier === "threeColumn" && middleDisplay === "solar" && middleSwitchCountdown && solarData ? buildSolarPanelLines(solarData, {
       seconds: middleSwitchCountdown.seconds,
-      next: "weather"
-    }) : baseSolarPanel;
+      next: "weather",
+      paused: middleSwitchCountdown.paused
+    }, panelWidth) : baseSolarPanel;
+    const compactCountdown = compactSwitchCountdown;
+    const panelLines = (panel, lines, allowWide) => {
+      if (!lines.length) return null;
+      if (usesCompactRotation(tier)) {
+        if (compactDisplay !== panel) return null;
+        return withCompactPanelCountdown(lines, compactCountdown);
+      }
+      if (!allowWide) return null;
+      return lines;
+    };
     writeDisplay(statusLines, true, {
+      layoutTier: tier,
+      stackCalendar,
+      compactDisplay,
       calendarLines,
-      calendarInnerWidth: calendarWidth,
-      weatherLines: isWeatherPanelReady(weatherPanel) ? weatherPanel : null,
-      solarLines: isSolarPanelReady(solarPanel) ? solarPanel : null,
-      middleDisplay,
-      cricLines: cricPanel,
-      footyLines: footyPanel,
-      sportsDisplay
+      calendarInnerWidth: panelWidth,
+      weatherLines: panelLines("weather", weatherPanel, tier === "full" || tier === "threeColumn"),
+      solarLines: panelLines("solar", solarPanel, tier === "full" || tier === "threeColumn"),
+      middleDisplay: tier === "threeColumn" ? middleDisplay : void 0,
+      cricLines: panelLines("cric", cricPanel, tier === "full" || tier === "threeColumn"),
+      footyLines: panelLines("footy", footyPanel, tier === "full" || tier === "threeColumn"),
+      sportsDisplay: tier === "threeColumn" || tier === "full" ? sportsDisplay : void 0
     });
+    const footyVisible = isFootyPanelVisible(tier, hasFooty, compactDisplay, sportsDisplay);
+    if (footyVisible && footyPanelWasVisible === false) {
+      void refreshFootball(trackedDate);
+    }
+    footyPanelWasVisible = footyVisible;
   };
   const refreshWeather = async () => {
     fullWeatherLines = await loadFullWeatherLines(location);
   };
   const refreshCalendar = async (now) => {
     calendarData = await loadStatusCalendarData(now);
+  };
+  const refreshFootball = async (ymd) => {
+    const generation = ++footyRefreshGeneration;
+    try {
+      const lines = await loadFootballStatusLines(ymd);
+      if (generation !== footyRefreshGeneration) return;
+      footyLines = lines;
+      render();
+    } catch {
+      if (generation !== footyRefreshGeneration) return;
+      footyLines = ["-"];
+      render();
+    }
   };
   const refreshSports = async (ymd) => {
     ({ cricLines, footyLines } = await loadSportsLines(ymd));
@@ -18083,14 +18602,133 @@ async function runLive() {
     render();
     timer = setInterval(tick, TICK_MS);
   };
+  const closeCmdMenu = () => {
+    cmdMenuState = { active: false };
+    render();
+  };
+  const openCmdMenu = () => {
+    cmdMenuState = { active: true, step: "top" };
+    render();
+  };
+  const handleCmdMenuKey = (key) => {
+    if (!cmdMenuState.active) return;
+    if (key.type === "ctrl-c" || key.type === "escape") {
+      closeCmdMenu();
+      return;
+    }
+    if (cmdMenuState.step === "running") {
+      return;
+    }
+    if (cmdMenuState.step === "done" || cmdMenuState.step === "error") {
+      if (key.type === "char" || key.type === "enter") {
+        closeCmdMenu();
+      }
+      return;
+    }
+    if (key.type !== "char") return;
+    if (key.char === "q") {
+      closeCmdMenu();
+      return;
+    }
+    if (cmdMenuState.step === "top") {
+      if (isWfhMenuKey(key.char)) {
+        void runCmdMenuWfh(
+          (next) => {
+            cmdMenuState = next;
+            render();
+          },
+          (nextWfh) => {
+            wfh = nextWfh;
+          }
+        );
+        return;
+      }
+      const room2 = roomForKey(key.char);
+      if (!room2) return;
+      cmdMenuState = { active: true, step: "device", room: room2 };
+      render();
+      return;
+    }
+    if (cmdMenuState.step === "device") {
+      const device2 = deviceForKey(key.char, cmdMenuState.room);
+      if (!device2) return;
+      cmdMenuState = {
+        active: true,
+        step: "state",
+        room: cmdMenuState.room,
+        device: device2
+      };
+      render();
+      return;
+    }
+    const state = stateForKey(key.char);
+    if (!state) return;
+    const { room, device } = cmdMenuState;
+    void runCmdMenuAction(room, device, state, (next) => {
+      cmdMenuState = next;
+      render();
+    });
+  };
+  const toggleRotationPause = () => {
+    if (rotationPaused) {
+      const pausedDuration = Date.now() - rotationPausedAt;
+      lastCompactRotateAt += pausedDuration;
+      lastSportsAlternateAt += pausedDuration;
+      lastMiddleAlternateAt += pausedDuration;
+      rotationPaused = false;
+    } else {
+      rotationPausedAt = Date.now();
+      rotationPaused = true;
+    }
+    render();
+  };
   const flipRotatingPanels = () => {
     const nowMs = Date.now();
-    if (sportsPanelHasContent(cricLines) && sportsPanelHasContent(footyLines)) {
+    if (rotationPaused) {
+      rotationPausedAt = nowMs;
+    }
+    const state = displayState();
+    const panelWidth = statusLayoutInnerWidth();
+    const statusLines = buildStatusLines(state);
+    const calendarLines = calendarData ? buildStatusCalendarLines(
+      calendarData.months,
+      state.now,
+      calendarData.colors,
+      maxCalendarContentLines(statusLines.length, true),
+      panelWidth
+    ) : null;
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth) : [];
+    const hasWeather = isWeatherPanelReady(fullWeatherLines);
+    const hasSolar = isSolarPanelReady(baseSolarPanel);
+    const hasCric = cricketPanelAvailable(cricLines);
+    const hasFooty = sportsPanelHasContent(footyLines);
+    const stackCalendar = shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
+    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
+      calendarLines,
+      calendarInnerWidth: panelWidth,
+      weatherLines: hasWeather ? fullWeatherLines : null,
+      solarLines: hasSolar ? baseSolarPanel : null,
+      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+      footyLines: hasFooty ? buildSportsPanelLines("footy", footyLines) : null
+    });
+    const compactPool = buildCompactRotationPool(
+      stackCalendar,
+      calendarLines,
+      hasWeather,
+      hasSolar,
+      hasCric,
+      hasFooty
+    );
+    if (usesCompactRotation(tier) && compactPool.length > 1) {
+      const index = compactPool.indexOf(compactRotatePhase);
+      compactRotatePhase = compactPool[(index + 1) % compactPool.length];
+      lastCompactRotateAt = nowMs;
+    }
+    if (tier === "threeColumn" && hasCric && hasFooty) {
       sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
       lastSportsAlternateAt = nowMs;
     }
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData) : [];
-    if (isWeatherPanelReady(fullWeatherLines) && isSolarPanelReady(baseSolarPanel)) {
+    if (tier === "threeColumn" && hasWeather && hasSolar) {
       middleAlternatePhase = middleAlternatePhase === "weather" ? "solar" : "weather";
       lastMiddleAlternateAt = nowMs;
     }
@@ -18099,13 +18737,25 @@ async function runLive() {
   const onKeys = (keys) => {
     if (runningCommand) return;
     for (const key of keys) {
+      if (cmdMenuState.active) {
+        handleCmdMenuKey(key);
+        return;
+      }
       const action = handleStatusKey(key);
       if (action === "quit") {
         stop();
         return;
       }
+      if (action === "cmd-menu") {
+        openCmdMenu();
+        return;
+      }
       if (action === "flip-next") {
         flipRotatingPanels();
+        return;
+      }
+      if (action === "toggle-pause") {
+        toggleRotationPause();
         return;
       }
       if (action) {

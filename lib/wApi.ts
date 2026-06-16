@@ -478,9 +478,12 @@ export async function buildFullWeatherLines(
 
 export function withWeatherPanelCountdown(
   lines: string[],
-  countdown?: { seconds: number; next: "solar" },
+  countdown?: { seconds: number; next: "solar"; paused?: boolean },
 ): string[] {
   if (!countdown || lines.length === 0) return lines;
-  const title = lines[0].replace(/ ===$/, `, Solar in ${countdown.seconds}, n) ===`);
+  const suffix = countdown.paused
+    ? "Solar paused, n"
+    : `Solar in ${countdown.seconds}, n`;
+  const title = lines[0].replace(/ ===$/, `, ${suffix}) ===`);
   return [title, ...lines.slice(1)];
 }

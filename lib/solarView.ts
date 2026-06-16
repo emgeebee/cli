@@ -286,19 +286,35 @@ function powerRowForValue(value: number): number {
   );
 }
 
-function renderPowerGraph(readings: PowerReading[]): string[] {
+const POWER_GRAPH_LABEL_PREFIX_WIDTH = 8;
+const POWER_GRAPH_COLUMN_WIDTH = 2;
+
+function maxPowerGraphColumns(maxLineWidth?: number): number {
+  if (maxLineWidth == null) return POWER_HISTORY_HOURS;
+  return Math.max(
+    1,
+    Math.floor((maxLineWidth - POWER_GRAPH_LABEL_PREFIX_WIDTH) / POWER_GRAPH_COLUMN_WIDTH),
+  );
+}
+
+function renderPowerGraph(readings: PowerReading[], maxLineWidth?: number): string[] {
   const { firstHour, series } = buildHourlyPowerSeries(readings);
   const values = series.filter((value): value is number => value != null);
   if (values.length === 0) {
     return [`No power readings in the last ${POWER_HISTORY_HOURS} available hours.`];
   }
 
+  const maxColumns = maxPowerGraphColumns(maxLineWidth);
+  const startCol = Math.max(0, series.length - maxColumns);
+  const displaySeries = series.slice(startCol);
+  const displayFirstHour = firstHour + startCol * HOUR_MS;
+
   const grid = Array.from({ length: POWER_CHART_HEIGHT }, () =>
-    Array.from({ length: series.length }, () => "  "),
+    Array.from({ length: displaySeries.length }, () => "  "),
   );
 
-  for (let col = 0; col < series.length; col += 1) {
-    const value = series[col];
+  for (let col = 0; col < displaySeries.length; col += 1) {
+    const value = displaySeries[col];
     if (value == null) continue;
     grid[powerRowForValue(value)][col] = formatColoredPowerPoint(value);
   }
@@ -309,10 +325,10 @@ function renderPowerGraph(readings: PowerReading[]): string[] {
     lines.push(`${formatWatts(labelValue).padStart(6)} |${grid[row].join("")}`);
   }
 
-  lines.push(`       +${"-".repeat(series.length * 2)}`);
-  const labelChars = Array(series.length * 2).fill(" ");
-  for (let col = 0; col < series.length; col += 6) {
-    const label = formatHourLabel(firstHour + col * HOUR_MS);
+  lines.push(`       +${"-".repeat(displaySeries.length * 2)}`);
+  const labelChars = Array(displaySeries.length * 2).fill(" ");
+  for (let col = 0; col < displaySeries.length; col += 6) {
+    const label = formatHourLabel(displayFirstHour + col * HOUR_MS);
     const pos = col * 2;
     for (let idx = 0; idx < label.length && pos + idx < labelChars.length; idx += 1) {
       labelChars[pos + idx] = label[idx] || " ";
@@ -322,7 +338,7 @@ function renderPowerGraph(readings: PowerReading[]): string[] {
   return lines;
 }
 
-function buildSolarViewBody(data: SolarResponse): string[] {
+function buildSolarViewBody(data: SolarResponse, maxLineWidth?: number): string[] {
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
@@ -340,18 +356,21 @@ function buildSolarViewBody(data: SolarResponse): string[] {
   );
   lines.push("");
   lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
-  lines.push(...renderPowerGraph(powerAvgReadings));
+  lines.push(...renderPowerGraph(powerAvgReadings, maxLineWidth));
   return lines;
 }
 
 export function buildSolarPanelLines(
   data: SolarResponse,
-  countdown?: { seconds: number; next: "weather" },
+  countdown?: { seconds: number; next: "weather"; paused?: boolean },
+  maxLineWidth?: number,
 ): string[] {
   const title = countdown
-    ? `=== Solar (Weather in ${countdown.seconds}, n) ===`
+    ? countdown.paused
+      ? "=== Solar (Weather paused, n) ==="
+      : `=== Solar (Weather in ${countdown.seconds}, n) ===`
     : "=== Solar ===";
-  return [title, "", ...buildSolarViewBody(data)];
+  return [title, "", ...buildSolarViewBody(data, maxLineWidth)];
 }
 
 export function buildSolarCliLines(data: SolarResponse): string[] {

@@ -338,6 +338,44 @@ function fixtureHeaderLine(event: CricketEvent, ymd: string): string {
   ].join(" | ");
 }
 
+const STATUS_CRICKET_PAD_DAYS = 7;
+
+function shiftYmd(ymd: string, days: number): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  const y = Number.parseInt(m[1], 10);
+  const mo = Number.parseInt(m[2], 10) - 1;
+  const d = Number.parseInt(m[3], 10);
+  const date = new Date(Date.UTC(y, mo, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function eventActiveOnDate(event: CricketEvent, ymd: string): boolean {
+  const start = event.matchDateSummary?.startDate;
+  const end = event.matchDateSummary?.endDate;
+  if (start && end && ymd >= start && ymd <= end) return true;
+  if (start && !end && start === ymd) return true;
+  const raw = event.startDateTime;
+  if (!raw) return false;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toLocaleDateString("en-CA", { timeZone: "Europe/London" }) === ymd;
+}
+
+async function fetchCricketRange(
+  startYmd: string,
+  endYmd: string,
+  todayYmd: string,
+): Promise<CricketResponse> {
+  const url =
+    `${CRICKET_BASE_URL}?selectedEndDate=${endYmd}` +
+    `&selectedStartDate=${startYmd}` +
+    `&todayDate=${todayYmd}` +
+    `&urn=${encodeURIComponent(CRICKET_URN)}`;
+  return fetchBbcJson<CricketResponse>(url, todayYmd, "cricket");
+}
+
 export function cricketStatusSectionLines(data: CricketResponse, ymd: string): string[] {
   const lines: string[] = [];
   let matchCount = 0;
@@ -349,8 +387,10 @@ export function cricketStatusSectionLines(data: CricketResponse, ymd: string): s
         const bTime = new Date(b.startDateTime || "").getTime();
         return aTime - bTime;
       });
-      const allowedEvents = events.filter((event) =>
-        isAllowedCompetition(competitionLabel(secondary, event)),
+      const allowedEvents = events.filter(
+        (event) =>
+          isAllowedCompetition(competitionLabel(secondary, event)) &&
+          eventActiveOnDate(event, ymd),
       );
       if (allowedEvents.length === 0) continue;
 
@@ -397,7 +437,9 @@ export async function fetchTodayCricket(ymd: string): Promise<CricketResponse> {
   return fetchBbcJson<CricketResponse>(url, ymd, "cricket");
 }
 
-export async function loadCricketStatusLines(ymd: string): Promise<string[]> {
-  const data = await fetchTodayCricket(ymd);
-  return cricketStatusSectionLines(data, ymd);
+export async function loadCricketStatusLines(todayYmd: string): Promise<string[]> {
+  const startYmd = shiftYmd(todayYmd, -STATUS_CRICKET_PAD_DAYS);
+  const endYmd = shiftYmd(todayYmd, STATUS_CRICKET_PAD_DAYS);
+  const data = await fetchCricketRange(startYmd, endYmd, todayYmd);
+  return cricketStatusSectionLines(data, todayYmd);
 }

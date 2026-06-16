@@ -50,7 +50,6 @@ export const STATUS_SHORTCUTS: StatusShortcut[] = [
   { key: "s", label: "solar", cmd: "solar" },
   { key: "w", label: "weather", cmd: "w" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "c", label: "cric", cmd: "cric" },
   { key: "f", label: "footy", cmd: "ball" },
   { key: "d", label: "dates", cmd: "cal" },
   { key: "b", label: "bdays", cmd: "bday" },
@@ -66,7 +65,7 @@ export function statusShortcutForKey(key: string): StatusShortcut | null {
 
 export function statusShortcutFooter(): string {
   const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
-  return `${shortcuts}  q:quit`;
+  return `${shortcuts}  c:cmd  q:quit`;
 }
 
 export function statusShortcutFooterWidth(): number {

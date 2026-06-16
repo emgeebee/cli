@@ -228,6 +228,17 @@ function fixtureHeaderLine(event, ymd) {
     event.matchSummary?.resultString || "-"
   ].join(" | ");
 }
+function eventActiveOnDate(event, ymd) {
+  const start = event.matchDateSummary?.startDate;
+  const end = event.matchDateSummary?.endDate;
+  if (start && end && ymd >= start && ymd <= end) return true;
+  if (start && !end && start === ymd) return true;
+  const raw = event.startDateTime;
+  if (!raw) return false;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toLocaleDateString("en-CA", { timeZone: "Europe/London" }) === ymd;
+}
 function cricketStatusSectionLines(data, ymd) {
   const lines = [];
   let matchCount = 0;
@@ -239,7 +250,7 @@ function cricketStatusSectionLines(data, ymd) {
         return aTime - bTime;
       });
       const allowedEvents = events.filter(
-        (event) => isAllowedCompetition(competitionLabel(secondary, event))
+        (event) => isAllowedCompetition(competitionLabel(secondary, event)) && eventActiveOnDate(event, ymd)
       );
       if (allowedEvents.length === 0) continue;
       if (lines.length > 0) {
