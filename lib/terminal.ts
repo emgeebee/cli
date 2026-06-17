@@ -146,14 +146,19 @@ export function statusLayoutInnerWidth(): number {
   return Math.min(fixed, Math.max(columns - 4, 20));
 }
 
+export function isStatusOnlyTerminal(): boolean {
+  const columns = process.stdout.columns ?? 80;
+  const rows = process.stdout.rows ?? 24;
+  return rows <= 32 && columns <= 79;
+}
+
 export function isMobileStatusTerminal(
   panelInnerWidth: number,
   _calendarInnerWidth?: number,
   _weatherLines?: string[] | null,
   _solarLines?: string[] | null,
 ): boolean {
-  const leftOuter = boxOuterWidth(panelInnerWidth);
-  return !isWeatherWideTerminal(leftOuter, panelInnerWidth);
+  return isStatusOnlyTerminal() || !isWeatherWideTerminal(boxOuterWidth(panelInnerWidth), panelInnerWidth);
 }
 
 function fitCalendarContentLines(
@@ -297,7 +302,7 @@ export function writeCenteredBox(lines: string[], innerWidth: number): void {
   writeFullscreenScreen([...Array(topPad).fill(""), ...centered]);
 }
 
-export type StatusLayoutTier = "compact" | "stacked" | "twoColumn" | "threeColumn" | "full";
+export type StatusLayoutTier = "statusOnly" | "compact" | "stacked" | "twoColumn" | "threeColumn" | "full";
 
 export type CompactRotatePanel = "weather" | "solar" | "cric" | "footy" | "calendar";
 
@@ -315,6 +320,10 @@ export function resolveStatusLayoutTier(
     "calendarLines" | "calendarInnerWidth" | "weatherLines" | "solarLines" | "cricLines" | "footyLines"
   >,
 ): StatusLayoutTier {
+  if (isStatusOnlyTerminal()) {
+    return "statusOnly";
+  }
+
   const columns = process.stdout.columns ?? 80;
   const panelInner = panels.calendarInnerWidth ?? innerWidth;
   const leftOuter = boxOuterWidth(panelInner);
@@ -493,6 +502,12 @@ export function writeFullscreenLines(
     ...panels,
     stackCalendar,
   });
+
+  if (tier === "statusOnly") {
+    const panelInner = panels.calendarInnerWidth ?? innerWidth;
+    writeFullscreenScreen(boxLines(statusLines, panelInner));
+    return;
+  }
 
   if (tier === "compact" || tier === "stacked") {
     const compactLines = resolveCompactPanelLines(panels);

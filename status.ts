@@ -73,6 +73,7 @@ import {
   maxCompactPanelBodyLines,
   resolveStatusLayoutTier,
   shouldStackCalendarUnderStatus,
+  isStatusOnlyTerminal,
   statusLayoutInnerWidth,
   writeCenteredBox,
   type CompactRotatePanel,
@@ -295,7 +296,7 @@ function isFootyPanelVisible(
   compactDisplay: CompactRotatePanel | undefined,
   sportsDisplay: "cric" | "footy" | "both",
 ): boolean {
-  if (!hasFooty) return false;
+  if (tier === "statusOnly" || !hasFooty) return false;
   if (usesCompactRotation(tier)) {
     return compactDisplay === "footy";
   }
@@ -663,17 +664,22 @@ async function runLive(): Promise<void> {
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
     const hasFootyRaw = sportsPanelHasContent(footyLines);
+    const statusOnly = isStatusOnlyTerminal();
     const stackCalendar =
-      shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
+      !statusOnly &&
+      shouldStackCalendarUnderStatus(statusLines.length) &&
+      Boolean(calendarLines?.length);
 
-    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
-      calendarLines,
-      calendarInnerWidth: panelWidth,
-      weatherLines: hasWeather ? baseWeatherPanel : null,
-      solarLines: hasSolar ? baseSolarPanel : null,
-      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
-      footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null,
-    });
+    const tier = statusOnly
+      ? "statusOnly"
+      : resolveStatusLayoutTier(statusLines.length, panelWidth, {
+          calendarLines,
+          calendarInnerWidth: panelWidth,
+          weatherLines: hasWeather ? baseWeatherPanel : null,
+          solarLines: hasSolar ? baseSolarPanel : null,
+          cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+          footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null,
+        });
 
     const maxFootyLines = maxCompactPanelBodyLines(
       tier,
