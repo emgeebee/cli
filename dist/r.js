@@ -18711,21 +18711,6 @@ var normalizeOptionalValue = (value) => {
 // lib/terminal.ts
 var import_string_width = __toESM(require_string_width());
 var import_strip_ansi = __toESM(require_strip_ansi());
-
-// lib/commands.ts
-var STATUS_SHORTCUTS = [
-  { key: "s", label: "solar", cmd: "solar" },
-  { key: "w", label: "weather", cmd: "w" },
-  { key: "o", label: "octo", cmd: "octo" },
-  { key: "f", label: "footy", cmd: "ball" },
-  { key: "d", label: "dates", cmd: "cal" },
-  { key: "b", label: "bdays", cmd: "bday" }
-];
-var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
-  STATUS_SHORTCUTS.map((shortcut) => [shortcut.key, shortcut])
-);
-
-// lib/terminal.ts
 var getTerminalWidth = () => {
   const columns = process.stdout.columns;
   if (columns === void 0) {

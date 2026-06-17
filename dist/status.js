@@ -17106,11 +17106,12 @@ function runLauncherCommand(command) {
   return result.status ?? 1;
 }
 var STATUS_SHORTCUTS = [
-  { key: "s", label: "solar", cmd: "solar" },
-  { key: "w", label: "weather", cmd: "w" },
+  { key: "s", label: "solar", cmd: "solar", panel: "solar" },
+  { key: "w", label: "weather", cmd: "w", panel: "weather" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "f", label: "footy", cmd: "ball" },
-  { key: "d", label: "dates", cmd: "cal" },
+  { key: "i", label: "cric", cmd: "cric", panel: "cric" },
+  { key: "f", label: "footy", cmd: "ball", panel: "footy" },
+  { key: "d", label: "dates", cmd: "cal", panel: "calendar" },
   { key: "b", label: "bdays", cmd: "bday" }
 ];
 var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
@@ -17119,12 +17120,35 @@ var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
 function statusShortcutForKey(key) {
   return STATUS_SHORTCUT_BY_KEY[key] ?? null;
 }
-function statusShortcutFooter() {
-  const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
-  return `${shortcuts}  c:cmd  q:quit`;
+function formatStatusShortcutLine(entries) {
+  return entries.map((entry) => `${entry.key}:${entry.label}`).join("  ");
 }
-function statusShortcutFooterWidth() {
-  return statusShortcutFooter().length;
+var STATUS_BAR_SHORTCUTS = [
+  { key: "a", label: "all" },
+  { key: "c", label: "cmd" },
+  { key: "n", label: "next" },
+  { key: "p", label: "pause" },
+  { key: "q", label: "quit" }
+];
+function buildStatusBarShortcutLines() {
+  return [formatStatusShortcutLine(STATUS_BAR_SHORTCUTS)];
+}
+var SHORTCUTS_MENU_INNER_WIDTH = 34;
+var STATUS_MENU_SHORTCUTS = [
+  { key: "c", label: "cmd" },
+  { key: "a", label: "back" },
+  { key: "q", label: "quit" }
+];
+function buildAllShortcutsMenuLines() {
+  const lines = ["=== Shortcuts ===", ""];
+  for (const { key, label } of STATUS_SHORTCUTS) {
+    lines.push(`  ${key}  ${label}`);
+  }
+  lines.push("");
+  for (const { key, label } of STATUS_MENU_SHORTCUTS) {
+    lines.push(`  ${key}  ${label}`);
+  }
+  return lines;
 }
 function runStatusShortcut(shortcut) {
   return runLauncherCommand({
@@ -17551,27 +17575,46 @@ function truncateToWidth(line, maxWidth) {
 function boxOuterWidth(innerWidth) {
   return innerWidth + 4;
 }
+var STATUS_LEFT_COLUMN_MAX_OUTER = 79;
+function statusLeftColumnOuterWidth() {
+  const columns = process.stdout.columns ?? 80;
+  return Math.min(STATUS_LEFT_COLUMN_MAX_OUTER, columns);
+}
+function statusLayoutInnerWidth() {
+  return Math.max(statusLeftColumnOuterWidth() - 4, 20);
+}
+var STATUS_THREE_COLUMN_MAX_WIDTH = 236;
+function statusSideColumnInnerWidth(leftInnerWidth = statusLayoutInnerWidth()) {
+  const leftOuter = boxOuterWidth(leftInnerWidth);
+  const availableOuter = STATUS_THREE_COLUMN_MAX_WIDTH - leftOuter - 2 * WIDE_LAYOUT_GAP;
+  const sideOuter = Math.max(24, Math.floor(availableOuter / 2));
+  return Math.max(sideOuter - 4, 20);
+}
 var WIDE_LAYOUT_GAP = 3;
-function maxCalendarContentLines(statusContentLineCount, useFullHeight = false) {
+function maxCalendarContentLines(statusContentLineCount, useFullHeight = false, shortcutContentLineCount = 0) {
   const terminalRows = process.stdout.rows ?? 24;
-  if (useFullHeight) {
-    const statusBoxRows2 = statusContentLineCount + 2;
-    return Math.max(0, terminalRows - statusBoxRows2 - 2);
-  }
   const statusBoxRows = statusContentLineCount + 2;
-  return Math.max(0, terminalRows - statusBoxRows);
+  const shortcutBoxRows = shortcutContentLineCount > 0 ? shortcutContentLineCount + 2 : 0;
+  if (useFullHeight) {
+    return Math.max(0, terminalRows - statusBoxRows - shortcutBoxRows - 2);
+  }
+  return Math.max(0, terminalRows - statusBoxRows - shortcutBoxRows);
 }
 function layoutWidth(outerWidths, gap = WIDE_LAYOUT_GAP) {
   if (outerWidths.length === 0) return 0;
   return outerWidths.reduce((sum, width) => sum + width, 0) + gap * (outerWidths.length - 1);
 }
-function statusLayoutInnerWidth() {
+function isStatusOnlyTerminal() {
   const columns = process.stdout.columns ?? 80;
-  const fixed = Math.max(statusCalendarInnerWidth(), statusShortcutFooterWidth());
-  return Math.min(fixed, Math.max(columns - 4, 20));
+  const rows = process.stdout.rows ?? 24;
+  return rows <= 32 && columns <= 79;
 }
-function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullHeight = false) {
-  const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
+function fitCalendarContentLines(calendarLines, statusContentLineCount, useFullHeight = false, shortcutContentLineCount = 0) {
+  const maxCalendarContent = maxCalendarContentLines(
+    statusContentLineCount,
+    useFullHeight,
+    shortcutContentLineCount
+  );
   if (calendarLines.length <= maxCalendarContent) {
     return calendarLines;
   }
@@ -17675,13 +17718,17 @@ function writeCenteredBox(lines, innerWidth) {
   writeFullscreenScreen([...Array(topPad).fill(""), ...centered]);
 }
 var MIN_CALENDAR_STACK_LINES = 4;
-function shouldStackCalendarUnderStatus(statusLineCount) {
-  return maxCalendarContentLines(statusLineCount, true) >= MIN_CALENDAR_STACK_LINES;
+function shouldStackCalendarUnderStatus(statusLineCount, shortcutContentLineCount = 0) {
+  return maxCalendarContentLines(statusLineCount, true, shortcutContentLineCount) >= MIN_CALENDAR_STACK_LINES;
 }
 function resolveStatusLayoutTier(statusLineCount, innerWidth, panels) {
+  if (isStatusOnlyTerminal()) {
+    return "statusOnly";
+  }
   const columns = process.stdout.columns ?? 80;
   const panelInner = panels.calendarInnerWidth ?? innerWidth;
   const leftOuter = boxOuterWidth(panelInner);
+  const sideInner = statusSideColumnInnerWidth(panelInner);
   const middleLayoutLines = middlePanelLayoutLines(panels);
   const hasMiddle = middleLayoutLines.length > 0;
   const hasSports = Boolean(
@@ -17690,33 +17737,41 @@ function resolveStatusLayoutTier(statusLineCount, innerWidth, panels) {
   if (!hasMiddle && !hasSports) {
     return shouldStackCalendarUnderStatus(statusLineCount) ? "stacked" : "compact";
   }
-  const sportsOuter = boxOuterWidth(panelInner);
+  const sportsOuter = boxOuterWidth(sideInner);
   const fourColWidth = layoutWidth([
     leftOuter,
-    boxOuterWidth(panelInner),
-    boxOuterWidth(panelInner),
+    boxOuterWidth(sideInner),
+    boxOuterWidth(sideInner),
     sportsOuter
   ]);
-  const threeColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner), sportsOuter]);
-  const twoColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner)]);
+  const threeColWidth = layoutWidth([leftOuter, boxOuterWidth(sideInner), sportsOuter]);
+  const twoColWidth = layoutWidth([leftOuter, boxOuterWidth(sideInner)]);
   if (hasMiddle && hasSports && columns >= fourColWidth) return "full";
   if (hasMiddle && hasSports && columns >= threeColWidth) return "threeColumn";
   if (columns >= twoColWidth && (hasMiddle || hasSports)) return "twoColumn";
   return shouldStackCalendarUnderStatus(statusLineCount) ? "stacked" : "compact";
 }
-function maxRotatingPanelBodyLines(innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth) {
+function maxRotatingPanelBodyLines(innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth, shortcutLines) {
   const terminalRows = process.stdout.rows ?? 24;
   const panelInner = calendarInnerWidth ?? innerWidth;
   let used = boxLines(statusLines, panelInner).length;
+  if (shortcutLines && shortcutLines.length > 0) {
+    used += boxLines(shortcutLines, panelInner).length;
+  }
   if (stackCalendar && calendarLines && calendarLines.length > 0) {
-    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+    const calendarContent = fitCalendarContentLines(
+      calendarLines,
+      statusLines.length,
+      true,
+      shortcutLines?.length ?? 0
+    );
     if (calendarContent.length > 0) {
       used += boxLines(calendarContent, panelInner).length;
     }
   }
   return Math.max(1, terminalRows - used - 4);
 }
-function maxCompactPanelBodyLines(tier, innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth) {
+function maxCompactPanelBodyLines(tier, innerWidth, statusLines, calendarLines, stackCalendar, calendarInnerWidth, shortcutLines) {
   if (tier === "twoColumn" || tier === "threeColumn" || tier === "full") {
     return maxFootballBodyLines(innerWidth, null);
   }
@@ -17725,7 +17780,8 @@ function maxCompactPanelBodyLines(tier, innerWidth, statusLines, calendarLines, 
     statusLines,
     calendarLines,
     stackCalendar,
-    calendarInnerWidth
+    calendarInnerWidth,
+    shortcutLines
   );
 }
 function middlePanelReady(lines, marker) {
@@ -17776,12 +17832,17 @@ function buildLeftColumn(statusLines, innerWidth, panels) {
   const panelInner = panels.calendarInnerWidth ?? innerWidth;
   const statusBox = boxLines(statusLines, panelInner);
   const leftStack = [statusBox];
+  if (panels.shortcutLines && panels.shortcutLines.length > 0) {
+    leftStack.push(boxLines(panels.shortcutLines, panelInner));
+  }
   const stackCalendar = panels.stackCalendar ?? shouldStackCalendarUnderStatus(statusLines.length);
   if (stackCalendar && panels.calendarLines && panels.calendarLines.length > 0) {
+    const shortcutContentLineCount = panels.shortcutLines?.length ?? 0;
     const calendarContent = fitCalendarContentLines(
       panels.calendarLines,
       statusLines.length,
-      true
+      true,
+      shortcutContentLineCount
     );
     if (calendarContent.length > 0) {
       leftStack.push(boxLines(calendarContent, panelInner));
@@ -17799,6 +17860,16 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
     ...panels,
     stackCalendar
   });
+  const sideInner = statusSideColumnInnerWidth(innerWidth);
+  if (tier === "statusOnly") {
+    const panelInner = panels.calendarInnerWidth ?? innerWidth;
+    const leftStack = [boxLines(statusLines, panelInner)];
+    if (panels.shortcutLines && panels.shortcutLines.length > 0) {
+      leftStack.push(boxLines(panels.shortcutLines, panelInner));
+    }
+    writeFullscreenScreen(stackBoxesVertically(leftStack));
+    return;
+  }
   if (tier === "compact" || tier === "stacked") {
     const compactLines = resolveCompactPanelLines(panels);
     if (compactLines && compactLines.length > 0) {
@@ -17822,8 +17893,8 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
     if (compactLines && compactLines.length > 0) {
       writeFullscreenScreen(
         joinBoxedColumnsVariable(
-          [leftColumn, boxLines(compactLines, innerWidth)],
-          [leftOuter, boxOuterWidth(innerWidth)]
+          [leftColumn, boxLines(compactLines, sideInner)],
+          [leftOuter, boxOuterWidth(sideInner)]
         )
       );
       return;
@@ -17835,24 +17906,24 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
     const columns2 = [leftColumn];
     const outerWidths2 = [leftOuter];
     if (hasWeather && weatherLines) {
-      columns2.push(boxLines(weatherLines, innerWidth));
-      outerWidths2.push(boxOuterWidth(innerWidth));
+      columns2.push(boxLines(weatherLines, sideInner));
+      outerWidths2.push(boxOuterWidth(sideInner));
     }
     if (hasSolar && solarLines) {
-      columns2.push(boxLines(solarLines, innerWidth));
-      outerWidths2.push(boxOuterWidth(innerWidth));
+      columns2.push(boxLines(solarLines, sideInner));
+      outerWidths2.push(boxOuterWidth(sideInner));
     }
     if (hasSports) {
       const sportsStack = [];
       if (cricLines && cricLines.length > 0) {
-        sportsStack.push(boxLines(cricLines, innerWidth));
+        sportsStack.push(boxLines(cricLines, sideInner));
       }
       if (footyLines && footyLines.length > 0) {
-        sportsStack.push(boxLines(footyLines, innerWidth));
+        sportsStack.push(boxLines(footyLines, sideInner));
       }
       if (sportsStack.length > 0) {
         columns2.push(stackBoxesVertically(sportsStack));
-        outerWidths2.push(boxOuterWidth(innerWidth));
+        outerWidths2.push(boxOuterWidth(sideInner));
       }
     }
     writeFullscreenScreen(joinBoxedColumnsVariable(columns2, outerWidths2));
@@ -17867,21 +17938,21 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
   const columns = [leftColumn];
   const outerWidths = [leftOuter];
   if (hasMiddle && middleLines) {
-    columns.push(boxLines(middleLines, innerWidth));
-    outerWidths.push(boxOuterWidth(innerWidth));
+    columns.push(boxLines(middleLines, sideInner));
+    outerWidths.push(boxOuterWidth(sideInner));
   }
   if (hasSports) {
     const sportsStack = [];
     const show = sportsDisplay ?? "both";
     if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
-      sportsStack.push(boxLines(cricLines, innerWidth));
+      sportsStack.push(boxLines(cricLines, sideInner));
     }
     if ((show === "both" || show === "footy") && footyLines && footyLines.length > 0) {
-      sportsStack.push(boxLines(footyLines, innerWidth));
+      sportsStack.push(boxLines(footyLines, sideInner));
     }
     if (sportsStack.length > 0) {
       columns.push(stackBoxesVertically(sportsStack));
-      outerWidths.push(boxOuterWidth(innerWidth));
+      outerWidths.push(boxOuterWidth(sideInner));
     }
   }
   writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
@@ -17984,7 +18055,7 @@ function usage() {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, c cmd menu, p pause, n next, q quit.");
+  console.log("In a TTY, stays open and updates every second. Bar: a/c/n/p/q; a opens full shortcut menu.");
   console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
@@ -18062,9 +18133,7 @@ function buildStatusLines(state) {
     ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
     capitalizeGasLine(state.houseOcto.gas.line),
-    ...capitalizeElectricityLines(state.houseOcto.electricityLines),
-    "",
-    statusShortcutFooter()
+    ...capitalizeElectricityLines(state.houseOcto.electricityLines)
   ];
 }
 function isWeatherPanelReady(lines) {
@@ -18111,8 +18180,11 @@ function withCompactPanelCountdown(lines, countdown) {
 function usesCompactRotation(tier) {
   return tier === "compact" || tier === "stacked" || tier === "twoColumn";
 }
+function renderAllShortcutsMenu() {
+  writeCenteredBox(buildAllShortcutsMenuLines(), SHORTCUTS_MENU_INNER_WIDTH);
+}
 function isFootyPanelVisible(tier, hasFooty, compactDisplay, sportsDisplay) {
-  if (!hasFooty) return false;
+  if (tier === "statusOnly" || !hasFooty) return false;
   if (usesCompactRotation(tier)) {
     return compactDisplay === "footy";
   }
@@ -18297,6 +18369,9 @@ function handleStatusKey(key) {
   if (key.char === "p") {
     return "toggle-pause";
   }
+  if (key.char === "a") {
+    return "shortcuts-menu";
+  }
   return statusShortcutForKey(key.char);
 }
 function cmdMenuSelection(state) {
@@ -18370,6 +18445,7 @@ async function runLive() {
   let footyPanelWasVisible = null;
   let footyRefreshGeneration = 0;
   let cmdMenuState = { active: false };
+  let shortcutsMenuOpen = false;
   let runningCommand = false;
   let timer;
   let disableRawInput;
@@ -18387,6 +18463,10 @@ async function runLive() {
     yieldAverages
   });
   const render = () => {
+    if (shortcutsMenuOpen) {
+      renderAllShortcutsMenu();
+      return;
+    }
     if (cmdMenuState.active) {
       renderCmdMenu(cmdMenuState);
       return;
@@ -18394,11 +18474,12 @@ async function runLive() {
     const state = displayState();
     const panelWidth = statusLayoutInnerWidth();
     const statusLines = buildStatusLines(state);
+    const shortcutContentLineCount = 1;
     const calendarLines = calendarData ? buildStatusCalendarLines(
       calendarData.months,
       state.now,
       calendarData.colors,
-      maxCalendarContentLines(statusLines.length, true),
+      maxCalendarContentLines(statusLines.length, true, shortcutContentLineCount),
       panelWidth
     ) : null;
     const baseWeatherPanel = fullWeatherLines;
@@ -18407,8 +18488,9 @@ async function runLive() {
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
     const hasFootyRaw = sportsPanelHasContent(footyLines);
-    const stackCalendar = shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
-    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
+    const statusOnly = isStatusOnlyTerminal();
+    const stackCalendar = !statusOnly && shouldStackCalendarUnderStatus(statusLines.length, shortcutContentLineCount) && Boolean(calendarLines?.length);
+    const tier = statusOnly ? "statusOnly" : resolveStatusLayoutTier(statusLines.length, panelWidth, {
       calendarLines,
       calendarInnerWidth: panelWidth,
       weatherLines: hasWeather ? baseWeatherPanel : null,
@@ -18416,13 +18498,15 @@ async function runLive() {
       cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
       footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null
     });
+    const shortcutPlaceholder = ["-"];
     const maxFootyLines = maxCompactPanelBodyLines(
       tier,
       panelWidth,
       statusLines,
       calendarLines,
       stackCalendar,
-      panelWidth
+      panelWidth,
+      shortcutPlaceholder
     );
     const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
@@ -18531,6 +18615,7 @@ async function runLive() {
       next: "weather",
       paused: middleSwitchCountdown.paused
     }, panelWidth) : baseSolarPanel;
+    const shortcutLines = buildStatusBarShortcutLines();
     const compactCountdown = compactSwitchCountdown;
     const panelLines = (panel, lines, allowWide) => {
       if (!lines.length) return null;
@@ -18547,6 +18632,7 @@ async function runLive() {
       compactDisplay,
       calendarLines,
       calendarInnerWidth: panelWidth,
+      shortcutLines,
       weatherLines: panelLines("weather", weatherPanel, tier === "full" || tier === "threeColumn"),
       solarLines: panelLines("solar", solarPanel, tier === "full" || tier === "threeColumn"),
       middleDisplay: tier === "threeColumn" ? middleDisplay : void 0,
@@ -18601,6 +18687,43 @@ async function runLive() {
     runningCommand = false;
     render();
     timer = setInterval(tick, TICK_MS);
+  };
+  const closeShortcutsMenu = () => {
+    shortcutsMenuOpen = false;
+    render();
+  };
+  const openShortcutsMenu = () => {
+    shortcutsMenuOpen = true;
+    render();
+  };
+  const handleShortcutsMenuKey = (key) => {
+    if (key.type === "ctrl-c") {
+      stop();
+      return;
+    }
+    if (key.type === "escape") {
+      closeShortcutsMenu();
+      return;
+    }
+    if (key.type !== "char") return;
+    if (key.char === "a") {
+      closeShortcutsMenu();
+      return;
+    }
+    if (key.char === "q") {
+      stop();
+      return;
+    }
+    if (key.char === "c") {
+      closeShortcutsMenu();
+      openCmdMenu();
+      return;
+    }
+    const shortcut = statusShortcutForKey(key.char);
+    if (shortcut) {
+      closeShortcutsMenu();
+      void runShortcut(shortcut);
+    }
   };
   const closeCmdMenu = () => {
     cmdMenuState = { active: false };
@@ -18737,6 +18860,10 @@ async function runLive() {
   const onKeys = (keys) => {
     if (runningCommand) return;
     for (const key of keys) {
+      if (shortcutsMenuOpen) {
+        handleShortcutsMenuKey(key);
+        return;
+      }
       if (cmdMenuState.active) {
         handleCmdMenuKey(key);
         return;
@@ -18756,6 +18883,10 @@ async function runLive() {
       }
       if (action === "toggle-pause") {
         toggleRotationPause();
+        return;
+      }
+      if (action === "shortcuts-menu") {
+        openShortcutsMenu();
         return;
       }
       if (action) {

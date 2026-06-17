@@ -39,19 +39,23 @@ export function runLauncherCommand(command: LauncherCommand): number {
   return result.status ?? 1;
 }
 
+export type StatusShortcutPanel = "weather" | "solar" | "cric" | "footy" | "calendar";
+
 export type StatusShortcut = {
   key: string;
   label: string;
   cmd: string;
   extraArgs?: string;
+  panel?: StatusShortcutPanel;
 };
 
 export const STATUS_SHORTCUTS: StatusShortcut[] = [
-  { key: "s", label: "solar", cmd: "solar" },
-  { key: "w", label: "weather", cmd: "w" },
+  { key: "s", label: "solar", cmd: "solar", panel: "solar" },
+  { key: "w", label: "weather", cmd: "w", panel: "weather" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "f", label: "footy", cmd: "ball" },
-  { key: "d", label: "dates", cmd: "cal" },
+  { key: "i", label: "cric", cmd: "cric", panel: "cric" },
+  { key: "f", label: "footy", cmd: "ball", panel: "footy" },
+  { key: "d", label: "dates", cmd: "cal", panel: "calendar" },
   { key: "b", label: "bdays", cmd: "bday" },
 ];
 
@@ -63,13 +67,63 @@ export function statusShortcutForKey(key: string): StatusShortcut | null {
   return STATUS_SHORTCUT_BY_KEY[key] ?? null;
 }
 
-export function statusShortcutFooter(): string {
-  const shortcuts = STATUS_SHORTCUTS.map((shortcut) => `${shortcut.key}:${shortcut.label}`).join("  ");
-  return `${shortcuts}  c:cmd  q:quit`;
+export type StatusShortcutEntry = {
+  key: string;
+  label: string;
+};
+
+export function formatStatusShortcutLine(entries: StatusShortcutEntry[]): string {
+  return entries.map((entry) => `${entry.key}:${entry.label}`).join("  ");
 }
 
+export const STATUS_BAR_SHORTCUTS: StatusShortcutEntry[] = [
+  { key: "a", label: "all" },
+  { key: "c", label: "cmd" },
+  { key: "n", label: "next" },
+  { key: "p", label: "pause" },
+  { key: "q", label: "quit" },
+];
+
+export function buildStatusBarShortcutLines(): string[] {
+  return [formatStatusShortcutLine(STATUS_BAR_SHORTCUTS)];
+}
+
+export function allStatusShortcutEntries(): StatusShortcutEntry[] {
+  return [
+    ...STATUS_SHORTCUTS.map(({ key, label }) => ({ key, label })),
+    { key: "c", label: "cmd" },
+    { key: "a", label: "all" },
+    { key: "q", label: "quit" },
+  ];
+}
+
+export const SHORTCUTS_MENU_INNER_WIDTH = 34;
+
+const STATUS_MENU_SHORTCUTS: StatusShortcutEntry[] = [
+  { key: "c", label: "cmd" },
+  { key: "a", label: "back" },
+  { key: "q", label: "quit" },
+];
+
+export function buildAllShortcutsMenuLines(): string[] {
+  const lines = ["=== Shortcuts ===", ""];
+  for (const { key, label } of STATUS_SHORTCUTS) {
+    lines.push(`  ${key}  ${label}`);
+  }
+  lines.push("");
+  for (const { key, label } of STATUS_MENU_SHORTCUTS) {
+    lines.push(`  ${key}  ${label}`);
+  }
+  return lines;
+}
+
+export function statusShortcutsBoxWidth(): number {
+  return formatStatusShortcutLine(STATUS_BAR_SHORTCUTS).length;
+}
+
+/** @deprecated Use statusShortcutsBoxWidth */
 export function statusShortcutFooterWidth(): number {
-  return statusShortcutFooter().length;
+  return statusShortcutsBoxWidth();
 }
 
 export function runStatusShortcut(shortcut: StatusShortcut): number {

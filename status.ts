@@ -59,8 +59,10 @@ import {
 } from "./lib/cmdApi";
 import { moneyRemaining } from "./lib/moneyApi";
 import {
+  buildAllShortcutsMenuLines,
+  buildStatusBarShortcutLines,
   runStatusShortcut,
-  statusShortcutFooter,
+  SHORTCUTS_MENU_INNER_WIDTH,
   statusShortcutForKey,
   type StatusShortcut,
 } from "./lib/commands";
@@ -75,6 +77,7 @@ import {
   shouldStackCalendarUnderStatus,
   isStatusOnlyTerminal,
   statusLayoutInnerWidth,
+  statusSideColumnInnerWidth,
   writeCenteredBox,
   type CompactRotatePanel,
   type FullscreenPanelLines,
@@ -100,7 +103,7 @@ function usage(): void {
   console.log("Usage:");
   console.log("  status");
   console.log("");
-  console.log("In a TTY, stays open and updates every second. Shortcuts: s/w/o/c/f/d/b, c cmd menu, p pause, n next, q quit.");
+  console.log("In a TTY, stays open and updates every second. Bar: a/c/n/p/q; a opens full shortcut menu.");
   console.log("Piped output prints once.");
   console.log(`Uses defaultLocation from ${getConfigPath()} for sunrise/sunset (falls back to cm2).`);
   console.log("Solar daily yield refreshes every 30 minutes.");
@@ -223,8 +226,6 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
     capitalizeGasLine(state.houseOcto.gas.line),
     ...capitalizeElectricityLines(state.houseOcto.electricityLines),
-    "",
-    statusShortcutFooter(),
   ];
 }
 
@@ -288,6 +289,10 @@ function withCompactPanelCountdown(
 
 function usesCompactRotation(tier: StatusLayoutTier): boolean {
   return tier === "compact" || tier === "stacked" || tier === "twoColumn";
+}
+
+function renderAllShortcutsMenu(): void {
+  writeCenteredBox(buildAllShortcutsMenuLines(), SHORTCUTS_MENU_INNER_WIDTH);
 }
 
 function isFootyPanelVisible(
@@ -507,7 +512,7 @@ async function printOnce(): Promise<void> {
   );
 }
 
-function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "cmd-menu" | null {
+function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "shortcuts-menu" | "cmd-menu" | null {
   if (key.type === "ctrl-c") {
     return "quit";
   }
@@ -525,6 +530,9 @@ function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next
   }
   if (key.char === "p") {
     return "toggle-pause";
+  }
+  if (key.char === "a") {
+    return "shortcuts-menu";
   }
   return statusShortcutForKey(key.char);
 }
@@ -621,6 +629,7 @@ async function runLive(): Promise<void> {
   let footyPanelWasVisible: boolean | null = null;
   let footyRefreshGeneration = 0;
   let cmdMenuState: CmdMenuState = { active: false };
+  let shortcutsMenuOpen = false;
   let runningCommand = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
@@ -640,6 +649,11 @@ async function runLive(): Promise<void> {
   });
 
   const render = (): void => {
+    if (shortcutsMenuOpen) {
+      renderAllShortcutsMenu();
+      return;
+    }
+
     if (cmdMenuState.active) {
       renderCmdMenu(cmdMenuState);
       return;
@@ -648,12 +662,13 @@ async function runLive(): Promise<void> {
     const state = displayState();
     const panelWidth = statusLayoutInnerWidth();
     const statusLines = buildStatusLines(state);
+    const shortcutContentLineCount = 1;
     const calendarLines = calendarData
       ? buildStatusCalendarLines(
           calendarData.months,
           state.now,
           calendarData.colors,
-          maxCalendarContentLines(statusLines.length, true),
+          maxCalendarContentLines(statusLines.length, true, shortcutContentLineCount),
           panelWidth,
         )
       : null;
@@ -667,7 +682,7 @@ async function runLive(): Promise<void> {
     const statusOnly = isStatusOnlyTerminal();
     const stackCalendar =
       !statusOnly &&
-      shouldStackCalendarUnderStatus(statusLines.length) &&
+      shouldStackCalendarUnderStatus(statusLines.length, shortcutContentLineCount) &&
       Boolean(calendarLines?.length);
 
     const tier = statusOnly
@@ -681,13 +696,19 @@ async function runLive(): Promise<void> {
           footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null,
         });
 
+    const sidePanelWidth =
+      tier === "threeColumn" || tier === "full"
+        ? statusSideColumnInnerWidth(panelWidth)
+        : panelWidth;
+    const shortcutPlaceholder = ["-"];
     const maxFootyLines = maxCompactPanelBodyLines(
       tier,
-      panelWidth,
+      sidePanelWidth,
       statusLines,
       calendarLines,
       stackCalendar,
       panelWidth,
+      shortcutPlaceholder,
     );
     const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
@@ -812,13 +833,21 @@ async function runLive(): Promise<void> {
           })
         : baseWeatherPanel;
     const solarPanel =
-      tier === "threeColumn" && middleDisplay === "solar" && middleSwitchCountdown && solarData
-        ? buildSolarPanelLines(solarData, {
-            seconds: middleSwitchCountdown.seconds,
-            next: "weather",
-            paused: middleSwitchCountdown.paused,
-          }, panelWidth)
+      tier === "threeColumn" && middleDisplay === "solar" && solarData
+        ? buildSolarPanelLines(
+            solarData,
+            middleSwitchCountdown
+              ? {
+                  seconds: middleSwitchCountdown.seconds,
+                  next: "weather",
+                  paused: middleSwitchCountdown.paused,
+                }
+              : undefined,
+            sidePanelWidth,
+          )
         : baseSolarPanel;
+
+    const shortcutLines = buildStatusBarShortcutLines();
 
     const compactCountdown = compactSwitchCountdown;
     const panelLines = (
@@ -841,6 +870,7 @@ async function runLive(): Promise<void> {
       compactDisplay,
       calendarLines,
       calendarInnerWidth: panelWidth,
+      shortcutLines,
       weatherLines: panelLines("weather", weatherPanel, tier === "full" || tier === "threeColumn"),
       solarLines: panelLines("solar", solarPanel, tier === "full" || tier === "threeColumn"),
       middleDisplay: tier === "threeColumn" ? middleDisplay : undefined,
@@ -902,6 +932,48 @@ async function runLive(): Promise<void> {
     runningCommand = false;
     render();
     timer = setInterval(tick, TICK_MS);
+  };
+
+  const closeShortcutsMenu = (): void => {
+    shortcutsMenuOpen = false;
+    render();
+  };
+
+  const openShortcutsMenu = (): void => {
+    shortcutsMenuOpen = true;
+    render();
+  };
+
+  const handleShortcutsMenuKey = (key: TerminalKey): void => {
+    if (key.type === "ctrl-c") {
+      stop();
+      return;
+    }
+    if (key.type === "escape") {
+      closeShortcutsMenu();
+      return;
+    }
+    if (key.type !== "char") return;
+
+    if (key.char === "a") {
+      closeShortcutsMenu();
+      return;
+    }
+    if (key.char === "q") {
+      stop();
+      return;
+    }
+    if (key.char === "c") {
+      closeShortcutsMenu();
+      openCmdMenu();
+      return;
+    }
+
+    const shortcut = statusShortcutForKey(key.char);
+    if (shortcut) {
+      closeShortcutsMenu();
+      void runShortcut(shortcut);
+    }
   };
 
   const closeCmdMenu = (): void => {
@@ -1056,6 +1128,10 @@ async function runLive(): Promise<void> {
   const onKeys = (keys: TerminalKey[]): void => {
     if (runningCommand) return;
     for (const key of keys) {
+      if (shortcutsMenuOpen) {
+        handleShortcutsMenuKey(key);
+        return;
+      }
       if (cmdMenuState.active) {
         handleCmdMenuKey(key);
         return;
@@ -1075,6 +1151,10 @@ async function runLive(): Promise<void> {
       }
       if (action === "toggle-pause") {
         toggleRotationPause();
+        return;
+      }
+      if (action === "shortcuts-menu") {
+        openShortcutsMenu();
         return;
       }
       if (action) {

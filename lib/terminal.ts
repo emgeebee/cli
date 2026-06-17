@@ -1,8 +1,5 @@
 import stringWidth from "string-width";
 import stripAnsi from "strip-ansi";
-import { statusCalendarInnerWidth } from "./calApi";
-import { statusShortcutFooterWidth } from "./commands";
-
 export const ANSI_ENTER_ALTERNATE_SCREEN = "\x1b[?1049h";
 export const ANSI_LEAVE_ALTERNATE_SCREEN = "\x1b[?1049l";
 export const ANSI_CLEAR_SCREEN = "\x1b[2J";
@@ -77,6 +74,28 @@ export function boxOuterWidth(innerWidth: number): number {
   return innerWidth + 4;
 }
 
+/** Maximum outer width of the status left column (status, shortcuts, calendar). */
+export const STATUS_LEFT_COLUMN_MAX_OUTER = 79;
+
+export function statusLeftColumnOuterWidth(): number {
+  const columns = process.stdout.columns ?? 80;
+  return Math.min(STATUS_LEFT_COLUMN_MAX_OUTER, columns);
+}
+
+export function statusLayoutInnerWidth(): number {
+  return Math.max(statusLeftColumnOuterWidth() - 4, 20);
+}
+
+/** Target total width for a three-column status layout. */
+export const STATUS_THREE_COLUMN_MAX_WIDTH = 236;
+
+export function statusSideColumnInnerWidth(leftInnerWidth = statusLayoutInnerWidth()): number {
+  const leftOuter = boxOuterWidth(leftInnerWidth);
+  const availableOuter = STATUS_THREE_COLUMN_MAX_WIDTH - leftOuter - 2 * WIDE_LAYOUT_GAP;
+  const sideOuter = Math.max(24, Math.floor(availableOuter / 2));
+  return Math.max(sideOuter - 4, 20);
+}
+
 const WIDE_LAYOUT_GAP = 3;
 
 export function wideLayoutWidth(innerWidth: number): number {
@@ -100,14 +119,15 @@ export function isExtraWideTerminal(innerWidth: number): boolean {
 export function maxCalendarContentLines(
   statusContentLineCount: number,
   useFullHeight = false,
+  shortcutContentLineCount = 0,
 ): number {
   const terminalRows = process.stdout.rows ?? 24;
-  if (useFullHeight) {
-    const statusBoxRows = statusContentLineCount + 2;
-    return Math.max(0, terminalRows - statusBoxRows - 2);
-  }
   const statusBoxRows = statusContentLineCount + 2;
-  return Math.max(0, terminalRows - statusBoxRows);
+  const shortcutBoxRows = shortcutContentLineCount > 0 ? shortcutContentLineCount + 2 : 0;
+  if (useFullHeight) {
+    return Math.max(0, terminalRows - statusBoxRows - shortcutBoxRows - 2);
+  }
+  return Math.max(0, terminalRows - statusBoxRows - shortcutBoxRows);
 }
 
 export function layoutWidth(
@@ -140,12 +160,6 @@ export function isWeatherWideTerminal(
   return columns >= layoutWidth([leftOuter, boxOuterWidth(weatherInner)]);
 }
 
-export function statusLayoutInnerWidth(): number {
-  const columns = process.stdout.columns ?? 80;
-  const fixed = Math.max(statusCalendarInnerWidth(), statusShortcutFooterWidth());
-  return Math.min(fixed, Math.max(columns - 4, 20));
-}
-
 export function isStatusOnlyTerminal(): boolean {
   const columns = process.stdout.columns ?? 80;
   const rows = process.stdout.rows ?? 24;
@@ -165,8 +179,13 @@ function fitCalendarContentLines(
   calendarLines: string[],
   statusContentLineCount: number,
   useFullHeight = false,
+  shortcutContentLineCount = 0,
 ): string[] {
-  const maxCalendarContent = maxCalendarContentLines(statusContentLineCount, useFullHeight);
+  const maxCalendarContent = maxCalendarContentLines(
+    statusContentLineCount,
+    useFullHeight,
+    shortcutContentLineCount,
+  );
   if (calendarLines.length <= maxCalendarContent) {
     return calendarLines;
   }
@@ -308,8 +327,11 @@ export type CompactRotatePanel = "weather" | "solar" | "cric" | "footy" | "calen
 
 const MIN_CALENDAR_STACK_LINES = 4;
 
-export function shouldStackCalendarUnderStatus(statusLineCount: number): boolean {
-  return maxCalendarContentLines(statusLineCount, true) >= MIN_CALENDAR_STACK_LINES;
+export function shouldStackCalendarUnderStatus(
+  statusLineCount: number,
+  shortcutContentLineCount = 0,
+): boolean {
+  return maxCalendarContentLines(statusLineCount, true, shortcutContentLineCount) >= MIN_CALENDAR_STACK_LINES;
 }
 
 export function resolveStatusLayoutTier(
@@ -327,6 +349,7 @@ export function resolveStatusLayoutTier(
   const columns = process.stdout.columns ?? 80;
   const panelInner = panels.calendarInnerWidth ?? innerWidth;
   const leftOuter = boxOuterWidth(panelInner);
+  const sideInner = statusSideColumnInnerWidth(panelInner);
   const middleLayoutLines = middlePanelLayoutLines(panels as FullscreenPanelLines);
   const hasMiddle = middleLayoutLines.length > 0;
   const hasSports = Boolean(
@@ -338,15 +361,15 @@ export function resolveStatusLayoutTier(
     return shouldStackCalendarUnderStatus(statusLineCount) ? "stacked" : "compact";
   }
 
-  const sportsOuter = boxOuterWidth(panelInner);
+  const sportsOuter = boxOuterWidth(sideInner);
   const fourColWidth = layoutWidth([
     leftOuter,
-    boxOuterWidth(panelInner),
-    boxOuterWidth(panelInner),
+    boxOuterWidth(sideInner),
+    boxOuterWidth(sideInner),
     sportsOuter,
   ]);
-  const threeColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner), sportsOuter]);
-  const twoColWidth = layoutWidth([leftOuter, boxOuterWidth(panelInner)]);
+  const threeColWidth = layoutWidth([leftOuter, boxOuterWidth(sideInner), sportsOuter]);
+  const twoColWidth = layoutWidth([leftOuter, boxOuterWidth(sideInner)]);
 
   if (hasMiddle && hasSports && columns >= fourColWidth) return "full";
   if (hasMiddle && hasSports && columns >= threeColWidth) return "threeColumn";
@@ -360,12 +383,21 @@ export function maxRotatingPanelBodyLines(
   calendarLines: string[] | null,
   stackCalendar: boolean,
   calendarInnerWidth?: number,
+  shortcutLines?: string[] | null,
 ): number {
   const terminalRows = process.stdout.rows ?? 24;
   const panelInner = calendarInnerWidth ?? innerWidth;
   let used = boxLines(statusLines, panelInner).length;
+  if (shortcutLines && shortcutLines.length > 0) {
+    used += boxLines(shortcutLines, panelInner).length;
+  }
   if (stackCalendar && calendarLines && calendarLines.length > 0) {
-    const calendarContent = fitCalendarContentLines(calendarLines, statusLines.length, true);
+    const calendarContent = fitCalendarContentLines(
+      calendarLines,
+      statusLines.length,
+      true,
+      shortcutLines?.length ?? 0,
+    );
     if (calendarContent.length > 0) {
       used += boxLines(calendarContent, panelInner).length;
     }
@@ -380,6 +412,7 @@ export function maxCompactPanelBodyLines(
   calendarLines: string[] | null,
   stackCalendar: boolean,
   calendarInnerWidth?: number,
+  shortcutLines?: string[] | null,
 ): number {
   if (tier === "twoColumn" || tier === "threeColumn" || tier === "full") {
     return maxFootballBodyLines(innerWidth, null);
@@ -390,6 +423,7 @@ export function maxCompactPanelBodyLines(
     calendarLines,
     stackCalendar,
     calendarInnerWidth,
+    shortcutLines,
   );
 }
 
@@ -402,6 +436,7 @@ export type FullscreenPanelLines = {
   solarLines?: string[] | null;
   middleDisplay?: "weather" | "solar";
   sportsDisplay?: "cric" | "footy" | "both";
+  shortcutLines?: string[] | null;
   layoutTier?: StatusLayoutTier;
   stackCalendar?: boolean;
   compactDisplay?: CompactRotatePanel;
@@ -471,13 +506,18 @@ function buildLeftColumn(
   const panelInner = panels.calendarInnerWidth ?? innerWidth;
   const statusBox = boxLines(statusLines, panelInner);
   const leftStack: string[][] = [statusBox];
+  if (panels.shortcutLines && panels.shortcutLines.length > 0) {
+    leftStack.push(boxLines(panels.shortcutLines, panelInner));
+  }
   const stackCalendar =
     panels.stackCalendar ?? shouldStackCalendarUnderStatus(statusLines.length);
   if (stackCalendar && panels.calendarLines && panels.calendarLines.length > 0) {
+    const shortcutContentLineCount = panels.shortcutLines?.length ?? 0;
     const calendarContent = fitCalendarContentLines(
       panels.calendarLines,
       statusLines.length,
       true,
+      shortcutContentLineCount,
     );
     if (calendarContent.length > 0) {
       leftStack.push(boxLines(calendarContent, panelInner));
@@ -502,10 +542,15 @@ export function writeFullscreenLines(
     ...panels,
     stackCalendar,
   });
+  const sideInner = statusSideColumnInnerWidth(innerWidth);
 
   if (tier === "statusOnly") {
     const panelInner = panels.calendarInnerWidth ?? innerWidth;
-    writeFullscreenScreen(boxLines(statusLines, panelInner));
+    const leftStack: string[][] = [boxLines(statusLines, panelInner)];
+    if (panels.shortcutLines && panels.shortcutLines.length > 0) {
+      leftStack.push(boxLines(panels.shortcutLines, panelInner));
+    }
+    writeFullscreenScreen(stackBoxesVertically(leftStack));
     return;
   }
 
@@ -535,8 +580,8 @@ export function writeFullscreenLines(
     if (compactLines && compactLines.length > 0) {
       writeFullscreenScreen(
         joinBoxedColumnsVariable(
-          [leftColumn, boxLines(compactLines, innerWidth)],
-          [leftOuter, boxOuterWidth(innerWidth)],
+          [leftColumn, boxLines(compactLines, sideInner)],
+          [leftOuter, boxOuterWidth(sideInner)],
         ),
       );
       return;
@@ -549,24 +594,24 @@ export function writeFullscreenLines(
     const columns: string[][] = [leftColumn];
     const outerWidths: number[] = [leftOuter];
     if (hasWeather && weatherLines) {
-      columns.push(boxLines(weatherLines, innerWidth));
-      outerWidths.push(boxOuterWidth(innerWidth));
+      columns.push(boxLines(weatherLines, sideInner));
+      outerWidths.push(boxOuterWidth(sideInner));
     }
     if (hasSolar && solarLines) {
-      columns.push(boxLines(solarLines, innerWidth));
-      outerWidths.push(boxOuterWidth(innerWidth));
+      columns.push(boxLines(solarLines, sideInner));
+      outerWidths.push(boxOuterWidth(sideInner));
     }
     if (hasSports) {
       const sportsStack: string[][] = [];
       if (cricLines && cricLines.length > 0) {
-        sportsStack.push(boxLines(cricLines, innerWidth));
+        sportsStack.push(boxLines(cricLines, sideInner));
       }
       if (footyLines && footyLines.length > 0) {
-        sportsStack.push(boxLines(footyLines, innerWidth));
+        sportsStack.push(boxLines(footyLines, sideInner));
       }
       if (sportsStack.length > 0) {
         columns.push(stackBoxesVertically(sportsStack));
-        outerWidths.push(boxOuterWidth(innerWidth));
+        outerWidths.push(boxOuterWidth(sideInner));
       }
     }
     writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
@@ -584,22 +629,22 @@ export function writeFullscreenLines(
   const outerWidths: number[] = [leftOuter];
 
   if (hasMiddle && middleLines) {
-    columns.push(boxLines(middleLines, innerWidth));
-    outerWidths.push(boxOuterWidth(innerWidth));
+    columns.push(boxLines(middleLines, sideInner));
+    outerWidths.push(boxOuterWidth(sideInner));
   }
 
   if (hasSports) {
     const sportsStack: string[][] = [];
     const show = sportsDisplay ?? "both";
     if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
-      sportsStack.push(boxLines(cricLines, innerWidth));
+      sportsStack.push(boxLines(cricLines, sideInner));
     }
     if ((show === "both" || show === "footy") && footyLines && footyLines.length > 0) {
-      sportsStack.push(boxLines(footyLines, innerWidth));
+      sportsStack.push(boxLines(footyLines, sideInner));
     }
     if (sportsStack.length > 0) {
       columns.push(stackBoxesVertically(sportsStack));
-      outerWidths.push(boxOuterWidth(innerWidth));
+      outerWidths.push(boxOuterWidth(sideInner));
     }
   }
 

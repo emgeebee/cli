@@ -2011,11 +2011,12 @@ function runLauncherCommand(command) {
   return result.status ?? 1;
 }
 var STATUS_SHORTCUTS = [
-  { key: "s", label: "solar", cmd: "solar" },
-  { key: "w", label: "weather", cmd: "w" },
+  { key: "s", label: "solar", cmd: "solar", panel: "solar" },
+  { key: "w", label: "weather", cmd: "w", panel: "weather" },
   { key: "o", label: "octo", cmd: "octo" },
-  { key: "f", label: "footy", cmd: "ball" },
-  { key: "d", label: "dates", cmd: "cal" },
+  { key: "i", label: "cric", cmd: "cric", panel: "cric" },
+  { key: "f", label: "footy", cmd: "ball", panel: "footy" },
+  { key: "d", label: "dates", cmd: "cal", panel: "calendar" },
   { key: "b", label: "bdays", cmd: "bday" }
 ];
 var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
