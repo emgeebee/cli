@@ -323,7 +323,9 @@ export function writeCenteredBox(lines: string[], innerWidth: number): void {
 
 export type StatusLayoutTier = "statusOnly" | "compact" | "stacked" | "twoColumn" | "threeColumn" | "full";
 
-export type CompactRotatePanel = "weather" | "solar" | "cric" | "footy" | "calendar";
+export type SportsRotatePanel = "cric" | "footy" | "plTable" | "villa";
+
+export type CompactRotatePanel = "weather" | "solar" | "cric" | "footy" | "plTable" | "villa" | "calendar";
 
 const MIN_CALENDAR_STACK_LINES = 4;
 
@@ -339,7 +341,7 @@ export function resolveStatusLayoutTier(
   innerWidth: number,
   panels: Pick<
     FullscreenPanelLines,
-    "calendarLines" | "calendarInnerWidth" | "weatherLines" | "solarLines" | "cricLines" | "footyLines"
+    "calendarLines" | "calendarInnerWidth" | "weatherLines" | "solarLines" | "cricLines" | "footyLines" | "plTableLines" | "villaLines"
   >,
 ): StatusLayoutTier {
   if (isStatusOnlyTerminal()) {
@@ -354,7 +356,9 @@ export function resolveStatusLayoutTier(
   const hasMiddle = middleLayoutLines.length > 0;
   const hasSports = Boolean(
     (panels.cricLines && panels.cricLines.length > 0) ||
-      (panels.footyLines && panels.footyLines.length > 0),
+      (panels.footyLines && panels.footyLines.length > 0) ||
+      (panels.plTableLines && panels.plTableLines.length > 0) ||
+      (panels.villaLines && panels.villaLines.length > 0),
   );
 
   if (!hasMiddle && !hasSports) {
@@ -430,12 +434,14 @@ export function maxCompactPanelBodyLines(
 export type FullscreenPanelLines = {
   cricLines?: string[] | null;
   footyLines?: string[] | null;
+  plTableLines?: string[] | null;
+  villaLines?: string[] | null;
   calendarLines?: string[] | null;
   calendarInnerWidth?: number;
   weatherLines?: string[] | null;
   solarLines?: string[] | null;
   middleDisplay?: "weather" | "solar";
-  sportsDisplay?: "cric" | "footy" | "both";
+  sportsDisplay?: SportsRotatePanel;
   shortcutLines?: string[] | null;
   layoutTier?: StatusLayoutTier;
   stackCalendar?: boolean;
@@ -491,6 +497,10 @@ function resolveCompactPanelLines(panels: FullscreenPanelLines): string[] | null
       return panels.cricLines ?? null;
     case "footy":
       return panels.footyLines ?? null;
+    case "plTable":
+      return panels.plTableLines ?? null;
+    case "villa":
+      return panels.villaLines ?? null;
     case "calendar":
       return panels.calendarLines ?? null;
     default:
@@ -566,13 +576,16 @@ export function writeFullscreenLines(
     return;
   }
 
-  const { cricLines, footyLines, weatherLines, solarLines, middleDisplay, sportsDisplay } =
+  const { cricLines, footyLines, plTableLines, villaLines, weatherLines, solarLines, middleDisplay, sportsDisplay } =
     panels;
   const middleLayoutLines = middlePanelLayoutLines(panels);
   const hasWeather = middlePanelReady(weatherLines, "=== Weather");
   const hasSolar = middlePanelReady(solarLines, "=== Solar");
   const hasSports = Boolean(
-    (cricLines && cricLines.length > 0) || (footyLines && footyLines.length > 0),
+    (cricLines && cricLines.length > 0) ||
+      (footyLines && footyLines.length > 0) ||
+      (plTableLines && plTableLines.length > 0) ||
+      (villaLines && villaLines.length > 0),
   );
 
   if (tier === "twoColumn") {
@@ -609,6 +622,12 @@ export function writeFullscreenLines(
       if (footyLines && footyLines.length > 0) {
         sportsStack.push(boxLines(footyLines, sideInner));
       }
+      if (plTableLines && plTableLines.length > 0) {
+        sportsStack.push(boxLines(plTableLines, sideInner));
+      }
+      if (villaLines && villaLines.length > 0) {
+        sportsStack.push(boxLines(villaLines, sideInner));
+      }
       if (sportsStack.length > 0) {
         columns.push(stackBoxesVertically(sportsStack));
         outerWidths.push(boxOuterWidth(sideInner));
@@ -635,12 +654,20 @@ export function writeFullscreenLines(
 
   if (hasSports) {
     const sportsStack: string[][] = [];
-    const show = sportsDisplay ?? "both";
-    if ((show === "both" || show === "cric") && cricLines && cricLines.length > 0) {
+    const show = sportsDisplay;
+    if (show === "cric" && cricLines && cricLines.length > 0) {
       sportsStack.push(boxLines(cricLines, sideInner));
-    }
-    if ((show === "both" || show === "footy") && footyLines && footyLines.length > 0) {
+    } else if (show === "footy" && footyLines && footyLines.length > 0) {
       sportsStack.push(boxLines(footyLines, sideInner));
+    } else if (show === "plTable" && plTableLines && plTableLines.length > 0) {
+      sportsStack.push(boxLines(plTableLines, sideInner));
+    } else if (show === "villa" && villaLines && villaLines.length > 0) {
+      sportsStack.push(boxLines(villaLines, sideInner));
+    } else if (!show) {
+      if (cricLines && cricLines.length > 0) sportsStack.push(boxLines(cricLines, sideInner));
+      if (footyLines && footyLines.length > 0) sportsStack.push(boxLines(footyLines, sideInner));
+      if (plTableLines && plTableLines.length > 0) sportsStack.push(boxLines(plTableLines, sideInner));
+      if (villaLines && villaLines.length > 0) sportsStack.push(boxLines(villaLines, sideInner));
     }
     if (sportsStack.length > 0) {
       columns.push(stackBoxesVertically(sportsStack));

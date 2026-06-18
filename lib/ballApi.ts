@@ -1,4 +1,5 @@
 import { fetchBbcJson, toYmd } from "../bbc";
+import { readPhoneCliConfig } from "../config";
 import { matchEventLines } from "./ballEvents";
 
 type JsonRecord = Record<string, unknown>;
@@ -595,4 +596,219 @@ export async function loadFootballStatusLines(todayYmd: string): Promise<string[
   }
 
   return footballStatusLinesFromDays(days, eventsByDay);
+}
+
+export const ASTON_VILLA_TEAM_URN = "urn:bbc:sportsdata:football:team:aston-villa";
+
+const PL_STANDINGS_URL = "https://premier-league-standings1.p.rapidapi.com/";
+const PL_RAPID_HOST = "premier-league-standings1.p.rapidapi.com";
+
+const urlForTeamGames = (
+  today: string,
+  end: string,
+  start: string,
+  teamUrn: string,
+): string =>
+  `${BBC_BASE_URL}?selectedEndDate=${end}&selectedStartDate=${start}&todayDate=${today}&urn=${encodeURIComponent(teamUrn)}`;
+
+function startOfMostRecentAugust(reference = new Date()): Date {
+  const y = reference.getFullYear();
+  const augustThisYear = new Date(Date.UTC(y, 7, 1));
+  if (reference.getTime() >= augustThisYear.getTime()) return augustThisYear;
+  return new Date(Date.UTC(y - 1, 7, 1));
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function valueByPath(record: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let cursor: unknown = record;
+  for (const part of parts) {
+    const rec = toRecord(cursor);
+    if (!rec) return undefined;
+    cursor = rec[part];
+  }
+  return cursor;
+}
+
+function firstValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    const v = key.includes(".") ? valueByPath(record, key) : record[key];
+    if (v != null && v !== "") return v;
+  }
+  return undefined;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function asString(value: unknown): string {
+  if (value == null) return "";
+  return String(value);
+}
+
+function normalizePlRows(payload: unknown): string[][] {
+  const rowsSource: unknown[] = Array.isArray(payload)
+    ? payload
+    : (() => {
+        const rec = toRecord(payload);
+        if (!rec) return [];
+        const candidates = [
+          rec.standings,
+          rec.table,
+          rec.data,
+          rec.results,
+          valueByPath(rec, "response.standings"),
+          valueByPath(rec, "response.table"),
+          valueByPath(rec, "response.data"),
+        ];
+        for (const c of candidates) {
+          if (Array.isArray(c)) return c;
+        }
+        return [];
+      })();
+
+  const normalized: Array<{
+    pos: number;
+    team: string;
+    played: number;
+    won: number;
+    draw: number;
+    lost: number;
+    gd: number;
+    points: number;
+  }> = [];
+
+  for (const row of rowsSource) {
+    const rec = toRecord(row);
+    if (!rec) continue;
+    const teamRaw =
+      firstValue(rec, ["team.name", "team.shortName", "team.abbreviation"]) ??
+      firstValue(rec, ["team", "teamName", "name", "club", "team.name", "team.shortName"]);
+    const team = highlightAstonVilla(asString(teamRaw));
+    if (!team) continue;
+
+    const pos = asNumber(firstValue(rec, ["position", "rank", "pos", "place"])) ?? normalized.length + 1;
+    const played =
+      asNumber(firstValue(rec, ["played", "playedGames", "matches", "p", "mp", "stats.gamesPlayed"])) ?? 0;
+    const won = asNumber(firstValue(rec, ["won", "wins", "w", "stats.wins"])) ?? 0;
+    const draw =
+      asNumber(firstValue(rec, ["drawn", "draw", "draws", "d", "ties", "stats.ties", "stats.draws"])) ?? 0;
+    const lost =
+      asNumber(firstValue(rec, ["lost", "losses", "l", "stats.losses", "stats.lost"])) ?? 0;
+    const gd =
+      asNumber(firstValue(rec, ["goalDifference", "gd", "goalsDiff", "stats.goalDifference"])) ?? 0;
+    const points = asNumber(firstValue(rec, ["points", "pts", "stats.points"])) ?? 0;
+    const rankFromStats = asNumber(firstValue(rec, ["stats.rank"]));
+    const finalPos = rankFromStats ?? pos;
+
+    normalized.push({ pos: finalPos, team, played, won, draw, lost, gd, points });
+  }
+
+  normalized.sort((a, b) => a.pos - b.pos);
+  return normalized.map((r) => [
+    String(r.pos),
+    r.team,
+    String(r.played),
+    String(r.won),
+    String(r.draw),
+    String(r.lost),
+    String(r.gd),
+    String(r.points),
+  ]);
+}
+
+function formatCompactPlRow(pos: string, team: string, gd: string, pts: string): string {
+  const gdNum = Number(gd);
+  const gdLabel = Number.isFinite(gdNum) && gdNum >= 0 ? `+${gd}` : gd;
+  return `${pos.padStart(2)} ${team} ${pts} (${gdLabel})`;
+}
+
+function premierLeagueTableStatusLines(rows: string[][]): string[] {
+  return rows.map(([pos, team, , , , , gd, pts]) => formatCompactPlRow(pos, team, gd, pts));
+}
+
+function formatFixtureDate(isoDateTime: string): string {
+  const d = new Date(isoDateTime);
+  if (Number.isNaN(d.getTime())) return "???";
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "short", timeZone: "Europe/London" });
+  const day = d.toLocaleDateString("en-GB", { day: "2-digit", timeZone: "Europe/London" });
+  const month = d.toLocaleDateString("en-GB", { month: "2-digit", timeZone: "Europe/London" });
+  const dayName = weekday.charAt(0).toUpperCase() + weekday.slice(1).toLowerCase();
+  return `${dayName} ${day}/${month}`;
+}
+
+function villaFixtureStatusLine(event: NormalizedEvent): string {
+  const date = formatFixtureDate(event.startTime || event.startDateTime);
+  const comp = competitionLabel(event);
+  return `- ${date} ${fixtureLine(event)} (${comp})`;
+}
+
+function readRapidApiKey(): string {
+  const config = readPhoneCliConfig();
+  const ballConfig = config.ball || {};
+  return String(
+    ballConfig.rapidApiKey ||
+      ballConfig.rapidapiKey ||
+      ballConfig.plRapidApiKey ||
+      process.env.RAPIDAPI_KEY ||
+      "",
+  ).trim();
+}
+
+export function fitPanelContentLines(lines: string[], maxContentLines: number): string[] {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+  return lines.slice(0, maxContentLines);
+}
+
+export async function loadPremierLeagueTableStatusLines(): Promise<string[]> {
+  const rapidApiKey = readRapidApiKey();
+  if (!rapidApiKey) return ["-"];
+
+  try {
+    const response = await fetch(PL_STANDINGS_URL, {
+      headers: {
+        "Content-Type": "application/json",
+        "x-rapidapi-host": PL_RAPID_HOST,
+        "x-rapidapi-key": rapidApiKey,
+      },
+    });
+    if (!response.ok) return ["-"];
+    const payload = (await response.json()) as unknown;
+    const rows = normalizePlRows(payload);
+    if (rows.length === 0) return ["-"];
+    return premierLeagueTableStatusLines(rows);
+  } catch {
+    return ["-"];
+  }
+}
+
+export async function loadVillaFixturesStatusLines(): Promise<string[]> {
+  try {
+    const now = new Date();
+    const seasonStart = startOfMostRecentAugust(now);
+    const start = toYmd(seasonStart);
+    const end = toYmd(new Date(now.getTime() + 30 * DAY_MS));
+    const today = toYmd(new Date());
+    const url = urlForTeamGames(today, end, start, ASTON_VILLA_TEAM_URN);
+    const events = (await fetchMatchData(url, start)).filter((event) => {
+      const dt = new Date(event.startTime || event.startDateTime);
+      return dt.getTime() >= seasonStart.getTime();
+    });
+    if (events.length === 0) return ["none"];
+    events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    return events.map((event) => villaFixtureStatusLine(event));
+  } catch {
+    return ["-"];
+  }
 }

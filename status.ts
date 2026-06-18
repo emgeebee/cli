@@ -3,7 +3,9 @@
 import { getConfigPath } from "./config";
 import {
   fetchBbcWeatherAggregated,
+  formatSunriseSunsetStatusLine,
   resolveDefaultLocation,
+  todaySunriseSunset,
   ukTodayYmd,
 } from "./lib/bbcWeather";
 import {
@@ -40,7 +42,13 @@ import {
   loadStatusCalendarData,
   type StatusCalendarData,
 } from "./lib/calApi";
-import { fitFootballStatusLines, loadFootballStatusLines } from "./lib/ballApi";
+import {
+  fitFootballStatusLines,
+  fitPanelContentLines,
+  loadFootballStatusLines,
+  loadPremierLeagueTableStatusLines,
+  loadVillaFixturesStatusLines,
+} from "./lib/ballApi";
 import { loadCricketStatusLines } from "./lib/cricApi";
 import {
   buildCmdMenuLines,
@@ -80,6 +88,7 @@ import {
   statusSideColumnInnerWidth,
   writeCenteredBox,
   type CompactRotatePanel,
+  type SportsRotatePanel,
   type FullscreenPanelLines,
   type StatusLayoutTier,
   writeFullscreenLines,
@@ -98,6 +107,9 @@ const SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1000;
 const SOLAR_POWER_REFRESH_MS = 10 * 60 * 1000;
 const TEMP_REFRESH_MS = 10 * 60 * 1000;
 const GAS_REFRESH_MS = 30 * 60 * 1000;
+const CRICKET_REFRESH_MS = 5 * 60 * 1000;
+const PL_TABLE_REFRESH_MS = 30 * 60 * 1000;
+const VILLA_REFRESH_MS = 30 * 60 * 1000;
 
 function usage(): void {
   console.log("Usage:");
@@ -110,6 +122,7 @@ function usage(): void {
   console.log("Solar power now and hourly average refresh every 10 minutes.");
   console.log("Downstairs and shed temperatures refresh every 10 minutes.");
   console.log("Gas and electricity prices refresh every 30 minutes (requires octo config).");
+  console.log("Cricket scores refresh every 5 minutes.");
 }
 
 function formatTime(now: Date): string {
@@ -195,6 +208,8 @@ type HouseOctoSnapshot = {
 type StatusDisplayState = {
   now: Date;
   todayYmd: string;
+  sunrise: string;
+  sunset: string;
   houseOcto: HouseOctoSnapshot;
   bdayConfig: BdayConfig | null;
   wfh: boolean | null;
@@ -213,6 +228,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     statusBoxTitle(now),
     "",
     `Time: ${formatTime(now)}`,
+    formatSunriseSunsetStatusLine(state.sunrise, state.sunset, now, state.todayYmd),
     ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
     ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
@@ -237,9 +253,11 @@ function isSolarPanelReady(lines: string[]): boolean {
   return lines.length > 0 && lines[0].startsWith("=== Solar");
 }
 
-const SPORTS_PANEL_NAMES: Record<"cric" | "footy", string> = {
+const SPORTS_PANEL_NAMES: Record<SportsRotatePanel, string> = {
   cric: "Cricket",
   footy: "Football",
+  plTable: "PL Table",
+  villa: "Villa",
 };
 
 const COMPACT_PANEL_LABELS: Record<CompactRotatePanel, string> = {
@@ -247,8 +265,24 @@ const COMPACT_PANEL_LABELS: Record<CompactRotatePanel, string> = {
   solar: "Solar",
   cric: "Cricket",
   footy: "Football",
+  plTable: "PL Table",
+  villa: "Villa",
   calendar: "Dates",
 };
+
+function buildSportsRotationPool(
+  hasCric: boolean,
+  hasFooty: boolean,
+  hasPlTable: boolean,
+  hasVilla: boolean,
+): SportsRotatePanel[] {
+  const pool: SportsRotatePanel[] = [];
+  if (hasCric) pool.push("cric");
+  if (hasFooty) pool.push("footy");
+  if (hasPlTable) pool.push("plTable");
+  if (hasVilla) pool.push("villa");
+  return pool;
+}
 
 function buildCompactRotationPool(
   stackCalendar: boolean,
@@ -257,12 +291,16 @@ function buildCompactRotationPool(
   hasSolar: boolean,
   hasCric: boolean,
   hasFooty: boolean,
+  hasPlTable: boolean,
+  hasVilla: boolean,
 ): CompactRotatePanel[] {
   const pool: CompactRotatePanel[] = [];
   if (!stackCalendar && calendarLines && calendarLines.length > 0) pool.push("calendar");
   if (hasWeather) pool.push("weather");
   if (hasFooty) pool.push("footy");
   if (hasCric) pool.push("cric");
+  if (hasPlTable) pool.push("plTable");
+  if (hasVilla) pool.push("villa");
   if (hasSolar) pool.push("solar");
   return pool;
 }
@@ -295,21 +333,22 @@ function renderAllShortcutsMenu(): void {
   writeCenteredBox(buildAllShortcutsMenuLines(), SHORTCUTS_MENU_INNER_WIDTH);
 }
 
-function isFootyPanelVisible(
+function isSportsPanelVisible(
   tier: StatusLayoutTier,
-  hasFooty: boolean,
+  panel: SportsRotatePanel,
+  hasPanel: boolean,
   compactDisplay: CompactRotatePanel | undefined,
-  sportsDisplay: "cric" | "footy" | "both",
+  sportsDisplay: SportsRotatePanel | undefined,
 ): boolean {
-  if (tier === "statusOnly" || !hasFooty) return false;
+  if (tier === "statusOnly" || !hasPanel) return false;
   if (usesCompactRotation(tier)) {
-    return compactDisplay === "footy";
+    return compactDisplay === panel;
   }
   if (tier === "threeColumn") {
-    return sportsDisplay === "footy";
+    return sportsDisplay === panel;
   }
   if (tier === "full") {
-    return sportsDisplay === "both" || sportsDisplay === "footy";
+    return true;
   }
   return false;
 }
@@ -324,10 +363,14 @@ function cricketPanelAvailable(lines: string[]): boolean {
   return lines.length > 0 && lines[0] !== "-";
 }
 
+function plTablePanelAvailable(lines: string[]): boolean {
+  return lines.length > 0 && lines[0] !== "-";
+}
+
 function buildSportsPanelLines(
-  panel: "cric" | "footy",
+  panel: SportsRotatePanel,
   lines: string[],
-  countdown?: { seconds: number; next: "cric" | "footy"; paused?: boolean },
+  countdown?: { seconds: number; next: SportsRotatePanel; paused?: boolean },
 ): string[] {
   const title = SPORTS_PANEL_NAMES[panel];
   const heading = countdown
@@ -337,9 +380,14 @@ function buildSportsPanelLines(
   return body;
 }
 
-async function loadFullWeatherLines(location: string): Promise<string[]> {
+async function loadWeatherSnapshot(
+  location: string,
+  todayYmd: string,
+): Promise<{ lines: string[]; sunrise: string; sunset: string }> {
   const data = (await fetchBbcWeatherAggregated(location)) as WeatherResponse;
-  return buildFullWeatherLines(data, location);
+  const { sunrise, sunset } = todaySunriseSunset(data, todayYmd);
+  const lines = await buildFullWeatherLines(data, location);
+  return { lines, sunrise, sunset };
 }
 
 function solarSnapshotFromData(data: SolarResponse, dayKey: string, now: Date): {
@@ -378,6 +426,16 @@ function writeDisplay(
   }
   if (panels.footyLines) {
     for (const line of panels.footyLines) {
+      console.log(line);
+    }
+  }
+  if (panels.plTableLines) {
+    for (const line of panels.plTableLines) {
+      console.log(line);
+    }
+  }
+  if (panels.villaLines) {
+    for (const line of panels.villaLines) {
       console.log(line);
     }
   }
@@ -481,18 +539,22 @@ async function printOnce(): Promise<void> {
   const dayKey = ukTodayYmd(now);
   const bdayConfig = readBdayConfig();
   const location = resolveDefaultLocation();
-  const [weatherLines, solar, wfh, temps, houseOcto, sports] = await Promise.all([
-    loadFullWeatherLines(location),
+  const [weatherSnapshot, solar, wfh, temps, houseOcto, sports, plTableLines, villaLines] = await Promise.all([
+    loadWeatherSnapshot(location, dayKey),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
     loadTemps(),
     loadHouseOctoPrices(now),
     loadSportsLines(dayKey),
+    loadPremierLeagueTableStatusLines(),
+    loadVillaFixturesStatusLines(),
   ]);
   writeDisplay(
     buildStatusLines({
       now,
       todayYmd: dayKey,
+      sunrise: weatherSnapshot.sunrise,
+      sunset: weatherSnapshot.sunset,
       houseOcto,
       bdayConfig,
       wfh,
@@ -505,9 +567,15 @@ async function printOnce(): Promise<void> {
     }),
     false,
     {
-      weatherLines,
+      weatherLines: weatherSnapshot.lines,
       cricLines: buildSportsPanelLines("cric", sports.cricLines),
       footyLines: buildSportsPanelLines("footy", sports.footyLines),
+      plTableLines: plTablePanelAvailable(plTableLines)
+        ? buildSportsPanelLines("plTable", plTableLines)
+        : null,
+      villaLines: sportsPanelHasContent(villaLines)
+        ? buildSportsPanelLines("villa", villaLines)
+        : null,
     },
   );
 }
@@ -601,6 +669,8 @@ async function runLive(): Promise<void> {
   let trackedDate = ukTodayYmd();
   let bdayConfig = readBdayConfig();
   let fullWeatherLines: string[] = [];
+  let sunrise = "-";
+  let sunset = "-";
   let wfh: boolean | null = null;
   let houseOcto = emptyHouseOctoSnapshot();
   let downstairsTemp: number | null = null;
@@ -614,11 +684,16 @@ async function runLive(): Promise<void> {
   let lastPowerHourStart = 0;
   let lastTempRefreshAt = 0;
   let lastGasRefreshAt = 0;
+  let lastCricRefreshAt = 0;
+  let lastPlTableRefreshAt = 0;
+  let lastVillaRefreshAt = 0;
   let calendarData: StatusCalendarData | null = null;
   let cricLines: string[] = ["-"];
   let footyLines: string[] = ["-"];
+  let plTableLines: string[] = ["-"];
+  let villaLines: string[] = ["-"];
   let solarData: SolarResponse | null = null;
-  let sportsAlternatePhase: "cric" | "footy" = "cric";
+  let sportsRotatePhase: SportsRotatePanel = "cric";
   let lastSportsAlternateAt = Date.now();
   let middleAlternatePhase: "weather" | "solar" = "weather";
   let lastMiddleAlternateAt = Date.now();
@@ -627,7 +702,9 @@ async function runLive(): Promise<void> {
   let rotationPaused = false;
   let rotationPausedAt = 0;
   let footyPanelWasVisible: boolean | null = null;
+  let villaPanelWasVisible: boolean | null = null;
   let footyRefreshGeneration = 0;
+  let villaRefreshGeneration = 0;
   let cmdMenuState: CmdMenuState = { active: false };
   let shortcutsMenuOpen = false;
   let runningCommand = false;
@@ -637,6 +714,8 @@ async function runLive(): Promise<void> {
   const displayState = (): StatusDisplayState => ({
     now: new Date(),
     todayYmd: trackedDate,
+    sunrise,
+    sunset,
     houseOcto,
     bdayConfig,
     wfh,
@@ -679,6 +758,8 @@ async function runLive(): Promise<void> {
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
     const hasFootyRaw = sportsPanelHasContent(footyLines);
+    const hasPlTableRaw = plTablePanelAvailable(plTableLines);
+    const hasVillaRaw = sportsPanelHasContent(villaLines);
     const statusOnly = isStatusOnlyTerminal();
     const stackCalendar =
       !statusOnly &&
@@ -694,6 +775,8 @@ async function runLive(): Promise<void> {
           solarLines: hasSolar ? baseSolarPanel : null,
           cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
           footyLines: hasFootyRaw ? buildSportsPanelLines("footy", footyLines) : null,
+          plTableLines: hasPlTableRaw ? buildSportsPanelLines("plTable", plTableLines) : null,
+          villaLines: hasVillaRaw ? buildSportsPanelLines("villa", villaLines) : null,
         });
 
     const sidePanelWidth =
@@ -711,9 +794,15 @@ async function runLive(): Promise<void> {
       shortcutPlaceholder,
     );
     const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
+    const fittedVillaLines = fitFootballStatusLines(villaLines, maxFootyLines);
+    const fittedPlTableLines = fitPanelContentLines(plTableLines, maxFootyLines);
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
+    const hasPlTable = plTablePanelAvailable(fittedPlTableLines);
+    const hasVilla = sportsPanelHasContent(fittedVillaLines);
     const baseCricPanel = buildSportsPanelLines("cric", cricLines);
     const baseFootyPanel = buildSportsPanelLines("footy", fittedFootyLines);
+    const basePlTablePanel = buildSportsPanelLines("plTable", fittedPlTableLines);
+    const baseVillaPanel = buildSportsPanelLines("villa", fittedVillaLines);
 
     const compactPool = buildCompactRotationPool(
       stackCalendar,
@@ -722,6 +811,8 @@ async function runLive(): Promise<void> {
       hasSolar,
       hasCric,
       hasFooty,
+      hasPlTable,
+      hasVilla,
     );
     let compactDisplay: CompactRotatePanel | undefined;
     let compactSwitchCountdown:
@@ -754,39 +845,35 @@ async function runLive(): Promise<void> {
       }
     }
 
-    let sportsDisplay: "cric" | "footy" | "both" = "both";
+    let sportsDisplay: SportsRotatePanel | undefined;
     let sportsSwitchCountdown:
-      | { seconds: number; next: "cric" | "footy"; paused?: boolean }
+      | { seconds: number; next: SportsRotatePanel; paused?: boolean }
       | undefined;
-    if (tier === "threeColumn") {
-      if (hasCric && hasFooty) {
+    const sportsPool = buildSportsRotationPool(hasCric, hasFooty, hasPlTable, hasVilla);
+    if (tier === "threeColumn" && sportsPool.length > 0) {
+      if (!sportsPool.includes(sportsRotatePhase)) {
+        sportsRotatePhase = sportsPool[0];
+      }
+      if (sportsPool.length > 1) {
         const nowMs = rotationPaused ? rotationPausedAt : Date.now();
         if (!rotationPaused && nowMs - lastSportsAlternateAt >= PANEL_ALTERNATE_MS) {
-          sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+          const index = sportsPool.indexOf(sportsRotatePhase);
+          sportsRotatePhase = sportsPool[(index + 1) % sportsPool.length];
           lastSportsAlternateAt = nowMs;
         }
-        sportsDisplay = sportsAlternatePhase;
+        sportsDisplay = sportsRotatePhase;
         const secondsLeft = Math.max(
           0,
           Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastSportsAlternateAt)) / 1000),
         );
+        const nextIndex = (sportsPool.indexOf(sportsRotatePhase) + 1) % sportsPool.length;
         sportsSwitchCountdown = {
           seconds: secondsLeft,
-          next: sportsAlternatePhase === "cric" ? "footy" : "cric",
+          next: sportsPool[nextIndex],
           paused: rotationPaused,
         };
-      } else if (hasCric) {
-        sportsDisplay = "cric";
-      } else if (hasFooty) {
-        sportsDisplay = "footy";
-      }
-    } else if (tier === "full") {
-      if (hasCric && hasFooty) {
-        sportsDisplay = "both";
-      } else if (hasCric) {
-        sportsDisplay = "cric";
-      } else if (hasFooty) {
-        sportsDisplay = "footy";
+      } else {
+        sportsDisplay = sportsPool[0];
       }
     }
 
@@ -798,6 +885,14 @@ async function runLive(): Promise<void> {
       tier === "threeColumn" && sportsDisplay === "footy" && sportsSwitchCountdown
         ? buildSportsPanelLines("footy", fittedFootyLines, sportsSwitchCountdown)
         : baseFootyPanel;
+    const plTablePanel =
+      tier === "threeColumn" && sportsDisplay === "plTable" && sportsSwitchCountdown
+        ? buildSportsPanelLines("plTable", fittedPlTableLines, sportsSwitchCountdown)
+        : basePlTablePanel;
+    const villaPanel =
+      tier === "threeColumn" && sportsDisplay === "villa" && sportsSwitchCountdown
+        ? buildSportsPanelLines("villa", fittedVillaLines, sportsSwitchCountdown)
+        : baseVillaPanel;
 
     const canAlternateMiddle = hasWeather && hasSolar;
     let middleDisplay: "weather" | "solar" = "weather";
@@ -876,18 +971,29 @@ async function runLive(): Promise<void> {
       middleDisplay: tier === "threeColumn" ? middleDisplay : undefined,
       cricLines: panelLines("cric", cricPanel, tier === "full" || tier === "threeColumn"),
       footyLines: panelLines("footy", footyPanel, tier === "full" || tier === "threeColumn"),
-      sportsDisplay: tier === "threeColumn" || tier === "full" ? sportsDisplay : undefined,
+      plTableLines: panelLines("plTable", plTablePanel, tier === "full" || tier === "threeColumn"),
+      villaLines: panelLines("villa", villaPanel, tier === "full" || tier === "threeColumn"),
+      sportsDisplay: tier === "threeColumn" ? sportsDisplay : undefined,
     });
 
-    const footyVisible = isFootyPanelVisible(tier, hasFooty, compactDisplay, sportsDisplay);
+    const footyVisible = isSportsPanelVisible(tier, "footy", hasFooty, compactDisplay, sportsDisplay);
     if (footyVisible && footyPanelWasVisible === false) {
       void refreshFootball(trackedDate);
     }
     footyPanelWasVisible = footyVisible;
+
+    const villaVisible = isSportsPanelVisible(tier, "villa", hasVilla, compactDisplay, sportsDisplay);
+    if (villaVisible && villaPanelWasVisible === false) {
+      void refreshVilla();
+    }
+    villaPanelWasVisible = villaVisible;
   };
 
   const refreshWeather = async (): Promise<void> => {
-    fullWeatherLines = await loadFullWeatherLines(location);
+    const snapshot = await loadWeatherSnapshot(location, trackedDate);
+    fullWeatherLines = snapshot.lines;
+    sunrise = snapshot.sunrise;
+    sunset = snapshot.sunset;
   };
 
   const refreshCalendar = async (now: Date): Promise<void> => {
@@ -904,6 +1010,20 @@ async function runLive(): Promise<void> {
     } catch {
       if (generation !== footyRefreshGeneration) return;
       footyLines = ["-"];
+      render();
+    }
+  };
+
+  const refreshVilla = async (): Promise<void> => {
+    const generation = ++villaRefreshGeneration;
+    try {
+      const lines = await loadVillaFixturesStatusLines();
+      if (generation !== villaRefreshGeneration) return;
+      villaLines = lines;
+      render();
+    } catch {
+      if (generation !== villaRefreshGeneration) return;
+      villaLines = ["-"];
       render();
     }
   };
@@ -1090,6 +1210,8 @@ async function runLive(): Promise<void> {
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
     const hasFooty = sportsPanelHasContent(footyLines);
+    const hasPlTable = plTablePanelAvailable(plTableLines);
+    const hasVilla = sportsPanelHasContent(villaLines);
     const stackCalendar =
       shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
     const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
@@ -1099,6 +1221,8 @@ async function runLive(): Promise<void> {
       solarLines: hasSolar ? baseSolarPanel : null,
       cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
       footyLines: hasFooty ? buildSportsPanelLines("footy", footyLines) : null,
+      plTableLines: hasPlTable ? buildSportsPanelLines("plTable", plTableLines) : null,
+      villaLines: hasVilla ? buildSportsPanelLines("villa", villaLines) : null,
     });
     const compactPool = buildCompactRotationPool(
       stackCalendar,
@@ -1107,6 +1231,8 @@ async function runLive(): Promise<void> {
       hasSolar,
       hasCric,
       hasFooty,
+      hasPlTable,
+      hasVilla,
     );
 
     if (usesCompactRotation(tier) && compactPool.length > 1) {
@@ -1114,8 +1240,10 @@ async function runLive(): Promise<void> {
       compactRotatePhase = compactPool[(index + 1) % compactPool.length];
       lastCompactRotateAt = nowMs;
     }
-    if (tier === "threeColumn" && hasCric && hasFooty) {
-      sportsAlternatePhase = sportsAlternatePhase === "cric" ? "footy" : "cric";
+    const sportsPool = buildSportsRotationPool(hasCric, hasFooty, hasPlTable, hasVilla);
+    if (tier === "threeColumn" && sportsPool.length > 1) {
+      const index = sportsPool.indexOf(sportsRotatePhase);
+      sportsRotatePhase = sportsPool[(index + 1) % sportsPool.length];
       lastSportsAlternateAt = nowMs;
     }
     if (tier === "threeColumn" && hasWeather && hasSolar) {
@@ -1164,22 +1292,29 @@ async function runLive(): Promise<void> {
     }
   };
 
-  [wfh, { downstairsTemp, shedTemp }, houseOcto, calendarData, { cricLines, footyLines }] =
+  [wfh, { downstairsTemp, shedTemp }, houseOcto, calendarData, { cricLines, footyLines }, plTableLines, villaLines] =
     await Promise.all([
       fetchWfhStatus(),
       loadTemps(),
       loadHouseOctoPrices(),
       loadStatusCalendarData(),
       loadSportsLines(trackedDate),
+      loadPremierLeagueTableStatusLines(),
+      loadVillaFixturesStatusLines(),
     ]);
   try {
     await refreshWeather();
   } catch {
     fullWeatherLines = ["weather unavailable"];
+    sunrise = "-";
+    sunset = "-";
   }
   const startedAt = Date.now();
   lastTempRefreshAt = startedAt;
   lastGasRefreshAt = startedAt;
+  lastCricRefreshAt = startedAt;
+  lastPlTableRefreshAt = startedAt;
+  lastVillaRefreshAt = startedAt;
 
   try {
     const data = await fetchSolarData();
@@ -1208,6 +1343,9 @@ async function runLive(): Promise<void> {
         dayChanged || hourChanged || nowMs - lastPowerRefreshAt >= SOLAR_POWER_REFRESH_MS;
       const needTempRefresh = dayChanged || nowMs - lastTempRefreshAt >= TEMP_REFRESH_MS;
       const needGasRefresh = dayChanged || nowMs - lastGasRefreshAt >= GAS_REFRESH_MS;
+      const needCricRefresh = dayChanged || nowMs - lastCricRefreshAt >= CRICKET_REFRESH_MS;
+      const needPlTableRefresh = dayChanged || nowMs - lastPlTableRefreshAt >= PL_TABLE_REFRESH_MS;
+      const needVillaRefresh = dayChanged || nowMs - lastVillaRefreshAt >= VILLA_REFRESH_MS;
 
       if (dayChanged) {
         trackedDate = today;
@@ -1219,7 +1357,41 @@ async function runLive(): Promise<void> {
           fetchWfhStatus(),
           refreshCalendar(now),
           refreshSports(today),
+          loadPremierLeagueTableStatusLines().then((lines) => {
+            plTableLines = lines;
+          }),
+          loadVillaFixturesStatusLines().then((lines) => {
+            villaLines = lines;
+          }),
         ]);
+        lastCricRefreshAt = nowMs;
+        lastPlTableRefreshAt = nowMs;
+        lastVillaRefreshAt = nowMs;
+      } else {
+        if (needCricRefresh) {
+          try {
+            cricLines = await loadCricketStatusLines(trackedDate);
+            lastCricRefreshAt = nowMs;
+          } catch {
+            // Keep last known values on transient API errors.
+          }
+        }
+        if (needPlTableRefresh) {
+          try {
+            plTableLines = await loadPremierLeagueTableStatusLines();
+            lastPlTableRefreshAt = nowMs;
+          } catch {
+            // Keep last known values on transient API errors.
+          }
+        }
+        if (needVillaRefresh) {
+          try {
+            villaLines = await loadVillaFixturesStatusLines();
+            lastVillaRefreshAt = nowMs;
+          } catch {
+            // Keep last known values on transient API errors.
+          }
+        }
       }
 
       if (needYieldRefresh || needPowerRefresh) {

@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.17.0",
+  "version": "3.18.0",
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {

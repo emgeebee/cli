@@ -242,6 +242,70 @@ export function todaySunriseSunset(
   return sunriseSunsetForDate(data, todayYmd);
 }
 
+function parseClockMinutes(value: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const hh = Number.parseInt(m[1], 10);
+  const mm = Number.parseInt(m[2], 10);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function parseYmdParts(ymd: string): { year: number; month: number; day: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return null;
+  return {
+    year: Number.parseInt(m[1], 10),
+    month: Number.parseInt(m[2], 10),
+    day: Number.parseInt(m[3], 10),
+  };
+}
+
+function ukClockEventMs(ymd: string, clock: string): number | null {
+  const day = parseYmdParts(ymd);
+  const minutes = parseClockMinutes(clock);
+  if (!day || minutes == null) return null;
+  return ukWallTimeToDate(day.year, day.month, day.day, Math.floor(minutes / 60), minutes % 60).getTime();
+}
+
+function formatRelativeSunOffset(nowMs: number, eventMs: number): string {
+  const diffMs = nowMs - eventMs;
+  const roundedMins = Math.round(Math.abs(diffMs) / 60_000);
+  if (roundedMins === 0) return "(now)";
+
+  const hours = Math.floor(roundedMins / 60);
+  const mins = roundedMins % 60;
+
+  if (diffMs > 0) {
+    if (hours > 0) {
+      return mins > 0 ? `(${hours}hr ${mins}m ago)` : `(${hours}hr ago)`;
+    }
+    return `(${mins}m ago)`;
+  }
+  if (hours > 0) {
+    return mins > 0 ? `(in ${hours}h ${mins}m)` : `(in ${hours}h)`;
+  }
+  return `(in ${mins}m)`;
+}
+
+export function formatSunriseSunsetStatusLine(
+  sunrise: string,
+  sunset: string,
+  now: Date,
+  todayYmd: string,
+): string {
+  if (sunrise === "-" || sunset === "-") {
+    return "sun up: - // down: -";
+  }
+
+  const nowMs = now.getTime();
+  const sunriseMs = ukClockEventMs(todayYmd, sunrise);
+  const sunsetMs = ukClockEventMs(todayYmd, sunset);
+  const upRel = sunriseMs != null ? ` ${formatRelativeSunOffset(nowMs, sunriseMs)}` : "";
+  const downRel = sunsetMs != null ? ` ${formatRelativeSunOffset(nowMs, sunsetMs)}` : "";
+  return `sun up: ${sunrise}${upRel} // down: ${sunset}${downRel}`;
+}
+
 function shouldUseColor(): boolean {
   return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 }
