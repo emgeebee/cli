@@ -17352,15 +17352,26 @@ var STATUS_SHORTCUT_BY_KEY = Object.fromEntries(
 function statusShortcutForKey(key) {
   return STATUS_SHORTCUT_BY_KEY[key] ?? null;
 }
+var ANSI_RED5 = "\x1B[31m";
+var ANSI_RESET7 = "\x1B[0m";
+function formatPlainStatusShortcutEntry(entry) {
+  return `${entry.key}:${entry.label}`;
+}
+function colorizeStatusShortcutEntry(value, entry) {
+  if (entry.color === "red") {
+    return `${ANSI_RED5}${value}${ANSI_RESET7}`;
+  }
+  return value;
+}
 function formatStatusShortcutLine(entries) {
-  return entries.map((entry) => `${entry.key}:${entry.label}`).join("  ");
+  return entries.map((entry) => colorizeStatusShortcutEntry(formatPlainStatusShortcutEntry(entry), entry)).join("  ");
 }
 var STATUS_BAR_SHORTCUTS = [
   { key: "a", label: "all" },
   { key: "c", label: "cmd" },
   { key: "n", label: "next" },
   { key: "p", label: "pause" },
-  { key: "q", label: "quit" }
+  { key: "q", label: "quit", color: "red" }
 ];
 function buildStatusBarShortcutLines() {
   return [formatStatusShortcutLine(STATUS_BAR_SHORTCUTS)];
@@ -17397,11 +17408,11 @@ var import_strip_ansi2 = __toESM(require_strip_ansi());
 var import_string_width3 = __toESM(require_string_width());
 var MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
 var MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
-var ANSI_RESET7 = "\x1B[0m";
+var ANSI_RESET8 = "\x1B[0m";
 var ANSI_GREEN5 = "\x1B[32m";
 var ANSI_YELLOW5 = "\x1B[33m";
 var ANSI_ORANGE5 = "\x1B[38;5;208m";
-var ANSI_RED5 = "\x1B[31m";
+var ANSI_RED6 = "\x1B[31m";
 var HEAVY_RAIN_WORDING = /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 var LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
 function visibleLength3(value) {
@@ -17486,7 +17497,7 @@ function shouldUseColor7() {
 }
 function colorize5(value, color) {
   if (!shouldUseColor7()) return value;
-  return `${color}${value}${ANSI_RESET7}`;
+  return `${color}${value}${ANSI_RESET8}`;
 }
 function formatMaxTemp(value) {
   return formatTemperatureText(value, { scale: "max" });
@@ -17497,13 +17508,13 @@ function formatMinTemp(value) {
 function formatRain(value) {
   if (value == null) return "?%";
   const text = `${value}%`;
-  const colored = value > 80 ? colorize5(text, ANSI_RED5) : value >= 50 ? colorize5(text, ANSI_ORANGE5) : value >= 25 ? colorize5(text, ANSI_YELLOW5) : colorize5(text, ANSI_GREEN5);
+  const colored = value > 80 ? colorize5(text, ANSI_RED6) : value >= 50 ? colorize5(text, ANSI_ORANGE5) : value >= 25 ? colorize5(text, ANSI_YELLOW5) : colorize5(text, ANSI_GREEN5);
   return colored;
 }
 function formatWindSpeed(value) {
   if (value == null) return "?mph";
   const text = `${value}mph`;
-  if (value > 40) return colorize5(text, ANSI_RED5);
+  if (value > 40) return colorize5(text, ANSI_RED6);
   if (value >= 20) return colorize5(text, ANSI_ORANGE5);
   if (value >= 10) return colorize5(text, ANSI_YELLOW5);
   return colorize5(text, ANSI_GREEN5);
@@ -17754,7 +17765,7 @@ var ANSI_ERASE_TO_END = "\x1B[J";
 var ANSI_HIDE_CURSOR = "\x1B[?25l";
 var ANSI_SHOW_CURSOR = "\x1B[?25h";
 var ANSI_SEQUENCE = /^\x1b\[[0-9;]*m/;
-var ANSI_RESET8 = "\x1B[0m";
+var ANSI_RESET9 = "\x1B[0m";
 function visibleLength4(value) {
   return (0, import_string_width4.default)((0, import_strip_ansi3.default)(value));
 }
@@ -17776,7 +17787,7 @@ function truncateToWidth(line, maxWidth) {
     const ansiMatch = line.slice(index).match(ANSI_SEQUENCE);
     if (ansiMatch) {
       result += ansiMatch[0];
-      if (ansiMatch[0] !== ANSI_RESET8) usedAnsi = true;
+      if (ansiMatch[0] !== ANSI_RESET9) usedAnsi = true;
       index += ansiMatch[0].length;
       continue;
     }
@@ -17789,7 +17800,7 @@ function truncateToWidth(line, maxWidth) {
       const inlineAnsi = line.slice(index).match(ANSI_SEQUENCE);
       if (inlineAnsi) {
         result += inlineAnsi[0];
-        if (inlineAnsi[0] !== ANSI_RESET8) usedAnsi = true;
+        if (inlineAnsi[0] !== ANSI_RESET9) usedAnsi = true;
         index += inlineAnsi[0].length;
         continue;
       }
@@ -17799,8 +17810,8 @@ function truncateToWidth(line, maxWidth) {
     }
     width += graphemeWidth;
   }
-  if (usedAnsi && !result.endsWith(ANSI_RESET8)) {
-    result += ANSI_RESET8;
+  if (usedAnsi && !result.endsWith(ANSI_RESET9)) {
+    result += ANSI_RESET9;
   }
   return result;
 }

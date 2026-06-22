@@ -70,10 +70,27 @@ export function statusShortcutForKey(key: string): StatusShortcut | null {
 export type StatusShortcutEntry = {
   key: string;
   label: string;
+  color?: "red";
 };
 
+const ANSI_RED = "\x1b[31m";
+const ANSI_RESET = "\x1b[0m";
+
+function formatPlainStatusShortcutEntry(entry: StatusShortcutEntry): string {
+  return `${entry.key}:${entry.label}`;
+}
+
+function colorizeStatusShortcutEntry(value: string, entry: StatusShortcutEntry): string {
+  if (entry.color === "red") {
+    return `${ANSI_RED}${value}${ANSI_RESET}`;
+  }
+  return value;
+}
+
 export function formatStatusShortcutLine(entries: StatusShortcutEntry[]): string {
-  return entries.map((entry) => `${entry.key}:${entry.label}`).join("  ");
+  return entries
+    .map((entry) => colorizeStatusShortcutEntry(formatPlainStatusShortcutEntry(entry), entry))
+    .join("  ");
 }
 
 export const STATUS_BAR_SHORTCUTS: StatusShortcutEntry[] = [
@@ -81,7 +98,7 @@ export const STATUS_BAR_SHORTCUTS: StatusShortcutEntry[] = [
   { key: "c", label: "cmd" },
   { key: "n", label: "next" },
   { key: "p", label: "pause" },
-  { key: "q", label: "quit" },
+  { key: "q", label: "quit", color: "red" },
 ];
 
 export function buildStatusBarShortcutLines(): string[] {
@@ -118,7 +135,7 @@ export function buildAllShortcutsMenuLines(): string[] {
 }
 
 export function statusShortcutsBoxWidth(): number {
-  return formatStatusShortcutLine(STATUS_BAR_SHORTCUTS).length;
+  return STATUS_BAR_SHORTCUTS.map(formatPlainStatusShortcutEntry).join("  ").length;
 }
 
 /** @deprecated Use statusShortcutsBoxWidth */
