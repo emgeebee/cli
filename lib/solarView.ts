@@ -4,6 +4,7 @@ import stringWidth from "string-width";
 import {
   formatColoredKwh,
   formatColoredWattsPrecise,
+  formatKwh,
   formatUkHourLabel,
   ukHourStartMs,
   ukWallTimeToDate,
@@ -11,6 +12,10 @@ import {
   SOLAR_API_URL,
   type SolarResponse,
 } from "./solarApi";
+import {
+  formatSolarMonthLabel,
+  type SolarMonthlyYieldRow,
+} from "./solarMonthlyYield";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -252,6 +257,15 @@ function buildAverageRows(yields: DailyYield[]): string[][] {
   ]);
 }
 
+function buildMonthlyYieldRows(monthlyYields: SolarMonthlyYieldRow[]): string[][] {
+  return monthlyYields.map((row) => [
+    formatSolarMonthLabel(row.month),
+    row.average == null ? "-" : formatColoredKwh(row.average),
+    row.total == null ? "-" : formatKwh(row.total),
+    row.days > 0 ? `${row.days}/${row.daysInMonth}` : "-",
+  ]);
+}
+
 function buildHourlyPowerSeries(readings: PowerReading[]): {
   firstHour: number;
   series: Array<number | null>;
@@ -338,7 +352,11 @@ function renderPowerGraph(readings: PowerReading[], maxLineWidth?: number): stri
   return lines;
 }
 
-function buildSolarViewBody(data: SolarResponse, maxLineWidth?: number): string[] {
+function buildSolarViewBody(
+  data: SolarResponse,
+  maxLineWidth?: number,
+  monthlyYields: SolarMonthlyYieldRow[] = [],
+): string[] {
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
@@ -355,6 +373,16 @@ function buildSolarViewBody(data: SolarResponse, maxLineWidth?: number): string[
     ),
   );
   lines.push("");
+  if (monthlyYields.length > 0) {
+    lines.push(`Monthly Yield (Last ${monthlyYields.length} Months)`);
+    lines.push(
+      ...makeAsciiTable(
+        ["Month", "Avg Yield", "Total Yield", "Days"],
+        buildMonthlyYieldRows(monthlyYields),
+      ),
+    );
+    lines.push("");
+  }
   lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
   lines.push(...renderPowerGraph(powerAvgReadings, maxLineWidth));
   return lines;
@@ -364,22 +392,29 @@ export function buildSolarPanelLines(
   data: SolarResponse,
   countdown?: { seconds: number; next: "weather"; paused?: boolean },
   maxLineWidth?: number,
+  monthlyYields: SolarMonthlyYieldRow[] = [],
 ): string[] {
   const title = countdown
     ? countdown.paused
       ? "=== Solar (Weather paused, n) ==="
       : `=== Solar (Weather in ${countdown.seconds}, n) ===`
     : "=== Solar ===";
-  return [title, "", ...buildSolarViewBody(data, maxLineWidth)];
+  return [title, "", ...buildSolarViewBody(data, maxLineWidth, monthlyYields)];
 }
 
-export function buildSolarCliLines(data: SolarResponse): string[] {
+export function buildSolarCliLines(
+  data: SolarResponse,
+  monthlyYields: SolarMonthlyYieldRow[] = [],
+): string[] {
   return [
     "Solar",
     `Source: ${SOLAR_API_URL}`,
     "",
-    ...buildSolarViewBody(data).map((line) => {
+    ...buildSolarViewBody(data, undefined, monthlyYields).map((line) => {
       if (line === "Daily Yield (Last 4 Weeks)") return "Daily yield (last 4 weeks)";
+      if (line === `Monthly Yield (Last ${monthlyYields.length} Months)`) {
+        return `Monthly yield (last ${monthlyYields.length} months)`;
+      }
       if (line.startsWith("Power Graph")) {
         return `Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`;
       }
@@ -388,16 +423,34 @@ export function buildSolarCliLines(data: SolarResponse): string[] {
   ];
 }
 
+function formatMonthlyYieldStatusLine(monthlyYields: SolarMonthlyYieldRow[]): string | null {
+  const rows = monthlyYields.filter((row) => row.average != null).slice(-3);
+  if (rows.length === 0) return null;
+  return `Monthly avg: ${rows
+    .map((row) => {
+      const suffix =
+        row.complete || row.days === 0 ? "" : ` (${row.days}/${row.daysInMonth})`;
+      return `${formatSolarMonthLabel(row.month)}: ${formatColoredKwh(row.average!)}${suffix}`;
+    })
+    .join(" // ")}`;
+}
+
 export function formatSolarStatusPowerLines(
   powerNow: number | null,
   powerHourAvg: number | null,
   now: Date,
   yieldAverages: YieldAverage[] | null,
+  monthlyYields: SolarMonthlyYieldRow[] | null = null,
 ): string[] {
   const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
   const avgText = powerHourAvg == null ? "-" : formatColoredWattsPrecise(powerHourAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
   const lines = [`Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`];
+  const monthlyLine = monthlyYields ? formatMonthlyYieldStatusLine(monthlyYields) : null;
+  if (monthlyLine) {
+    lines.push(monthlyLine);
+    return lines;
+  }
   if (!yieldAverages || yieldAverages.length === 0) return lines;
   const averages = yieldAverages
     .map(({ days, average }) => `${days}d: ${average == null ? "-" : formatColoredKwh(average)}`)

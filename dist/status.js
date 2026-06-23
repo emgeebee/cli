@@ -14957,10 +14957,166 @@ function formatSunriseSunsetStatusLine(sunrise, sunset, now, todayYmd) {
   return `sun up: ${sunrise}${upRel} // down: ${sunset}${downRel}`;
 }
 
+// lib/solarMonthlyYield.ts
+var import_node_fs2 = require("node:fs");
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var UK_TZ3 = "Europe/London";
+var SOLAR_MONTHLY_YIELD_MONTHS = 6;
+function parseDateKey(key) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date5 = new Date(Date.UTC(year, month - 1, day));
+  return Number.isNaN(date5.getTime()) ? null : date5;
+}
+function dayKeyUK(date5 = /* @__PURE__ */ new Date()) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
+}
+function currentMonthKey(now) {
+  return dayKeyUK(now).slice(0, 7);
+}
+function nextMonthKey(monthKey) {
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const date5 = new Date(Date.UTC(year, month, 1));
+  return `${date5.getUTCFullYear()}-${String(date5.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function monthKeyOffset(monthKey, offset) {
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const date5 = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return `${date5.getUTCFullYear()}-${String(date5.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function daysInMonthKey(monthKey) {
+  const start = /* @__PURE__ */ new Date(`${monthKey}-01T00:00:00Z`);
+  const end = /* @__PURE__ */ new Date(`${nextMonthKey(monthKey)}-01T00:00:00Z`);
+  return Math.round((end.getTime() - start.getTime()) / DAY_MS);
+}
+function monthKeysBackInclusive(now, months) {
+  const current = currentMonthKey(now);
+  const safeMonths = Math.max(1, Math.floor(months));
+  return Array.from(
+    { length: safeMonths },
+    (_, index) => monthKeyOffset(current, index - safeMonths + 1)
+  );
+}
+function normalizeDailyYields(data) {
+  return Object.entries(data.yield).map(([date5, value]) => ({ date: date5, value })).filter((entry) => parseDateKey(entry.date) && Number.isFinite(entry.value)).sort((a, b) => a.date.localeCompare(b.date));
+}
+function normalizeCachedMonthlyYield(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record2 = value;
+  const average = Number(record2.average);
+  const total = Number(record2.total);
+  const days = Number(record2.days);
+  if (!Number.isFinite(average) || !Number.isFinite(total) || !Number.isFinite(days) || days <= 0) {
+    return null;
+  }
+  return {
+    average,
+    total,
+    days,
+    updatedAt: String(record2.updatedAt || "")
+  };
+}
+function readSolarMonthlyYieldCache() {
+  const config2 = readPhoneCliConfig();
+  const solar = config2.solar || {};
+  const raw = solar.monthlyYieldCache;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const cache = {};
+  for (const [month, value] of Object.entries(raw)) {
+    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const normalized = normalizeCachedMonthlyYield(value);
+    if (normalized) {
+      cache[month] = normalized;
+    }
+  }
+  return cache;
+}
+function saveSolarMonthlyYieldCache(cache) {
+  const configPath = getConfigPath();
+  const config2 = readPhoneCliConfig();
+  const solar = config2.solar || {};
+  solar.monthlyYieldCache = cache;
+  config2.solar = solar;
+  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config2, null, 2)}
+`, "utf8");
+}
+function monthlyYieldFromDaily(data, currentMonth, immutableCachedMonths) {
+  const sums = {};
+  for (const entry of normalizeDailyYields(data)) {
+    const month = entry.date.slice(0, 7);
+    if (month < currentMonth && immutableCachedMonths.has(month)) continue;
+    sums[month] ||= { total: 0, days: 0 };
+    sums[month].total += entry.value;
+    sums[month].days += 1;
+  }
+  const updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const monthly = {};
+  for (const [month, sum] of Object.entries(sums)) {
+    if (sum.days <= 0) continue;
+    monthly[month] = {
+      average: sum.total / sum.days,
+      total: sum.total,
+      days: sum.days,
+      updatedAt
+    };
+  }
+  return monthly;
+}
+function completedCachedMonths(cache, currentMonth) {
+  return new Set(
+    Object.entries(cache).filter(([month, record2]) => month < currentMonth && record2.days >= daysInMonthKey(month)).map(([month]) => month)
+  );
+}
+function solarMonthlyYieldRowsFromData(data, now = /* @__PURE__ */ new Date(), months = SOLAR_MONTHLY_YIELD_MONTHS) {
+  const currentMonth = currentMonthKey(now);
+  const cache = readSolarMonthlyYieldCache();
+  const immutableCachedMonths = completedCachedMonths(cache, currentMonth);
+  const computed = monthlyYieldFromDaily(data, currentMonth, immutableCachedMonths);
+  let updated = false;
+  for (const [month, record2] of Object.entries(computed)) {
+    if (month >= currentMonth || cache[month]) continue;
+    if (record2.days < daysInMonthKey(month)) continue;
+    cache[month] = record2;
+    updated = true;
+  }
+  if (updated) {
+    saveSolarMonthlyYieldCache(cache);
+  }
+  return monthKeysBackInclusive(now, months).map((month) => {
+    const cached2 = cache[month];
+    const record2 = month < currentMonth ? cached2 ?? computed[month] : computed[month] ?? cached2;
+    const daysInMonth2 = daysInMonthKey(month);
+    return {
+      month,
+      average: record2?.average ?? null,
+      total: record2?.total ?? null,
+      days: record2?.days ?? 0,
+      daysInMonth: daysInMonth2,
+      complete: month < currentMonth && (record2?.days ?? 0) >= daysInMonth2,
+      cached: Boolean(cached2)
+    };
+  });
+}
+function formatSolarMonthLabel(monthKey) {
+  const date5 = /* @__PURE__ */ new Date(`${monthKey}-01T00:00:00Z`);
+  return date5.toLocaleDateString("en-GB", {
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC"
+  });
+}
+
 // lib/solarView.ts
 var import_strip_ansi = __toESM(require_strip_ansi());
 var import_string_width = __toESM(require_string_width());
-var DAY_MS = 24 * 60 * 60 * 1e3;
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var HOUR_MS = 60 * 60 * 1e3;
 var DAILY_YIELD_DAYS = 28;
 var AVERAGE_WINDOWS = [7, 14, 31];
@@ -14970,13 +15126,13 @@ var POWER_CHART_MAX_W = 800;
 var POWER_CHART_STEP_W = 50;
 var POWER_CHART_HEIGHT = (POWER_CHART_MAX_W - POWER_CHART_MIN_W) / POWER_CHART_STEP_W + 1;
 var CHART_POINT = "\u25CF";
-var UK_TZ3 = "Europe/London";
+var UK_TZ4 = "Europe/London";
 var ANSI_RESET3 = "\x1B[0m";
 var ANSI_GREEN3 = "\x1B[32m";
 var ANSI_YELLOW3 = "\x1B[33m";
 var ANSI_ORANGE3 = "\x1B[38;5;208m";
 var ANSI_RED3 = "\x1B[31m";
-function parseDateKey(key) {
+function parseDateKey2(key) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
   if (!match) return null;
   const year = Number(match[1]);
@@ -14988,8 +15144,8 @@ function parseDateKey(key) {
 function toYmd(date5) {
   return date5.toISOString().slice(0, 10);
 }
-function dayKeyUK(date5 = /* @__PURE__ */ new Date()) {
-  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ3 });
+function dayKeyUK2(date5 = /* @__PURE__ */ new Date()) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ4 });
 }
 function subtractDayKey(dayKey, days) {
   const [year, month, day] = dayKey.split("-").map(Number);
@@ -15002,7 +15158,7 @@ function startOfUtcDay(date5) {
 }
 function startOfUkHour(ms) {
   const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: UK_TZ3,
+    timeZone: UK_TZ4,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -15016,7 +15172,7 @@ function startOfUkHour(ms) {
   return ukWallTimeToDate(year, month, day, hour, 0).getTime();
 }
 function formatDateLabel(ymd) {
-  const date5 = parseDateKey(ymd);
+  const date5 = parseDateKey2(ymd);
   if (!date5) return ymd;
   return date5.toLocaleDateString("en-GB", {
     weekday: "short",
@@ -15030,7 +15186,7 @@ function formatHourLabel(ms) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-    timeZone: UK_TZ3
+    timeZone: UK_TZ4
   });
 }
 function formatWatts(value) {
@@ -15074,7 +15230,7 @@ function makeAsciiTable(headers, rows) {
   return [border, headerLine, border, ...body, border];
 }
 function normalizeDailyYield(data) {
-  return Object.entries(data.yield).map(([date5, value]) => ({ date: date5, value })).filter((entry) => parseDateKey(entry.date) && Number.isFinite(entry.value)).sort((a, b) => a.date.localeCompare(b.date));
+  return Object.entries(data.yield).map(([date5, value]) => ({ date: date5, value })).filter((entry) => parseDateKey2(entry.date) && Number.isFinite(entry.value)).sort((a, b) => a.date.localeCompare(b.date));
 }
 function normalizePowerAvgReadings(data) {
   return Object.entries(data.powerAvg).map(([key, value]) => {
@@ -15109,15 +15265,15 @@ function buildPowerRows(powerNow, powerAvgReadings) {
 }
 function latestYieldDay(yields) {
   const latest = yields.at(-1);
-  return latest ? parseDateKey(latest.date) ?? startOfUtcDay(/* @__PURE__ */ new Date()) : startOfUtcDay(/* @__PURE__ */ new Date());
+  return latest ? parseDateKey2(latest.date) ?? startOfUtcDay(/* @__PURE__ */ new Date()) : startOfUtcDay(/* @__PURE__ */ new Date());
 }
 function buildDailyYieldRows(yields) {
   const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
   const end = latestYieldDay(yields);
-  const start = new Date(end.getTime() - (DAILY_YIELD_DAYS - 1) * DAY_MS);
+  const start = new Date(end.getTime() - (DAILY_YIELD_DAYS - 1) * DAY_MS2);
   const rows = [];
   for (let offset = 0; offset < DAILY_YIELD_DAYS; offset += 1) {
-    const date5 = new Date(start.getTime() + offset * DAY_MS);
+    const date5 = new Date(start.getTime() + offset * DAY_MS2);
     const ymd = toYmd(date5);
     const value = byDate.get(ymd);
     rows.push([formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)]);
@@ -15126,7 +15282,7 @@ function buildDailyYieldRows(yields) {
 }
 function yieldAveragesFromYields(yields) {
   const byDate = new Map(yields.map((entry) => [entry.date, entry.value]));
-  const todayKey = dayKeyUK();
+  const todayKey = dayKeyUK2();
   return AVERAGE_WINDOWS.map((days) => {
     const values = [];
     for (let back = 1; back <= days; back += 1) {
@@ -15145,6 +15301,14 @@ function buildAverageRows(yields) {
     `${days} days`,
     average == null ? "-" : formatColoredKwh(average),
     `${samples}/${days}`
+  ]);
+}
+function buildMonthlyYieldRows(monthlyYields) {
+  return monthlyYields.map((row) => [
+    formatSolarMonthLabel(row.month),
+    row.average == null ? "-" : formatColoredKwh(row.average),
+    row.total == null ? "-" : formatKwh(row.total),
+    row.days > 0 ? `${row.days}/${row.daysInMonth}` : "-"
   ]);
 }
 function buildHourlyPowerSeries(readings) {
@@ -15219,7 +15383,7 @@ function renderPowerGraph(readings, maxLineWidth) {
   lines.push(`        ${labelChars.join("")}`);
   return lines;
 }
-function buildSolarViewBody(data, maxLineWidth) {
+function buildSolarViewBody(data, maxLineWidth, monthlyYields = []) {
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
@@ -15235,19 +15399,42 @@ function buildSolarViewBody(data, maxLineWidth) {
     )
   );
   lines.push("");
+  if (monthlyYields.length > 0) {
+    lines.push(`Monthly Yield (Last ${monthlyYields.length} Months)`);
+    lines.push(
+      ...makeAsciiTable(
+        ["Month", "Avg Yield", "Total Yield", "Days"],
+        buildMonthlyYieldRows(monthlyYields)
+      )
+    );
+    lines.push("");
+  }
   lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
   lines.push(...renderPowerGraph(powerAvgReadings, maxLineWidth));
   return lines;
 }
-function buildSolarPanelLines(data, countdown, maxLineWidth) {
+function buildSolarPanelLines(data, countdown, maxLineWidth, monthlyYields = []) {
   const title = countdown ? countdown.paused ? "=== Solar (Weather paused, n) ===" : `=== Solar (Weather in ${countdown.seconds}, n) ===` : "=== Solar ===";
-  return [title, "", ...buildSolarViewBody(data, maxLineWidth)];
+  return [title, "", ...buildSolarViewBody(data, maxLineWidth, monthlyYields)];
 }
-function formatSolarStatusPowerLines(powerNow, powerHourAvg, now, yieldAverages) {
+function formatMonthlyYieldStatusLine(monthlyYields) {
+  const rows = monthlyYields.filter((row) => row.average != null).slice(-3);
+  if (rows.length === 0) return null;
+  return `Monthly avg: ${rows.map((row) => {
+    const suffix = row.complete || row.days === 0 ? "" : ` (${row.days}/${row.daysInMonth})`;
+    return `${formatSolarMonthLabel(row.month)}: ${formatColoredKwh(row.average)}${suffix}`;
+  }).join(" // ")}`;
+}
+function formatSolarStatusPowerLines(powerNow, powerHourAvg, now, yieldAverages, monthlyYields = null) {
   const nowText = powerNow == null ? "-" : formatColoredWattsPrecise(powerNow);
   const avgText = powerHourAvg == null ? "-" : formatColoredWattsPrecise(powerHourAvg);
   const hourLabel = formatUkHourLabel(ukHourStartMs(now));
   const lines = [`Solar: ${nowText} // Avg (${hourLabel}): ${avgText}`];
+  const monthlyLine = monthlyYields ? formatMonthlyYieldStatusLine(monthlyYields) : null;
+  if (monthlyLine) {
+    lines.push(monthlyLine);
+    return lines;
+  }
   if (!yieldAverages || yieldAverages.length === 0) return lines;
   const averages = yieldAverages.map(({ days, average }) => `${days}d: ${average == null ? "-" : formatColoredKwh(average)}`).join(" // ");
   lines.push(averages);
@@ -15298,7 +15485,7 @@ function latestRoomTemp(data, room) {
 }
 
 // lib/octoApi.ts
-var import_node_fs2 = require("node:fs");
+var import_node_fs3 = require("node:fs");
 var ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"];
 var ELECTRICITY_PERIODS = [
   { label: "< 6", minHour: 0, maxHour: 6 },
@@ -15308,9 +15495,9 @@ var ELECTRICITY_PERIODS = [
   { label: "> 7", minHour: 19, maxHour: 24 }
 ];
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
-var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
 var CACHE_MAX_AGE_DAYS = 2;
-var UK_TZ4 = "Europe/London";
+var UK_TZ5 = "Europe/London";
 var ANSI_RESET4 = "\x1B[0m";
 var ANSI_GREEN4 = "\x1B[32m";
 var ANSI_YELLOW4 = "\x1B[33m";
@@ -15492,25 +15679,25 @@ function colorForRate(rateIncVat, fuel) {
   if (rateIncVat < 6) return ANSI_ORANGE4;
   return ANSI_RED4;
 }
-function dayKeyUK2(date5) {
-  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ4 });
+function dayKeyUK3(date5) {
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ5 });
 }
 function ukTomorrowYmd(now = /* @__PURE__ */ new Date()) {
-  const [year, month, day] = dayKeyUK2(now).split("-").map(Number);
+  const [year, month, day] = dayKeyUK3(now).split("-").map(Number);
   const date5 = new Date(Date.UTC(year, month - 1, day + 1));
   return date5.toISOString().slice(0, 10);
 }
 function gasRatesForDay(rates, dayYmd) {
-  return rates.filter((rate) => rate.valid_from && dayKeyUK2(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
+  return rates.filter((rate) => rate.valid_from && dayKeyUK3(new Date(rate.valid_from)) === dayYmd).sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
 function cacheEntryAgeDays(dayYmd, now) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dayYmd)) return null;
-  const [tY, tM, tD] = dayKeyUK2(now).split("-").map(Number);
+  const [tY, tM, tD] = dayKeyUK3(now).split("-").map(Number);
   const [y, m, d] = dayYmd.split("-").map(Number);
   const todayUtc = Date.UTC(tY, tM - 1, tD);
   const entryUtc = Date.UTC(y, m - 1, d);
   if (Number.isNaN(entryUtc)) return null;
-  return Math.floor((todayUtc - entryUtc) / DAY_MS2);
+  return Math.floor((todayUtc - entryUtc) / DAY_MS3);
 }
 function pruneStaleDateKeyedCache(cache, now = /* @__PURE__ */ new Date()) {
   let pruned = false;
@@ -15558,7 +15745,7 @@ function writeOctoConfigSection(section, value) {
   const octo = config2.octo || {};
   octo[section] = value;
   config2.octo = octo;
-  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config2, null, 2)}
+  (0, import_node_fs3.writeFileSync)(configPath, `${JSON.stringify(config2, null, 2)}
 `, "utf8");
 }
 function saveGasPriceCache(cache) {
@@ -15581,7 +15768,7 @@ async function ensureGasPricesCached(dayKeys, now) {
     return cache;
   }
   const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS2);
+  const to = new Date(from.getTime() + 2 * DAY_MS3);
   const fetched = await fetchGasRates(from, to);
   let updated = false;
   for (const dayKey of missing) {
@@ -15605,7 +15792,7 @@ async function fetchGasRates(from, to) {
   return fetchAllOctopusResults(url2, token);
 }
 async function loadTodayTomorrowGasRates(now = /* @__PURE__ */ new Date()) {
-  const todayYmd = dayKeyUK2(now);
+  const todayYmd = dayKeyUK3(now);
   const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureGasPricesCached([todayYmd, tomorrowYmd], now);
   return {
@@ -15702,7 +15889,7 @@ async function ensureElectricityPricesCached(dayKeys, now) {
     return cache;
   }
   const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS2);
+  const to = new Date(from.getTime() + 2 * DAY_MS3);
   const fetched = await fetchElectricityRates(from, to);
   let updated = false;
   for (const dayKey of missing) {
@@ -15718,7 +15905,7 @@ async function ensureElectricityPricesCached(dayKeys, now) {
   return cache;
 }
 async function loadTodayTomorrowElectricityRates(now = /* @__PURE__ */ new Date()) {
-  const todayYmd = dayKeyUK2(now);
+  const todayYmd = dayKeyUK3(now);
   const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
   return {
@@ -15732,7 +15919,7 @@ function ukHourFromIso(iso) {
   const hour = Number(date5.toLocaleTimeString("en-GB", {
     hour: "numeric",
     hour12: false,
-    timeZone: UK_TZ4
+    timeZone: UK_TZ5
   }));
   return Number.isFinite(hour) ? hour : null;
 }
@@ -15809,8 +15996,8 @@ function formatElectricityPeriodAvgTable(today, tomorrow) {
 }
 
 // lib/bdayApi.ts
-var DAY_MS3 = 24 * 60 * 60 * 1e3;
-var UK_TZ5 = "Europe/London";
+var DAY_MS4 = 24 * 60 * 60 * 1e3;
+var UK_TZ6 = "Europe/London";
 function readBdayConfig() {
   const config2 = readPhoneCliConfig();
   const bday = config2.bday;
@@ -15820,7 +16007,7 @@ function readBdayConfig() {
   return bday;
 }
 function ukTodayYmd2(now = /* @__PURE__ */ new Date()) {
-  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ5 });
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ6 });
 }
 function isLeapYear(year) {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
@@ -15855,7 +16042,7 @@ function nextUpcomingBirthdays(config2, now = /* @__PURE__ */ new Date(), limit 
     if (!bdYmd) continue;
     const nextYmd = nextBirthdayYmd(bdYmd, now);
     if (!nextYmd) continue;
-    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS3);
+    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS4);
     const birthYear = Number(bdYmd.slice(0, 4));
     const nextYear = Number(nextYmd.slice(0, 4));
     upcoming.push({
@@ -15873,7 +16060,7 @@ function formatBdayDate(ymd) {
   return date5.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
-    timeZone: UK_TZ5
+    timeZone: UK_TZ6
   });
 }
 function formatDaysUntil(daysUntil) {
@@ -16309,7 +16496,7 @@ var COMPETITION_ORDER = [
   "League One",
   "Scottish Premiership"
 ];
-var DAY_MS4 = 24 * 60 * 60 * 1e3;
+var DAY_MS5 = 24 * 60 * 60 * 1e3;
 var STATUS_FORWARD_DAYS = 59;
 var COMPETITION_ALLOWLIST = /* @__PURE__ */ new Set([
   "premierleague",
@@ -16549,14 +16736,14 @@ function statusDayRows(todayYmd) {
   const d = Number.parseInt(m[3], 10);
   const today = new Date(Date.UTC(y, mo, d));
   const rows = [
-    { relative: "yesterday", ymd: toYmd2(new Date(today.getTime() - DAY_MS4)) },
+    { relative: "yesterday", ymd: toYmd2(new Date(today.getTime() - DAY_MS5)) },
     { relative: "today", ymd: todayYmd },
-    { relative: "tomorrow", ymd: toYmd2(new Date(today.getTime() + DAY_MS4)) }
+    { relative: "tomorrow", ymd: toYmd2(new Date(today.getTime() + DAY_MS5)) }
   ];
   for (let offset = 2; offset <= STATUS_FORWARD_DAYS; offset += 1) {
     rows.push({
       relative: "",
-      ymd: toYmd2(new Date(today.getTime() + offset * DAY_MS4))
+      ymd: toYmd2(new Date(today.getTime() + offset * DAY_MS5))
     });
   }
   return rows;
@@ -16824,7 +17011,7 @@ async function loadVillaFixturesStatusLines() {
     const now = /* @__PURE__ */ new Date();
     const seasonStart = startOfMostRecentAugust(now);
     const start = toYmd2(seasonStart);
-    const end = toYmd2(new Date(now.getTime() + 30 * DAY_MS4));
+    const end = toYmd2(new Date(now.getTime() + 30 * DAY_MS5));
     const today = toYmd2(/* @__PURE__ */ new Date());
     const url2 = urlForTeamGames(today, end, start, ASTON_VILLA_TEAM_URN);
     const events = (await fetchMatchData(url2, start)).filter((event) => {
@@ -16842,7 +17029,7 @@ async function loadVillaFixturesStatusLines() {
 // lib/cricApi.ts
 var CRICKET_BASE_URL = "https://web-cdn.api.bbci.co.uk/wc-poll-data/container/sport-data-scores-fixtures";
 var CRICKET_URN = "urn:bbc:sportsdata:cricket:tournament-collection:collated";
-var DAY_MS5 = 24 * 60 * 60 * 1e3;
+var DAY_MS6 = 24 * 60 * 60 * 1e3;
 var ANSI_RESET6 = "\x1B[0m";
 var ANSI_DARK_GREEN2 = "\x1B[32m";
 var ANSI_DARK_RED2 = "\x1B[31m";
@@ -17012,7 +17199,7 @@ function multiDayLabel(event, selectedYmd) {
     return "";
   }
   if (selectedDate < startDate || selectedDate > endDate) return "";
-  const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS5) + 1;
+  const dayNumber = Math.floor((selectedDate.getTime() - startDate.getTime()) / DAY_MS6) + 1;
   return `Day ${dayNumber}`;
 }
 function fixtureHeaderLine(event, ymd) {
@@ -17122,7 +17309,7 @@ async function fetchWfhStatus() {
     return null;
   }
 }
-var UK_TZ6 = "Europe/London";
+var UK_TZ7 = "Europe/London";
 function formatWfhLine(wfh) {
   if (wfh == null) return "wfh: -";
   return `wfh: ${wfh ? "yes" : "no"}`;
@@ -17130,7 +17317,7 @@ function formatWfhLine(wfh) {
 function houseSectionLabel(now, wfh) {
   const weekday = now.toLocaleDateString("en-GB", {
     weekday: "long",
-    timeZone: UK_TZ6
+    timeZone: UK_TZ7
   }).toLowerCase();
   if (weekday === "saturday" || weekday === "sunday") {
     return "house (weekend)";
@@ -18305,7 +18492,7 @@ ${prompt}`);
 }
 
 // status.ts
-var UK_TZ7 = "Europe/London";
+var UK_TZ8 = "Europe/London";
 var TICK_MS = 1e3;
 var PANEL_ALTERNATE_MS = 15e3;
 var SOLAR_YIELD_REFRESH_MS = 30 * 60 * 1e3;
@@ -18334,7 +18521,7 @@ function formatTime(now) {
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-    timeZone: UK_TZ7
+    timeZone: UK_TZ8
   });
 }
 function formatDate(now) {
@@ -18343,7 +18530,7 @@ function formatDate(now) {
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: UK_TZ7
+    timeZone: UK_TZ8
   });
 }
 function formatSolarYieldLine(solarYield) {
@@ -18394,7 +18581,8 @@ function buildStatusLines(state) {
       state.powerNow,
       state.powerHourAvg,
       now,
-      state.yieldAverages
+      state.yieldAverages,
+      state.monthlyYields
     ),
     ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
@@ -18545,10 +18733,17 @@ async function loadSolarSnapshot(dayKey, now) {
     const data = await fetchSolarData();
     return {
       ...solarSnapshotFromData(data, dayKey, now),
-      yieldAverages: yieldAveragesFromData(data)
+      yieldAverages: yieldAveragesFromData(data),
+      monthlyYields: solarMonthlyYieldRowsFromData(data, now)
     };
   } catch {
-    return { yield: null, powerNow: null, powerHourAvg: null, yieldAverages: null };
+    return {
+      yield: null,
+      powerNow: null,
+      powerHourAvg: null,
+      yieldAverages: null,
+      monthlyYields: null
+    };
   }
 }
 function tempsFromData(data) {
@@ -18639,7 +18834,8 @@ async function printOnce() {
       solarYield: solar.yield,
       powerNow: solar.powerNow,
       powerHourAvg: solar.powerHourAvg,
-      yieldAverages: solar.yieldAverages
+      yieldAverages: solar.yieldAverages,
+      monthlyYields: solar.monthlyYields
     }),
     false,
     {
@@ -18728,6 +18924,7 @@ async function runLive() {
   let powerNow = null;
   let powerHourAvg = null;
   let yieldAverages = null;
+  let monthlyYields = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
@@ -18772,7 +18969,8 @@ async function runLive() {
     solarYield,
     powerNow,
     powerHourAvg,
-    yieldAverages
+    yieldAverages,
+    monthlyYields
   });
   const render = () => {
     if (shortcutsMenuOpen) {
@@ -18795,7 +18993,7 @@ async function runLive() {
       panelWidth
     ) : null;
     const baseWeatherPanel = fullWeatherLines;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth) : [];
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth, monthlyYields ?? []) : [];
     const hasWeather = isWeatherPanelReady(baseWeatherPanel);
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
@@ -18940,7 +19138,8 @@ async function runLive() {
         next: "weather",
         paused: middleSwitchCountdown.paused
       } : void 0,
-      sidePanelWidth
+      sidePanelWidth,
+      monthlyYields ?? []
     ) : baseSolarPanel;
     const shortcutLines = buildStatusBarShortcutLines();
     const compactCountdown = compactSwitchCountdown;
@@ -19170,7 +19369,7 @@ async function runLive() {
       maxCalendarContentLines(statusLines.length, true),
       panelWidth
     ) : null;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth) : [];
+    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, void 0, panelWidth, monthlyYields ?? []) : [];
     const hasWeather = isWeatherPanelReady(fullWeatherLines);
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
@@ -19281,6 +19480,7 @@ async function runLive() {
     yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
+    monthlyYields = solarMonthlyYieldRowsFromData(data, started);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
     lastSolarYieldRefreshAt = solarStartedAt;
     lastPowerRefreshAt = solarStartedAt;
@@ -19352,6 +19552,7 @@ async function runLive() {
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
             yieldAverages = yieldAveragesFromData(data);
+            monthlyYields = solarMonthlyYieldRowsFromData(data, now);
             lastSolarYieldRefreshAt = nowMs;
           }
           if (needPowerRefresh) {

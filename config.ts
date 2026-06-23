@@ -14,6 +14,7 @@ export type PhoneCliConfig = {
   money?: CliConfig;
   w?: CliConfig;
   cal?: CliConfig;
+  solar?: CliConfig;
   [section: string]: CliConfig | string | undefined;
 };
 

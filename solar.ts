@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { fetchSolarData } from "./lib/solarApi";
+import { solarMonthlyYieldRowsFromData } from "./lib/solarMonthlyYield";
 import { buildSolarCliLines } from "./lib/solarView";
 
 function usage(): void {
@@ -24,7 +25,8 @@ async function main(): Promise<void> {
     }
 
     const data = await fetchSolarData();
-    for (const line of buildSolarCliLines(data)) {
+    const monthlyYields = solarMonthlyYieldRowsFromData(data);
+    for (const line of buildSolarCliLines(data, monthlyYields)) {
       console.log(line);
     }
   } catch (error: unknown) {
