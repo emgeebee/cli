@@ -18,6 +18,10 @@ import {
   type SolarResponse,
 } from "./lib/solarApi";
 import {
+  solarMonthlyYieldRowsFromData,
+  type SolarMonthlyYieldRow,
+} from "./lib/solarMonthlyYield";
+import {
   buildSolarPanelLines,
   formatSolarStatusPowerLines,
   yieldAveragesFromData,
@@ -219,6 +223,7 @@ type StatusDisplayState = {
   powerNow: number | null;
   powerHourAvg: number | null;
   yieldAverages: YieldAverage[] | null;
+  monthlyYields: SolarMonthlyYieldRow[] | null;
 };
 
 function buildStatusLines(state: StatusDisplayState): string[] {
@@ -237,6 +242,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
       state.powerHourAvg,
       now,
       state.yieldAverages,
+      state.monthlyYields,
     ),
     ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
@@ -446,15 +452,23 @@ async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
   powerNow: number | null;
   powerHourAvg: number | null;
   yieldAverages: YieldAverage[] | null;
+  monthlyYields: SolarMonthlyYieldRow[] | null;
 }> {
   try {
     const data = await fetchSolarData();
     return {
       ...solarSnapshotFromData(data, dayKey, now),
       yieldAverages: yieldAveragesFromData(data),
+      monthlyYields: solarMonthlyYieldRowsFromData(data, now),
     };
   } catch {
-    return { yield: null, powerNow: null, powerHourAvg: null, yieldAverages: null };
+    return {
+      yield: null,
+      powerNow: null,
+      powerHourAvg: null,
+      yieldAverages: null,
+      monthlyYields: null,
+    };
   }
 }
 
@@ -564,6 +578,7 @@ async function printOnce(): Promise<void> {
       powerNow: solar.powerNow,
       powerHourAvg: solar.powerHourAvg,
       yieldAverages: solar.yieldAverages,
+      monthlyYields: solar.monthlyYields,
     }),
     false,
     {
@@ -679,6 +694,7 @@ async function runLive(): Promise<void> {
   let powerNow: number | null = null;
   let powerHourAvg: number | null = null;
   let yieldAverages: YieldAverage[] | null = null;
+  let monthlyYields: SolarMonthlyYieldRow[] | null = null;
   let lastSolarYieldRefreshAt = 0;
   let lastPowerRefreshAt = 0;
   let lastPowerHourStart = 0;
@@ -725,6 +741,7 @@ async function runLive(): Promise<void> {
     powerNow,
     powerHourAvg,
     yieldAverages,
+    monthlyYields,
   });
 
   const render = (): void => {
@@ -753,7 +770,9 @@ async function runLive(): Promise<void> {
       : null;
 
     const baseWeatherPanel = fullWeatherLines;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, undefined, panelWidth) : [];
+    const baseSolarPanel = solarData
+      ? buildSolarPanelLines(solarData, undefined, panelWidth, monthlyYields ?? [])
+      : [];
     const hasWeather = isWeatherPanelReady(baseWeatherPanel);
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
@@ -939,6 +958,7 @@ async function runLive(): Promise<void> {
                 }
               : undefined,
             sidePanelWidth,
+            monthlyYields ?? [],
           )
         : baseSolarPanel;
 
@@ -1205,7 +1225,9 @@ async function runLive(): Promise<void> {
           panelWidth,
         )
       : null;
-    const baseSolarPanel = solarData ? buildSolarPanelLines(solarData, undefined, panelWidth) : [];
+    const baseSolarPanel = solarData
+      ? buildSolarPanelLines(solarData, undefined, panelWidth, monthlyYields ?? [])
+      : [];
     const hasWeather = isWeatherPanelReady(fullWeatherLines);
     const hasSolar = isSolarPanelReady(baseSolarPanel);
     const hasCric = cricketPanelAvailable(cricLines);
@@ -1322,6 +1344,7 @@ async function runLive(): Promise<void> {
     yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
+    monthlyYields = solarMonthlyYieldRowsFromData(data, started);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
     lastSolarYieldRefreshAt = solarStartedAt;
     lastPowerRefreshAt = solarStartedAt;
@@ -1401,6 +1424,7 @@ async function runLive(): Promise<void> {
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
             yieldAverages = yieldAveragesFromData(data);
+            monthlyYields = solarMonthlyYieldRowsFromData(data, now);
             lastSolarYieldRefreshAt = nowMs;
           }
           if (needPowerRefresh) {
