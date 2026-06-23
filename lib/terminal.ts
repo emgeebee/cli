@@ -446,7 +446,153 @@ export type FullscreenPanelLines = {
   layoutTier?: StatusLayoutTier;
   stackCalendar?: boolean;
   compactDisplay?: CompactRotatePanel;
+  pageOffsets?: FullscreenPanelPageOffsets;
 };
+
+export type FullscreenPanelPageOffsets = Record<string, number | undefined>;
+
+export type FullscreenPaginationState = {
+  hasOverflow: boolean;
+  overflowKeys: string[];
+  nextOffsets: Record<string, number>;
+};
+
+export function emptyFullscreenPaginationState(): FullscreenPaginationState {
+  return {
+    hasOverflow: false,
+    overflowKeys: [],
+    nextOffsets: {},
+  };
+}
+
+const MORE_PROMPT = "d for more";
+
+function likelySectionStart(line: string): boolean {
+  const text = stripAnsi(line).trim();
+  if (text.length === 0) return false;
+  if (text.startsWith("|") || text.startsWith("+") || text.startsWith("-")) return false;
+  if (/^\d+(?:\.\d+)?[kKMwW]?\s+\|/.test(text)) return false;
+  if (/^(?:={2,}|─{2,})\s+.+\s+(?:={2,}|─{2,})$/.test(text)) return true;
+  return /^[A-Z][A-Za-z0-9 ,()/-]+$/.test(text);
+}
+
+function normalizedPageStart(lines: string[], requestedStart: number): number {
+  if (!Number.isFinite(requestedStart) || requestedStart <= 0 || requestedStart >= lines.length) {
+    return 0;
+  }
+  let start = Math.floor(requestedStart);
+  while (start < lines.length && lines[start] === "") {
+    start += 1;
+  }
+  return start >= lines.length ? 0 : start;
+}
+
+function sensiblePageEnd(lines: string[], start: number, maxLines: number): number {
+  const hardEnd = Math.min(lines.length, start + maxLines);
+  if (hardEnd >= lines.length) return hardEnd;
+
+  for (let index = hardEnd; index > start + 1; index -= 1) {
+    if (lines[index - 1] === "") return index - 1;
+  }
+
+  for (let index = hardEnd - 1; index > start + 1; index -= 1) {
+    if (likelySectionStart(lines[index])) return index;
+  }
+
+  return hardEnd;
+}
+
+function nextPageStart(lines: string[], end: number): number {
+  let next = end;
+  while (next < lines.length && lines[next] === "") {
+    next += 1;
+  }
+  return next >= lines.length ? 0 : next;
+}
+
+function fitPageLines(
+  lines: string[],
+  bodyRows: number,
+  requestedStart: number,
+): { lines: string[]; overflow: boolean; nextOffset: number } {
+  if (bodyRows <= 0) {
+    return { lines: [], overflow: lines.length > 0, nextOffset: 0 };
+  }
+
+  if (lines.length <= bodyRows) {
+    return { lines: [...lines], overflow: false, nextOffset: 0 };
+  }
+
+  const contentRows = Math.max(0, bodyRows - 1);
+  if (contentRows === 0) {
+    return { lines: [MORE_PROMPT], overflow: true, nextOffset: 0 };
+  }
+
+  const start = normalizedPageStart(lines, requestedStart);
+  let end = sensiblePageEnd(lines, start, contentRows);
+  if (end <= start) {
+    end = Math.min(lines.length, start + contentRows);
+  }
+
+  const page = lines.slice(start, end);
+  while (page.length < contentRows) {
+    page.push("");
+  }
+  page.push(MORE_PROMPT);
+
+  return {
+    lines: page,
+    overflow: true,
+    nextOffset: nextPageStart(lines, end),
+  };
+}
+
+function recordOverflow(
+  pagination: FullscreenPaginationState,
+  key: string,
+  nextOffset: number,
+): void {
+  pagination.hasOverflow = true;
+  pagination.overflowKeys.push(key);
+  pagination.nextOffsets[key] = nextOffset;
+}
+
+function fullHeightBoxLines(
+  key: string,
+  lines: string[],
+  innerWidth: number,
+  targetRows: number,
+  pageOffsets: FullscreenPanelPageOffsets | undefined,
+  pagination: FullscreenPaginationState,
+): string[] {
+  const bodyRows = Math.max(0, targetRows - 2);
+  const page = fitPageLines(lines, bodyRows, pageOffsets?.[key] ?? 0);
+  if (page.overflow) {
+    recordOverflow(pagination, key, page.nextOffset);
+  }
+  while (page.lines.length < bodyRows) {
+    page.lines.push("");
+  }
+  return boxLines(page.lines, innerWidth);
+}
+
+function fitFullHeightColumnLines(
+  key: string,
+  lines: string[],
+  outerWidth: number,
+  targetRows: number,
+  pageOffsets: FullscreenPanelPageOffsets | undefined,
+  pagination: FullscreenPaginationState,
+): string[] {
+  const page = fitPageLines(lines, targetRows, pageOffsets?.[key] ?? 0);
+  if (page.overflow) {
+    recordOverflow(pagination, key, page.nextOffset);
+  }
+  while (page.lines.length < targetRows) {
+    page.lines.push("");
+  }
+  return page.lines.map((line) => padVisible(truncateToWidth(line, outerWidth), outerWidth));
+}
 
 function middlePanelReady(lines: string[] | null | undefined, marker: string): boolean {
   return Boolean(lines && lines.length > 0 && lines[0]?.startsWith(marker));
@@ -543,7 +689,10 @@ export function writeFullscreenLines(
   statusLines: string[],
   innerWidth: number,
   panels: FullscreenPanelLines = {},
-): void {
+): FullscreenPaginationState {
+  const pagination = emptyFullscreenPaginationState();
+  const terminalRows = process.stdout.rows ?? 24;
+  const targetRows = Math.max(1, terminalRows);
   const tier =
     panels.layoutTier ?? resolveStatusLayoutTier(statusLines.length, innerWidth, panels);
   const stackCalendar =
@@ -561,7 +710,7 @@ export function writeFullscreenLines(
       leftStack.push(boxLines(panels.shortcutLines, panelInner));
     }
     writeFullscreenScreen(stackBoxesVertically(leftStack));
-    return;
+    return pagination;
   }
 
   if (tier === "compact" || tier === "stacked") {
@@ -570,10 +719,10 @@ export function writeFullscreenLines(
       writeFullscreenScreen(
         stackBoxesVertically([leftColumn, boxLines(compactLines, innerWidth)]),
       );
-      return;
+      return pagination;
     }
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
 
   const { cricLines, footyLines, plTableLines, villaLines, weatherLines, solarLines, middleDisplay, sportsDisplay } =
@@ -593,25 +742,53 @@ export function writeFullscreenLines(
     if (compactLines && compactLines.length > 0) {
       writeFullscreenScreen(
         joinBoxedColumnsVariable(
-          [leftColumn, boxLines(compactLines, sideInner)],
+          [
+            leftColumn,
+            fullHeightBoxLines(
+              "compact",
+              compactLines,
+              sideInner,
+              targetRows,
+              panels.pageOffsets,
+              pagination,
+            ),
+          ],
           [leftOuter, boxOuterWidth(sideInner)],
         ),
       );
-      return;
+      return pagination;
     }
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
 
   if (tier === "full") {
     const columns: string[][] = [leftColumn];
     const outerWidths: number[] = [leftOuter];
     if (hasWeather && weatherLines) {
-      columns.push(boxLines(weatherLines, sideInner));
+      columns.push(
+        fullHeightBoxLines(
+          "weather",
+          weatherLines,
+          sideInner,
+          targetRows,
+          panels.pageOffsets,
+          pagination,
+        ),
+      );
       outerWidths.push(boxOuterWidth(sideInner));
     }
     if (hasSolar && solarLines) {
-      columns.push(boxLines(solarLines, sideInner));
+      columns.push(
+        fullHeightBoxLines(
+          "solar",
+          solarLines,
+          sideInner,
+          targetRows,
+          panels.pageOffsets,
+          pagination,
+        ),
+      );
       outerWidths.push(boxOuterWidth(sideInner));
     }
     if (hasSports) {
@@ -629,26 +806,44 @@ export function writeFullscreenLines(
         sportsStack.push(boxLines(villaLines, sideInner));
       }
       if (sportsStack.length > 0) {
-        columns.push(stackBoxesVertically(sportsStack));
+        columns.push(
+          fitFullHeightColumnLines(
+            "sports",
+            stackBoxesVertically(sportsStack),
+            boxOuterWidth(sideInner),
+            targetRows,
+            panels.pageOffsets,
+            pagination,
+          ),
+        );
         outerWidths.push(boxOuterWidth(sideInner));
       }
     }
     writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
-    return;
+    return pagination;
   }
 
   const middleLines = resolveMiddlePanelLines(panels);
   const hasMiddle = Boolean(middleLines && middleLines.length > 0);
   if (!hasMiddle && !hasSports) {
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
 
   const columns: string[][] = [leftColumn];
   const outerWidths: number[] = [leftOuter];
 
   if (hasMiddle && middleLines) {
-    columns.push(boxLines(middleLines, sideInner));
+    columns.push(
+      fullHeightBoxLines(
+        `middle:${panels.middleDisplay ?? "default"}`,
+        middleLines,
+        sideInner,
+        targetRows,
+        panels.pageOffsets,
+        pagination,
+      ),
+    );
     outerWidths.push(boxOuterWidth(sideInner));
   }
 
@@ -670,10 +865,20 @@ export function writeFullscreenLines(
       if (villaLines && villaLines.length > 0) sportsStack.push(boxLines(villaLines, sideInner));
     }
     if (sportsStack.length > 0) {
-      columns.push(stackBoxesVertically(sportsStack));
+      columns.push(
+        fitFullHeightColumnLines(
+          `sports:${sportsDisplay ?? "all"}`,
+          stackBoxesVertically(sportsStack),
+          boxOuterWidth(sideInner),
+          targetRows,
+          panels.pageOffsets,
+          pagination,
+        ),
+      );
       outerWidths.push(boxOuterWidth(sideInner));
     }
   }
 
   writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
+  return pagination;
 }
