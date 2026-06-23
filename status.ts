@@ -91,9 +91,11 @@ import {
   statusLayoutInnerWidth,
   statusSideColumnInnerWidth,
   writeCenteredBox,
+  emptyFullscreenPaginationState,
   type CompactRotatePanel,
   type SportsRotatePanel,
   type FullscreenPanelLines,
+  type FullscreenPaginationState,
   type StatusLayoutTier,
   writeFullscreenLines,
 } from "./lib/terminal";
@@ -412,10 +414,9 @@ function writeDisplay(
   statusLines: string[],
   fullscreen: boolean,
   panels: FullscreenPanelLines = {},
-): void {
+): FullscreenPaginationState {
   if (fullscreen) {
-    writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
-    return;
+    return writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
   }
   for (const line of statusLines) {
     console.log(line);
@@ -445,6 +446,7 @@ function writeDisplay(
       console.log(line);
     }
   }
+  return emptyFullscreenPaginationState();
 }
 
 async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
@@ -726,6 +728,8 @@ async function runLive(): Promise<void> {
   let runningCommand = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
+  let panelPageOffsets: Record<string, number> = {};
+  let latestPagination = emptyFullscreenPaginationState();
 
   const displayState = (): StatusDisplayState => ({
     now: new Date(),
@@ -746,11 +750,13 @@ async function runLive(): Promise<void> {
 
   const render = (): void => {
     if (shortcutsMenuOpen) {
+      latestPagination = emptyFullscreenPaginationState();
       renderAllShortcutsMenu();
       return;
     }
 
     if (cmdMenuState.active) {
+      latestPagination = emptyFullscreenPaginationState();
       renderCmdMenu(cmdMenuState);
       return;
     }
@@ -802,19 +808,28 @@ async function runLive(): Promise<void> {
       tier === "threeColumn" || tier === "full"
         ? statusSideColumnInnerWidth(panelWidth)
         : panelWidth;
+    const preFitSportsPanels = tier === "statusOnly" || tier === "compact" || tier === "stacked";
     const shortcutPlaceholder = ["-"];
-    const maxFootyLines = maxCompactPanelBodyLines(
-      tier,
-      sidePanelWidth,
-      statusLines,
-      calendarLines,
-      stackCalendar,
-      panelWidth,
-      shortcutPlaceholder,
-    );
-    const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
-    const fittedVillaLines = fitFootballStatusLines(villaLines, maxFootyLines);
-    const fittedPlTableLines = fitPanelContentLines(plTableLines, maxFootyLines);
+    const maxFootyLines = preFitSportsPanels
+      ? maxCompactPanelBodyLines(
+          tier,
+          sidePanelWidth,
+          statusLines,
+          calendarLines,
+          stackCalendar,
+          panelWidth,
+          shortcutPlaceholder,
+        )
+      : Number.POSITIVE_INFINITY;
+    const fittedFootyLines = preFitSportsPanels
+      ? fitFootballStatusLines(footyLines, maxFootyLines)
+      : footyLines;
+    const fittedVillaLines = preFitSportsPanels
+      ? fitFootballStatusLines(villaLines, maxFootyLines)
+      : villaLines;
+    const fittedPlTableLines = preFitSportsPanels
+      ? fitPanelContentLines(plTableLines, maxFootyLines)
+      : plTableLines;
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
     const hasPlTable = plTablePanelAvailable(fittedPlTableLines);
     const hasVilla = sportsPanelHasContent(fittedVillaLines);
@@ -979,10 +994,11 @@ async function runLive(): Promise<void> {
       return lines;
     };
 
-    writeDisplay(statusLines, true, {
+    latestPagination = writeDisplay(statusLines, true, {
       layoutTier: tier,
       stackCalendar,
       compactDisplay,
+      pageOffsets: panelPageOffsets,
       calendarLines,
       calendarInnerWidth: panelWidth,
       shortcutLines,
@@ -1007,6 +1023,18 @@ async function runLive(): Promise<void> {
       void refreshVilla();
     }
     villaPanelWasVisible = villaVisible;
+  };
+
+  const pageVisibleOverflowPanels = (): boolean => {
+    if (!latestPagination.hasOverflow) return false;
+    panelPageOffsets = {
+      ...panelPageOffsets,
+    };
+    for (const key of latestPagination.overflowKeys) {
+      panelPageOffsets[key] = latestPagination.nextOffsets[key] ?? 0;
+    }
+    render();
+    return true;
   };
 
   const refreshWeather = async (): Promise<void> => {
@@ -1284,6 +1312,9 @@ async function runLive(): Promise<void> {
       }
       if (cmdMenuState.active) {
         handleCmdMenuKey(key);
+        return;
+      }
+      if (key.type === "char" && key.char === "d" && pageVisibleOverflowPanels()) {
         return;
       }
       const action = handleStatusKey(key);

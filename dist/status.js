@@ -18214,6 +18214,103 @@ function maxCompactPanelBodyLines(tier, innerWidth, statusLines, calendarLines, 
     shortcutLines
   );
 }
+function emptyFullscreenPaginationState() {
+  return {
+    hasOverflow: false,
+    overflowKeys: [],
+    nextOffsets: {}
+  };
+}
+var MORE_PROMPT = "d for more";
+function likelySectionStart(line) {
+  const text = (0, import_strip_ansi3.default)(line).trim();
+  if (text.length === 0) return false;
+  if (text.startsWith("|") || text.startsWith("+") || text.startsWith("-")) return false;
+  if (/^\d+(?:\.\d+)?[kKMwW]?\s+\|/.test(text)) return false;
+  if (/^(?:={2,}|─{2,})\s+.+\s+(?:={2,}|─{2,})$/.test(text)) return true;
+  return /^[A-Z][A-Za-z0-9 ,()/-]+$/.test(text);
+}
+function normalizedPageStart(lines, requestedStart) {
+  if (!Number.isFinite(requestedStart) || requestedStart <= 0 || requestedStart >= lines.length) {
+    return 0;
+  }
+  let start = Math.floor(requestedStart);
+  while (start < lines.length && lines[start] === "") {
+    start += 1;
+  }
+  return start >= lines.length ? 0 : start;
+}
+function sensiblePageEnd(lines, start, maxLines) {
+  const hardEnd = Math.min(lines.length, start + maxLines);
+  if (hardEnd >= lines.length) return hardEnd;
+  for (let index = hardEnd; index > start + 1; index -= 1) {
+    if (lines[index - 1] === "") return index - 1;
+  }
+  for (let index = hardEnd - 1; index > start + 1; index -= 1) {
+    if (likelySectionStart(lines[index])) return index;
+  }
+  return hardEnd;
+}
+function nextPageStart(lines, end) {
+  let next = end;
+  while (next < lines.length && lines[next] === "") {
+    next += 1;
+  }
+  return next >= lines.length ? 0 : next;
+}
+function fitPageLines(lines, bodyRows, requestedStart) {
+  if (bodyRows <= 0) {
+    return { lines: [], overflow: lines.length > 0, nextOffset: 0 };
+  }
+  if (lines.length <= bodyRows) {
+    return { lines: [...lines], overflow: false, nextOffset: 0 };
+  }
+  const contentRows = Math.max(0, bodyRows - 1);
+  if (contentRows === 0) {
+    return { lines: [MORE_PROMPT], overflow: true, nextOffset: 0 };
+  }
+  const start = normalizedPageStart(lines, requestedStart);
+  let end = sensiblePageEnd(lines, start, contentRows);
+  if (end <= start) {
+    end = Math.min(lines.length, start + contentRows);
+  }
+  const page = lines.slice(start, end);
+  while (page.length < contentRows) {
+    page.push("");
+  }
+  page.push(MORE_PROMPT);
+  return {
+    lines: page,
+    overflow: true,
+    nextOffset: nextPageStart(lines, end)
+  };
+}
+function recordOverflow(pagination, key, nextOffset) {
+  pagination.hasOverflow = true;
+  pagination.overflowKeys.push(key);
+  pagination.nextOffsets[key] = nextOffset;
+}
+function fullHeightBoxLines(key, lines, innerWidth, targetRows, pageOffsets, pagination) {
+  const bodyRows = Math.max(0, targetRows - 2);
+  const page = fitPageLines(lines, bodyRows, pageOffsets?.[key] ?? 0);
+  if (page.overflow) {
+    recordOverflow(pagination, key, page.nextOffset);
+  }
+  while (page.lines.length < bodyRows) {
+    page.lines.push("");
+  }
+  return boxLines(page.lines, innerWidth);
+}
+function fitFullHeightColumnLines(key, lines, outerWidth, targetRows, pageOffsets, pagination) {
+  const page = fitPageLines(lines, targetRows, pageOffsets?.[key] ?? 0);
+  if (page.overflow) {
+    recordOverflow(pagination, key, page.nextOffset);
+  }
+  while (page.lines.length < targetRows) {
+    page.lines.push("");
+  }
+  return page.lines.map((line) => padVisible(truncateToWidth(line, outerWidth), outerWidth));
+}
 function middlePanelReady(lines, marker) {
   return Boolean(lines && lines.length > 0 && lines[0]?.startsWith(marker));
 }
@@ -18288,6 +18385,9 @@ function buildLeftColumn(statusLines, innerWidth, panels) {
   };
 }
 function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
+  const pagination = emptyFullscreenPaginationState();
+  const terminalRows = process.stdout.rows ?? 24;
+  const targetRows = Math.max(1, terminalRows);
   const tier = panels.layoutTier ?? resolveStatusLayoutTier(statusLines.length, innerWidth, panels);
   const stackCalendar = panels.stackCalendar ?? shouldStackCalendarUnderStatus(statusLines.length);
   const { column: leftColumn, outer: leftOuter } = buildLeftColumn(statusLines, innerWidth, {
@@ -18302,7 +18402,7 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
       leftStack.push(boxLines(panels.shortcutLines, panelInner));
     }
     writeFullscreenScreen(stackBoxesVertically(leftStack));
-    return;
+    return pagination;
   }
   if (tier === "compact" || tier === "stacked") {
     const compactLines = resolveCompactPanelLines(panels);
@@ -18310,10 +18410,10 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
       writeFullscreenScreen(
         stackBoxesVertically([leftColumn, boxLines(compactLines, innerWidth)])
       );
-      return;
+      return pagination;
     }
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
   const { cricLines, footyLines, plTableLines, villaLines, weatherLines, solarLines, middleDisplay, sportsDisplay } = panels;
   const middleLayoutLines = middlePanelLayoutLines(panels);
@@ -18327,24 +18427,52 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
     if (compactLines && compactLines.length > 0) {
       writeFullscreenScreen(
         joinBoxedColumnsVariable(
-          [leftColumn, boxLines(compactLines, sideInner)],
+          [
+            leftColumn,
+            fullHeightBoxLines(
+              "compact",
+              compactLines,
+              sideInner,
+              targetRows,
+              panels.pageOffsets,
+              pagination
+            )
+          ],
           [leftOuter, boxOuterWidth(sideInner)]
         )
       );
-      return;
+      return pagination;
     }
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
   if (tier === "full") {
     const columns2 = [leftColumn];
     const outerWidths2 = [leftOuter];
     if (hasWeather && weatherLines) {
-      columns2.push(boxLines(weatherLines, sideInner));
+      columns2.push(
+        fullHeightBoxLines(
+          "weather",
+          weatherLines,
+          sideInner,
+          targetRows,
+          panels.pageOffsets,
+          pagination
+        )
+      );
       outerWidths2.push(boxOuterWidth(sideInner));
     }
     if (hasSolar && solarLines) {
-      columns2.push(boxLines(solarLines, sideInner));
+      columns2.push(
+        fullHeightBoxLines(
+          "solar",
+          solarLines,
+          sideInner,
+          targetRows,
+          panels.pageOffsets,
+          pagination
+        )
+      );
       outerWidths2.push(boxOuterWidth(sideInner));
     }
     if (hasSports) {
@@ -18362,23 +18490,41 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
         sportsStack.push(boxLines(villaLines, sideInner));
       }
       if (sportsStack.length > 0) {
-        columns2.push(stackBoxesVertically(sportsStack));
+        columns2.push(
+          fitFullHeightColumnLines(
+            "sports",
+            stackBoxesVertically(sportsStack),
+            boxOuterWidth(sideInner),
+            targetRows,
+            panels.pageOffsets,
+            pagination
+          )
+        );
         outerWidths2.push(boxOuterWidth(sideInner));
       }
     }
     writeFullscreenScreen(joinBoxedColumnsVariable(columns2, outerWidths2));
-    return;
+    return pagination;
   }
   const middleLines = resolveMiddlePanelLines(panels);
   const hasMiddle = Boolean(middleLines && middleLines.length > 0);
   if (!hasMiddle && !hasSports) {
     writeFullscreenScreen(leftColumn);
-    return;
+    return pagination;
   }
   const columns = [leftColumn];
   const outerWidths = [leftOuter];
   if (hasMiddle && middleLines) {
-    columns.push(boxLines(middleLines, sideInner));
+    columns.push(
+      fullHeightBoxLines(
+        `middle:${panels.middleDisplay ?? "default"}`,
+        middleLines,
+        sideInner,
+        targetRows,
+        panels.pageOffsets,
+        pagination
+      )
+    );
     outerWidths.push(boxOuterWidth(sideInner));
   }
   if (hasSports) {
@@ -18399,11 +18545,21 @@ function writeFullscreenLines(statusLines, innerWidth, panels = {}) {
       if (villaLines && villaLines.length > 0) sportsStack.push(boxLines(villaLines, sideInner));
     }
     if (sportsStack.length > 0) {
-      columns.push(stackBoxesVertically(sportsStack));
+      columns.push(
+        fitFullHeightColumnLines(
+          `sports:${sportsDisplay ?? "all"}`,
+          stackBoxesVertically(sportsStack),
+          boxOuterWidth(sideInner),
+          targetRows,
+          panels.pageOffsets,
+          pagination
+        )
+      );
       outerWidths.push(boxOuterWidth(sideInner));
     }
   }
   writeFullscreenScreen(joinBoxedColumnsVariable(columns, outerWidths));
+  return pagination;
 }
 
 // lib/terminalInput.ts
@@ -18696,8 +18852,7 @@ function solarSnapshotFromData(data, dayKey, now) {
 }
 function writeDisplay(statusLines, fullscreen, panels = {}) {
   if (fullscreen) {
-    writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
-    return;
+    return writeFullscreenLines(statusLines, statusLayoutInnerWidth(), panels);
   }
   for (const line of statusLines) {
     console.log(line);
@@ -18727,6 +18882,7 @@ function writeDisplay(statusLines, fullscreen, panels = {}) {
       console.log(line);
     }
   }
+  return emptyFullscreenPaginationState();
 }
 async function loadSolarSnapshot(dayKey, now) {
   try {
@@ -18956,6 +19112,8 @@ async function runLive() {
   let runningCommand = false;
   let timer;
   let disableRawInput;
+  let panelPageOffsets = {};
+  let latestPagination = emptyFullscreenPaginationState();
   const displayState = () => ({
     now: /* @__PURE__ */ new Date(),
     todayYmd: trackedDate,
@@ -18974,10 +19132,12 @@ async function runLive() {
   });
   const render = () => {
     if (shortcutsMenuOpen) {
+      latestPagination = emptyFullscreenPaginationState();
       renderAllShortcutsMenu();
       return;
     }
     if (cmdMenuState.active) {
+      latestPagination = emptyFullscreenPaginationState();
       renderCmdMenu(cmdMenuState);
       return;
     }
@@ -19013,8 +19173,9 @@ async function runLive() {
       villaLines: hasVillaRaw ? buildSportsPanelLines("villa", villaLines) : null
     });
     const sidePanelWidth = tier === "threeColumn" || tier === "full" ? statusSideColumnInnerWidth(panelWidth) : panelWidth;
+    const preFitSportsPanels = tier === "statusOnly" || tier === "compact" || tier === "stacked";
     const shortcutPlaceholder = ["-"];
-    const maxFootyLines = maxCompactPanelBodyLines(
+    const maxFootyLines = preFitSportsPanels ? maxCompactPanelBodyLines(
       tier,
       sidePanelWidth,
       statusLines,
@@ -19022,10 +19183,10 @@ async function runLive() {
       stackCalendar,
       panelWidth,
       shortcutPlaceholder
-    );
-    const fittedFootyLines = fitFootballStatusLines(footyLines, maxFootyLines);
-    const fittedVillaLines = fitFootballStatusLines(villaLines, maxFootyLines);
-    const fittedPlTableLines = fitPanelContentLines(plTableLines, maxFootyLines);
+    ) : Number.POSITIVE_INFINITY;
+    const fittedFootyLines = preFitSportsPanels ? fitFootballStatusLines(footyLines, maxFootyLines) : footyLines;
+    const fittedVillaLines = preFitSportsPanels ? fitFootballStatusLines(villaLines, maxFootyLines) : villaLines;
+    const fittedPlTableLines = preFitSportsPanels ? fitPanelContentLines(plTableLines, maxFootyLines) : plTableLines;
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
     const hasPlTable = plTablePanelAvailable(fittedPlTableLines);
     const hasVilla = sportsPanelHasContent(fittedVillaLines);
@@ -19152,10 +19313,11 @@ async function runLive() {
       if (!allowWide) return null;
       return lines;
     };
-    writeDisplay(statusLines, true, {
+    latestPagination = writeDisplay(statusLines, true, {
       layoutTier: tier,
       stackCalendar,
       compactDisplay,
+      pageOffsets: panelPageOffsets,
       calendarLines,
       calendarInnerWidth: panelWidth,
       shortcutLines,
@@ -19178,6 +19340,17 @@ async function runLive() {
       void refreshVilla();
     }
     villaPanelWasVisible = villaVisible;
+  };
+  const pageVisibleOverflowPanels = () => {
+    if (!latestPagination.hasOverflow) return false;
+    panelPageOffsets = {
+      ...panelPageOffsets
+    };
+    for (const key of latestPagination.overflowKeys) {
+      panelPageOffsets[key] = latestPagination.nextOffsets[key] ?? 0;
+    }
+    render();
+    return true;
   };
   const refreshWeather = async () => {
     const snapshot = await loadWeatherSnapshot(location, trackedDate);
@@ -19423,6 +19596,9 @@ async function runLive() {
       }
       if (cmdMenuState.active) {
         handleCmdMenuKey(key);
+        return;
+      }
+      if (key.type === "char" && key.char === "d" && pageVisibleOverflowPanels()) {
         return;
       }
       const action = handleStatusKey(key);
