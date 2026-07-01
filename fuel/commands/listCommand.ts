@@ -1,7 +1,6 @@
 import type { Command } from "commander";
 
-import { getConfigPath } from "../../config";
-import { loadStationListsConfig } from "../lib/listConfig";
+import { loadStationListsConfig, STATIONS_API_URL } from "../lib/listConfig";
 import { formatStationListText } from "../lib/formatting";
 import { createAppError } from "../lib/errors";
 import { runCommand, withGlobalOutputOptions } from "../lib/output";
@@ -15,14 +14,13 @@ type ListCommandOptions = OutputOptions & {
 };
 
 export const registerListCommand = (program: Command, fuelService: FuelService): void => {
-  const configPath = getConfigPath();
   const command = addOutputOptions(program.command("list <listName>"))
-    .description(`Inspect stations from a named list in ${configPath} (fuel.lists)`)
+    .description(`Inspect stations from a named list at ${STATIONS_API_URL}`)
     .option("--refresh", "Refresh cached Fuel Finder data before querying")
     .showHelpAfterError()
     .addHelpText(
       "after",
-      `\nExample ${configPath} section:\n  {\n    "fuel": {\n      "lists": {\n        "commute": {\n          "fuel": "B7_STANDARD",\n          "stations": [\n            { "searchText": "TESCO WATFORD", "display": "Tesco", "sort": 1 },\n            { "searchText": "MFG BLUECOATS", "sort": 2 }\n          ]\n        }\n      }\n    }\n  }\n\nRows use optional numeric "sort" (lower first). Prices are coloured by rank: cheapest 20% green, dearest 40% red.\n\nExample:\n  fuel list commute`
+      `\nStation lists are loaded from ${STATIONS_API_URL}.\nEach list includes a fuel type and station entries with "searchText", optional "display", and optional numeric "sort" (lower first).\nPrices are coloured by rank: cheapest 20% green, dearest 40% red.\n\nExample:\n  fuel list parents`
     );
 
   command.action(async (listName: string, options: ListCommandOptions, commandInstance: Command) => {
@@ -36,7 +34,7 @@ export const registerListCommand = (program: Command, fuelService: FuelService):
         const listDefinition = config[listName];
 
         if (!listDefinition) {
-          throw createAppError("NOT_FOUND", `List "${listName}" was not found in ${configPath} at fuel.lists.`);
+          throw createAppError("NOT_FOUND", `List "${listName}" was not found at ${STATIONS_API_URL}.`);
         }
 
         return fuelService.findStationList(listName, {

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
-import { getConfigPath } from "./config";
 import { buildCli } from "./fuel/buildCli";
 import { handleCliRuntimeError } from "./fuel/lib/cliRuntime";
 import { createAppError } from "./fuel/lib/errors";
-import { loadStationListsConfig } from "./fuel/lib/listConfig";
+import { loadStationListsConfig, STATIONS_API_URL } from "./fuel/lib/listConfig";
 
 const normalizeLegacyListOption = (argv: string[]): string[] => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
@@ -41,7 +40,7 @@ void (async () => {
       if (listNames.length === 0) {
         throw createAppError(
           "INVALID_INPUT",
-          `No station lists defined in fuel.lists in ${getConfigPath()}. Add at least one named list.`
+          `No station lists returned from ${STATIONS_API_URL}.`
         );
       }
       cliArguments = ["list", listNames[0]!];
