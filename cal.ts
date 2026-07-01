@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   let token: string;
   let birthdayMonthDays: Set<string>;
   try {
-    ({ token, birthdayMonthDays } = resolveCalConfig());
+    ({ token, birthdayMonthDays } = await resolveCalConfig());
   } catch {
     console.error(`Missing cal token at ${getConfigPath()} (expected config.cal.token).`);
     process.exit(1);

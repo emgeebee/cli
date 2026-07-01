@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 
-import { getConfigPath, readPhoneCliConfig } from "./config";
-
-type BdayPersonConfig = {
-  bd?: string;
-  type?: number;
-};
-
-type BdayConfig = Record<string, BdayPersonConfig>;
+import { DATES_API_URL, fetchBdayConfig, type BdayConfig } from "./lib/bdayApi";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -15,7 +8,7 @@ function usage(): void {
   console.log("Usage:");
   console.log("  bday");
   console.log("");
-  console.log(`Config file: ${getConfigPath()} (section: "bday")`);
+  console.log(`Birthdays API: ${DATES_API_URL}`);
 }
 
 function parseIsoDate(value: string): Date {
@@ -75,15 +68,12 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
-function loadBdayConfig(): BdayConfig {
-  const config = readPhoneCliConfig();
-  const bday = config.bday;
-  if (!bday || typeof bday !== "object" || Array.isArray(bday)) {
-    throw new Error(
-      `Missing or invalid "bday" section in ${getConfigPath()}. Expected object keyed by person name.`,
-    );
+async function loadBdayConfig(): Promise<BdayConfig> {
+  const config = await fetchBdayConfig();
+  if (!config) {
+    throw new Error(`Failed to load birthdays from ${DATES_API_URL}.`);
   }
-  return bday as BdayConfig;
+  return config;
 }
 
 function printBdayTable(config: BdayConfig): void {
@@ -111,7 +101,7 @@ function printBdayTable(config: BdayConfig): void {
   }
 
   if (rows.length === 0) {
-    console.log("No valid birthdays found in config.");
+    console.log("No valid birthdays found.");
     return;
   }
 
@@ -134,7 +124,7 @@ async function main(): Promise<void> {
       throw new Error("This command takes no arguments.");
     }
 
-    const config = loadBdayConfig();
+    const config = await loadBdayConfig();
     printBdayTable(config);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -148,4 +138,3 @@ async function main(): Promise<void> {
 void main();
 
 export {};
-
