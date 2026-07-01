@@ -57,6 +57,20 @@ export function writeJsonCacheFile<T>(path: string, data: T): void {
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
+/** Move legacy monthly averages from config into cache (runs even outside monthly stats window). */
+export function ensureOctoMonthlyAveragesMigrated(): void {
+  const path = cachePaths.octoMonthlyAverages();
+  const legacy = migrateLegacyOctoCacheFromConfig(["monthlyAverageCache"])
+    .monthlyAverageCache;
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) {
+    return;
+  }
+  const existing = readJsonCacheFile<Record<string, unknown>>(path);
+  if (!existing || Object.keys(existing).length === 0) {
+    writeJsonCacheFile(path, legacy);
+  }
+}
+
 type LegacyOctoCacheKeys = "gas" | "electricity" | "monthlyAverageCache";
 
 /** Move legacy octo cache blobs from ~/.phone_cli.json into cache files. */
