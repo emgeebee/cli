@@ -424,7 +424,7 @@ export function buildSolarCliLines(
 }
 
 function formatMonthlyYieldStatusLine(monthlyYields: SolarMonthlyYieldRow[]): string | null {
-  const rows = monthlyYields.filter((row) => row.average != null).slice(-3);
+  const rows = monthlyYields.filter((row) => row.average != null).slice(-2);
   if (rows.length === 0) return null;
   return `Monthly avg: ${rows
     .map((row) => {
