@@ -18096,6 +18096,88 @@ function truncateToWidth(line, maxWidth) {
   }
   return result;
 }
+function finalizeAnsiSegment(segment, usedAnsi) {
+  if (usedAnsi && !segment.endsWith(ANSI_RESET9)) {
+    return `${segment}${ANSI_RESET9}`;
+  }
+  return segment;
+}
+function splitAtVisibleWidth(line, maxWidth, preferWordBreak) {
+  if (visibleLength4(line) <= maxWidth) {
+    return { head: line, tail: "" };
+  }
+  let index = 0;
+  let width = 0;
+  let result = "";
+  let usedAnsi = false;
+  let activeAnsi = "";
+  let bestBreak = null;
+  while (index < line.length && width < maxWidth) {
+    const ansiMatch = line.slice(index).match(ANSI_SEQUENCE);
+    if (ansiMatch) {
+      result += ansiMatch[0];
+      if (ansiMatch[0] !== ANSI_RESET9) {
+        usedAnsi = true;
+        activeAnsi += ansiMatch[0];
+      } else {
+        activeAnsi = "";
+      }
+      index += ansiMatch[0].length;
+      continue;
+    }
+    const grapheme = nextGrapheme((0, import_strip_ansi3.default)(line.slice(index)));
+    if (!grapheme) break;
+    const graphemeWidth = (0, import_string_width4.default)(grapheme);
+    if (width + graphemeWidth > maxWidth) break;
+    let remaining = grapheme.length;
+    while (remaining > 0 && index < line.length) {
+      const inlineAnsi = line.slice(index).match(ANSI_SEQUENCE);
+      if (inlineAnsi) {
+        result += inlineAnsi[0];
+        if (inlineAnsi[0] !== ANSI_RESET9) {
+          usedAnsi = true;
+          activeAnsi += inlineAnsi[0];
+        } else {
+          activeAnsi = "";
+        }
+        index += inlineAnsi[0].length;
+        continue;
+      }
+      const character = line[index];
+      result += character;
+      if (preferWordBreak && character === " ") {
+        bestBreak = { sourceIndex: index + 1, result, activeAnsi };
+      }
+      index += 1;
+      remaining -= 1;
+    }
+    width += graphemeWidth;
+  }
+  const minBreakWidth = Math.max(1, Math.floor(maxWidth * 0.25));
+  const useWordBreak = preferWordBreak && bestBreak !== null && visibleLength4(bestBreak.result) >= minBreakWidth;
+  const headSourceEnd = useWordBreak ? bestBreak.sourceIndex : index;
+  const head = finalizeAnsiSegment(useWordBreak ? bestBreak.result : result, usedAnsi);
+  const tailPrefix = useWordBreak ? bestBreak.activeAnsi : activeAnsi;
+  const tail = `${tailPrefix}${line.slice(headSourceEnd).trimStart()}`;
+  return { head, tail };
+}
+function wrapToWidth(line, maxWidth) {
+  if (maxWidth <= 0) return [line];
+  if (visibleLength4(line) <= maxWidth) return [line];
+  if (line.trim() === "") return [""];
+  const wrapped = [];
+  let remaining = line;
+  while (visibleLength4(remaining) > maxWidth) {
+    const { head, tail } = splitAtVisibleWidth(remaining, maxWidth, true);
+    wrapped.push(head);
+    remaining = tail;
+    if (!remaining) break;
+  }
+  if (remaining.length > 0 || wrapped.length === 0) {
+    wrapped.push(remaining);
+  }
+  return wrapped;
+}
 function boxOuterWidth(innerWidth) {
   return innerWidth + 4;
 }
@@ -18105,7 +18187,11 @@ function statusLeftColumnOuterWidth() {
   return Math.min(STATUS_LEFT_COLUMN_MAX_OUTER, columns);
 }
 function statusLayoutInnerWidth() {
-  return Math.max(statusLeftColumnOuterWidth() - 4, 20);
+  return Math.max(statusLeftColumnOuterWidth() - 4, 1);
+}
+function isNarrowStatusTerminal() {
+  const columns = process.stdout.columns ?? 80;
+  return columns < STATUS_LEFT_COLUMN_MAX_OUTER;
 }
 var STATUS_THREE_COLUMN_MAX_WIDTH = 236;
 function statusSideColumnInnerWidth(leftInnerWidth = statusLayoutInnerWidth()) {
@@ -18178,11 +18264,17 @@ function padVisible(line, width) {
   const len = visibleLength4(line);
   return len >= width ? line : `${line}${" ".repeat(width - len)}`;
 }
+function fitBoxContentLines(lines, innerWidth) {
+  const wrapLines = isNarrowStatusTerminal();
+  return lines.flatMap(
+    (line) => wrapLines ? wrapToWidth(line, innerWidth) : [truncateToWidth(line, innerWidth)]
+  );
+}
 function boxLines(lines, innerWidth) {
   if (lines.length === 0 || innerWidth <= 0) return lines;
   const top = `\u250C${"\u2500".repeat(innerWidth + 2)}\u2510`;
   const bottom = `\u2514${"\u2500".repeat(innerWidth + 2)}\u2518`;
-  const body = lines.map((line) => {
+  const body = fitBoxContentLines(lines, innerWidth).map((line) => {
     const fitted = truncateToWidth(line, innerWidth);
     const padding = innerWidth - visibleLength4(fitted);
     return `\u2502 ${fitted}${" ".repeat(padding)} \u2502`;
