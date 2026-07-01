@@ -15996,15 +15996,64 @@ function formatElectricityPeriodAvgTable(today, tomorrow) {
 }
 
 // lib/bdayApi.ts
+var DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 var DAY_MS4 = 24 * 60 * 60 * 1e3;
 var UK_TZ6 = "Europe/London";
-function readBdayConfig() {
-  const config2 = readPhoneCliConfig();
-  const bday = config2.bday;
-  if (!bday || typeof bday !== "object" || Array.isArray(bday)) {
+var BdayPersonSchema = external_exports.object({
+  bd: external_exports.string().optional(),
+  type: external_exports.number().optional()
+});
+var BdayConfigSchema = external_exports.record(external_exports.string(), BdayPersonSchema);
+function normalizeBirthDateYmd(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const date5 = new Date(trimmed);
+  if (Number.isNaN(date5.getTime())) {
     return null;
   }
-  return bday;
+  return date5.toLocaleDateString("en-CA", { timeZone: UK_TZ6 });
+}
+function normalizeBdayConfig(raw) {
+  const config2 = {};
+  for (const [name, person] of Object.entries(raw)) {
+    const bdYmd = normalizeBirthDateYmd(String(person?.bd || ""));
+    if (!bdYmd) continue;
+    config2[name] = {
+      bd: bdYmd,
+      ...person.type == null ? {} : { type: person.type }
+    };
+  }
+  return config2;
+}
+async function fetchBdayConfig() {
+  try {
+    const response = await fetch(DATES_API_URL, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const config2 = normalizeBdayConfig(BdayConfigSchema.parse(await response.json()));
+    return Object.keys(config2).length > 0 ? config2 : null;
+  } catch {
+    return null;
+  }
+}
+function birthdayMonthDaysFromConfig(config2) {
+  const birthdayMonthDays = /* @__PURE__ */ new Set();
+  if (!config2) return birthdayMonthDays;
+  for (const person of Object.values(config2)) {
+    const bdYmd = String(person?.bd || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bdYmd)) continue;
+    const [, month, day] = bdYmd.split("-").map(Number);
+    birthdayMonthDays.add(`${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+  }
+  return birthdayMonthDays;
 }
 function ukTodayYmd2(now = /* @__PURE__ */ new Date()) {
   return now.toLocaleDateString("en-CA", { timeZone: UK_TZ6 });
@@ -16123,16 +16172,6 @@ function formatIsoDate(year, month, day) {
 }
 function formatMonthDay(month, day) {
   return `${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-function parseIsoBirthDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return null;
-  }
-  const d = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) {
-    return null;
-  }
-  return d;
 }
 function parseShortDate(shortDate) {
   const m = /^(\d{2})-(\d{2})-(\d{2})$/.exec(shortDate.trim());
@@ -16301,30 +16340,21 @@ function statusYearWindowFrom(now = /* @__PURE__ */ new Date()) {
     return { year: t.getFullYear(), month: t.getMonth() };
   });
 }
-function resolveCalConfig() {
+async function resolveCalConfig() {
   const config2 = readPhoneCliConfig();
   const token = asRecord(config2.cal)?.token;
   if (typeof token === "string" && token.trim() !== "") {
-    const birthdayMonthDays = /* @__PURE__ */ new Set();
-    const bdaySection = asRecord(config2.bday);
-    if (bdaySection) {
-      for (const person of Object.values(bdaySection)) {
-        const raw = String(person?.bd || "").trim();
-        if (!raw) continue;
-        const parsed = parseIsoBirthDate(raw);
-        if (!parsed) continue;
-        birthdayMonthDays.add(
-          formatMonthDay(parsed.getUTCMonth(), parsed.getUTCDate())
-        );
-      }
-    }
-    return { token: token.trim(), birthdayMonthDays };
+    const bdayConfig = await fetchBdayConfig();
+    return {
+      token: token.trim(),
+      birthdayMonthDays: birthdayMonthDaysFromConfig(bdayConfig)
+    };
   }
   throw new Error("Missing cal token (expected config.cal.token).");
 }
-function readOptionalCalConfig() {
+async function readOptionalCalConfig() {
   try {
-    return resolveCalConfig();
+    return await resolveCalConfig();
   } catch {
     return null;
   }
@@ -16363,7 +16393,7 @@ async function fetchCalendarColors(token, birthdayMonthDays) {
   return { birthdayMonthDays, holidayDays, bankHolidayDays };
 }
 async function loadStatusCalendarData(now = /* @__PURE__ */ new Date()) {
-  const calConfig = readOptionalCalConfig();
+  const calConfig = await readOptionalCalConfig();
   if (!calConfig) return null;
   try {
     const colors = await fetchCalendarColors(calConfig.token, calConfig.birthdayMonthDays);
@@ -19150,9 +19180,9 @@ async function loadSportsLines(ymd) {
 async function printOnce() {
   const now = /* @__PURE__ */ new Date();
   const dayKey = ukTodayYmd(now);
-  const bdayConfig = readBdayConfig();
   const location = resolveDefaultLocation();
-  const [weatherSnapshot, solar, wfh, temps, houseOcto, sports, plTableLines, villaLines] = await Promise.all([
+  const [bdayConfig, weatherSnapshot, solar, wfh, temps, houseOcto, sports, plTableLines, villaLines] = await Promise.all([
+    fetchBdayConfig(),
     loadWeatherSnapshot(location, dayKey),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
@@ -19254,7 +19284,7 @@ async function runCmdMenuWfh(onUpdate, onWfhChanged) {
 async function runLive() {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
-  let bdayConfig = readBdayConfig();
+  let bdayConfig = await fetchBdayConfig();
   let fullWeatherLines = [];
   let sunrise = "-";
   let sunset = "-";
@@ -19867,7 +19897,7 @@ async function runLive() {
       const needVillaRefresh = dayChanged || nowMs - lastVillaRefreshAt >= VILLA_REFRESH_MS;
       if (dayChanged) {
         trackedDate = today;
-        bdayConfig = readBdayConfig();
+        bdayConfig = await fetchBdayConfig();
         [, wfh] = await Promise.all([
           refreshWeather().catch(() => {
             fullWeatherLines = ["weather unavailable"];
