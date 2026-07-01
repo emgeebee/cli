@@ -158,7 +158,11 @@ const PREFERRED_LINE_BREAK = " // ";
 
 function shouldNoWrapStatusLine(line: string): boolean {
   const stripped = stripAnsi(line).trim();
-  return stripped.startsWith("===") || stripped.startsWith("Temp:");
+  return (
+    stripped.startsWith("===") ||
+    stripped.startsWith("Temp:") ||
+    stripped.startsWith("Solar:")
+  );
 }
 
 function wrapToWidth(line: string, maxWidth: number): string[] {
