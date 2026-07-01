@@ -16601,6 +16601,13 @@ function isResultState(event) {
   const status = String(event.status || "").toLowerCase();
   return Boolean(status) && status !== "preevent";
 }
+function isVillaFixtureEvent(event, now = /* @__PURE__ */ new Date()) {
+  const startMs = new Date(event.startTime || event.startDateTime).getTime();
+  if (!Number.isNaN(startMs) && startMs > now.getTime()) {
+    return true;
+  }
+  return !isResultState(event);
+}
 function isFinishedState(event) {
   const status = String(event.status || "").toLowerCase();
   if (status === "postevent") return true;
@@ -17036,7 +17043,8 @@ function fitVillaStatusLines(lines, maxContentLines) {
   }
   const fitted = allocateVillaSectionLines(results, fixtures, maxItemLines);
   const output = [VILLA_RESULTS_HEADING, "", ...fitted.results, "", VILLA_FIXTURES_HEADING, "", ...fitted.fixtures];
-  return fitPanelContentLines(output, maxContentLines);
+  if (output.length <= maxContentLines) return output;
+  return output.slice(0, maxContentLines);
 }
 function readRapidApiKey() {
   const config2 = readPhoneCliConfig();
@@ -17075,9 +17083,8 @@ async function loadVillaFixturesStatusLines() {
     const now = /* @__PURE__ */ new Date();
     const seasonStart = startOfMostRecentAugust(now);
     const start = toYmd2(seasonStart);
-    const end = toYmd2(new Date(now.getTime() + 30 * DAY_MS5));
-    const today = toYmd2(/* @__PURE__ */ new Date());
-    const url2 = urlForTeamGames(today, end, start, ASTON_VILLA_TEAM_URN);
+    const end = toYmd2(new Date(now.getTime() + STATUS_FORWARD_DAYS * DAY_MS5));
+    const url2 = urlForTeamGames(start, end, start, ASTON_VILLA_TEAM_URN);
     const events = (await fetchMatchData(url2, start)).filter((event) => {
       const dt = new Date(event.startTime || event.startDateTime);
       return dt.getTime() >= seasonStart.getTime();
@@ -17087,10 +17094,10 @@ async function loadVillaFixturesStatusLines() {
     const results = [];
     const fixtures = [];
     for (const event of events) {
-      if (isResultState(event)) {
-        results.push(event);
-      } else {
+      if (isVillaFixtureEvent(event, now)) {
         fixtures.push(event);
+      } else {
+        results.push(event);
       }
     }
     const lines = [];
