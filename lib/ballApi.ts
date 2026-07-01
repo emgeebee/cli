@@ -279,6 +279,14 @@ function isResultState(event: ApiEvent): boolean {
   return Boolean(status) && status !== "preevent";
 }
 
+function isVillaFixtureEvent(event: NormalizedEvent, now = new Date()): boolean {
+  const startMs = new Date(event.startTime || event.startDateTime).getTime();
+  if (!Number.isNaN(startMs) && startMs > now.getTime()) {
+    return true;
+  }
+  return !isResultState(event);
+}
+
 function isFinishedState(event: ApiEvent): boolean {
   const status = String(event.status || "").toLowerCase();
   if (status === "postevent") return true;
@@ -828,7 +836,8 @@ export function fitVillaStatusLines(lines: string[], maxContentLines: number): s
 
   const fitted = allocateVillaSectionLines(results, fixtures, maxItemLines);
   const output = [VILLA_RESULTS_HEADING, "", ...fitted.results, "", VILLA_FIXTURES_HEADING, "", ...fitted.fixtures];
-  return fitPanelContentLines(output, maxContentLines);
+  if (output.length <= maxContentLines) return output;
+  return output.slice(0, maxContentLines);
 }
 
 function readRapidApiKey(): string {
@@ -876,9 +885,8 @@ export async function loadVillaFixturesStatusLines(): Promise<string[]> {
     const now = new Date();
     const seasonStart = startOfMostRecentAugust(now);
     const start = toYmd(seasonStart);
-    const end = toYmd(new Date(now.getTime() + 30 * DAY_MS));
-    const today = toYmd(new Date());
-    const url = urlForTeamGames(today, end, start, ASTON_VILLA_TEAM_URN);
+    const end = toYmd(new Date(now.getTime() + STATUS_FORWARD_DAYS * DAY_MS));
+    const url = urlForTeamGames(start, end, start, ASTON_VILLA_TEAM_URN);
     const events = (await fetchMatchData(url, start)).filter((event) => {
       const dt = new Date(event.startTime || event.startDateTime);
       return dt.getTime() >= seasonStart.getTime();
@@ -888,10 +896,10 @@ export async function loadVillaFixturesStatusLines(): Promise<string[]> {
     const results: NormalizedEvent[] = [];
     const fixtures: NormalizedEvent[] = [];
     for (const event of events) {
-      if (isResultState(event)) {
-        results.push(event);
-      } else {
+      if (isVillaFixtureEvent(event, now)) {
         fixtures.push(event);
+      } else {
+        results.push(event);
       }
     }
     const lines: string[] = [];

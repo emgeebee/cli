@@ -1058,7 +1058,7 @@ async function futureFixturesForTeam(teamQuery: string, teamInput: string, teamU
   const now = new Date();
   const seasonStart = startOfMostRecentAugust(now);
   const start = toYmd(seasonStart);
-  const end = toYmd(new Date(now.getTime() + 30 * DAY_MS));
+  const end = toYmd(new Date(now.getTime() + 59 * DAY_MS));
   const url = urlForTeamGames(start, end, start, teamUrn);
   const events = (await fetchMatchData(url, start)).filter((event) => {
     const dt = new Date(event.startTime || event.startDateTime);
