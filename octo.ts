@@ -3,7 +3,7 @@
 import { getConfigPath } from "./config";
 import {
   cachePaths,
-  migrateLegacyOctoCacheFromConfig,
+  ensureOctoMonthlyAveragesMigrated,
   readJsonCacheFile,
   writeJsonCacheFile,
 } from "./lib/cache";
@@ -438,16 +438,8 @@ function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCa
 }
 
 function readMonthlyAverageCache(): MonthlyAverageCache {
-  const path = cachePaths.octoMonthlyAverages();
-  let raw = readJsonCacheFile<MonthlyAverageCache>(path);
-  if (!raw) {
-    const legacy = migrateLegacyOctoCacheFromConfig(["monthlyAverageCache"])
-      .monthlyAverageCache;
-    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
-      raw = legacy as MonthlyAverageCache;
-      writeJsonCacheFile(path, raw);
-    }
-  }
+  ensureOctoMonthlyAveragesMigrated();
+  const raw = readJsonCacheFile<MonthlyAverageCache>(cachePaths.octoMonthlyAverages());
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const cache: MonthlyAverageCache = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -667,6 +659,8 @@ async function main(): Promise<void> {
     if (args.length > 0) {
       throw new Error("This command takes no arguments.");
     }
+
+    ensureOctoMonthlyAveragesMigrated();
 
     const { token, accountNumber, gasKwhPerUnit } = resolveOctoCredentials();
 
