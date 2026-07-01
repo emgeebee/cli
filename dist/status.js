@@ -16974,6 +16974,70 @@ function villaFixtureStatusLine(event) {
   const comp = competitionLabel(event);
   return `- ${date5} ${fixtureLine(event)} (${comp})`;
 }
+var VILLA_RESULTS_HEADING = "== Results ==";
+var VILLA_FIXTURES_HEADING = "== Fixtures ==";
+function splitVillaStatusSections(lines) {
+  const results = [];
+  const fixtures = [];
+  let section = null;
+  for (const line of lines) {
+    if (line === VILLA_RESULTS_HEADING) {
+      section = "results";
+      continue;
+    }
+    if (line === VILLA_FIXTURES_HEADING) {
+      section = "fixtures";
+      continue;
+    }
+    if (line === "" || line.startsWith("===")) continue;
+    if (section === "results") results.push(line);
+    else if (section === "fixtures") fixtures.push(line);
+  }
+  return { results, fixtures };
+}
+function allocateVillaSectionLines(results, fixtures, maxItemLines) {
+  if (maxItemLines <= 0) return { results: [], fixtures: [] };
+  if (results.length + fixtures.length <= maxItemLines) {
+    return { results, fixtures };
+  }
+  let resultsBudget = Math.floor(maxItemLines / 2);
+  let fixturesBudget = maxItemLines - resultsBudget;
+  let fittedResults = results.slice(-resultsBudget);
+  let fittedFixtures = fixtures.slice(0, fixturesBudget);
+  const resultsShortfall = resultsBudget - fittedResults.length;
+  if (resultsShortfall > 0) {
+    fittedFixtures = fixtures.slice(0, fixturesBudget + resultsShortfall);
+  }
+  const fixturesShortfall = fixturesBudget - fittedFixtures.length;
+  if (fixturesShortfall > 0) {
+    fittedResults = results.slice(-(resultsBudget + fixturesShortfall));
+  }
+  return { results: fittedResults, fixtures: fittedFixtures };
+}
+function fitVillaStatusLines(lines, maxContentLines) {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+  const { results, fixtures } = splitVillaStatusSections(lines);
+  const hasResults = results.length > 0;
+  const hasFixtures = fixtures.length > 0;
+  if (!hasResults && !hasFixtures) {
+    return lines.slice(0, maxContentLines);
+  }
+  if (!hasResults) {
+    return fitPanelContentLines([VILLA_FIXTURES_HEADING, "", ...fixtures], maxContentLines);
+  }
+  if (!hasFixtures) {
+    return fitPanelContentLines([VILLA_RESULTS_HEADING, "", ...results], maxContentLines);
+  }
+  const sectionOverhead = 5;
+  const maxItemLines = maxContentLines - sectionOverhead;
+  if (maxItemLines <= 0) {
+    return [VILLA_RESULTS_HEADING, "", VILLA_FIXTURES_HEADING];
+  }
+  const fitted = allocateVillaSectionLines(results, fixtures, maxItemLines);
+  const output = [VILLA_RESULTS_HEADING, "", ...fitted.results, "", VILLA_FIXTURES_HEADING, "", ...fitted.fixtures];
+  return fitPanelContentLines(output, maxContentLines);
+}
 function readRapidApiKey() {
   const config2 = readPhoneCliConfig();
   const ballConfig = config2.ball || {};
@@ -17020,7 +17084,30 @@ async function loadVillaFixturesStatusLines() {
     });
     if (events.length === 0) return ["none"];
     events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-    return events.map((event) => villaFixtureStatusLine(event));
+    const results = [];
+    const fixtures = [];
+    for (const event of events) {
+      if (isResultState(event)) {
+        results.push(event);
+      } else {
+        fixtures.push(event);
+      }
+    }
+    const lines = [];
+    if (results.length > 0) {
+      lines.push(VILLA_RESULTS_HEADING, "");
+      for (const event of results) {
+        lines.push(villaFixtureStatusLine(event));
+      }
+    }
+    if (fixtures.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push(VILLA_FIXTURES_HEADING, "");
+      for (const event of fixtures) {
+        lines.push(villaFixtureStatusLine(event));
+      }
+    }
+    return lines.length > 0 ? lines : ["none"];
   } catch {
     return ["-"];
   }
@@ -19185,7 +19272,8 @@ async function runLive() {
       shortcutPlaceholder
     ) : Number.POSITIVE_INFINITY;
     const fittedFootyLines = preFitSportsPanels ? fitFootballStatusLines(footyLines, maxFootyLines) : footyLines;
-    const fittedVillaLines = preFitSportsPanels ? fitFootballStatusLines(villaLines, maxFootyLines) : villaLines;
+    const maxVillaBodyLines = tier === "statusOnly" ? 0 : preFitSportsPanels ? maxFootyLines : maxFootballBodyLines(sidePanelWidth, null);
+    const fittedVillaLines = maxVillaBodyLines > 0 ? fitVillaStatusLines(villaLines, maxVillaBodyLines) : villaLines;
     const fittedPlTableLines = preFitSportsPanels ? fitPanelContentLines(plTableLines, maxFootyLines) : plTableLines;
     const hasFooty = sportsPanelHasContent(fittedFootyLines);
     const hasPlTable = plTablePanelAvailable(fittedPlTableLines);

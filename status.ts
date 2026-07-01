@@ -49,6 +49,7 @@ import {
 import {
   fitFootballStatusLines,
   fitPanelContentLines,
+  fitVillaStatusLines,
   loadFootballStatusLines,
   loadPremierLeagueTableStatusLines,
   loadVillaFixturesStatusLines,
@@ -85,6 +86,7 @@ import {
   leaveFullscreen,
   maxCalendarContentLines,
   maxCompactPanelBodyLines,
+  maxFootballBodyLines,
   resolveStatusLayoutTier,
   shouldStackCalendarUnderStatus,
   isStatusOnlyTerminal,
@@ -824,9 +826,14 @@ async function runLive(): Promise<void> {
     const fittedFootyLines = preFitSportsPanels
       ? fitFootballStatusLines(footyLines, maxFootyLines)
       : footyLines;
-    const fittedVillaLines = preFitSportsPanels
-      ? fitFootballStatusLines(villaLines, maxFootyLines)
-      : villaLines;
+    const maxVillaBodyLines =
+      tier === "statusOnly"
+        ? 0
+        : preFitSportsPanels
+          ? maxFootyLines
+          : maxFootballBodyLines(sidePanelWidth, null);
+    const fittedVillaLines =
+      maxVillaBodyLines > 0 ? fitVillaStatusLines(villaLines, maxVillaBodyLines) : villaLines;
     const fittedPlTableLines = preFitSportsPanels
       ? fitPanelContentLines(plTableLines, maxFootyLines)
       : plTableLines;
