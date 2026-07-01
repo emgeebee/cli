@@ -1,10 +1,15 @@
-import { writeFileSync } from "node:fs";
+import {
+  cachePaths,
+  migrateLegacyOctoCacheFromConfig,
+  readJsonCacheFile,
+  writeJsonCacheFile,
+} from "./cache";
 import { getConfigPath, readPhoneCliConfig } from "../config";
 
-/** `octo.gas` in ~/.phone_cli.json — YYYY-MM-DD to inc-VAT pence rate(s). */
+/** Cached gas prices — YYYY-MM-DD to inc-VAT pence rate(s). */
 export type GasPriceCache = Record<string, number[]>;
 
-/** `octo.electricity` in ~/.phone_cli.json — YYYY-MM-DD to half-hourly rate slots. */
+/** Cached electricity prices — YYYY-MM-DD to half-hourly rate slots. */
 export type CachedElectricityRate = {
   valid_from: string;
   valid_to: string;
@@ -402,10 +407,16 @@ function normalizeCachedDayPrices(value: unknown): number[] | null {
   return prices.length > 0 ? prices : null;
 }
 
-export function readGasPriceCache(now: Date = new Date()): GasPriceCache {
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const raw = octo.gas;
+function loadGasPriceCacheRaw(now: Date = new Date()): GasPriceCache {
+  const path = cachePaths.octoGasPrices();
+  let raw = readJsonCacheFile<GasPriceCache>(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["gas"]).gas;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy as GasPriceCache;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
@@ -423,17 +434,12 @@ export function readGasPriceCache(now: Date = new Date()): GasPriceCache {
   return pruned;
 }
 
-function writeOctoConfigSection(section: string, value: unknown): void {
-  const configPath = getConfigPath();
-  const config = readPhoneCliConfig() as Record<string, unknown>;
-  const octo = ((config.octo || {}) as Record<string, unknown>);
-  octo[section] = value;
-  config.octo = octo;
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+export function readGasPriceCache(now: Date = new Date()): GasPriceCache {
+  return loadGasPriceCacheRaw(now);
 }
 
 export function saveGasPriceCache(cache: GasPriceCache): void {
-  writeOctoConfigSection("gas", cache);
+  writeJsonCacheFile(cachePaths.octoGasPrices(), cache);
 }
 
 function hasCachedDay(cache: GasPriceCache, dayYmd: string): boolean {
@@ -556,10 +562,16 @@ function normalizeCachedElectricityDay(value: unknown): CachedElectricityRate[] 
   return rates.length > 0 ? rates : null;
 }
 
-export function readElectricityPriceCache(now: Date = new Date()): ElectricityPriceCache {
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const raw = octo.electricity;
+function loadElectricityPriceCacheRaw(now: Date = new Date()): ElectricityPriceCache {
+  const path = cachePaths.octoElectricityPrices();
+  let raw = readJsonCacheFile<ElectricityPriceCache>(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["electricity"]).electricity;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy as ElectricityPriceCache;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
@@ -577,8 +589,12 @@ export function readElectricityPriceCache(now: Date = new Date()): ElectricityPr
   return pruned;
 }
 
+export function readElectricityPriceCache(now: Date = new Date()): ElectricityPriceCache {
+  return loadElectricityPriceCacheRaw(now);
+}
+
 export function saveElectricityPriceCache(cache: ElectricityPriceCache): void {
-  writeOctoConfigSection("electricity", cache);
+  writeJsonCacheFile(cachePaths.octoElectricityPrices(), cache);
 }
 
 function hasCachedElectricityDay(cache: ElectricityPriceCache, dayYmd: string): boolean {

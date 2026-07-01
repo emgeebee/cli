@@ -16,7 +16,6 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // octo.ts
 var octo_exports = {};
 module.exports = __toCommonJS(octo_exports);
-var import_node_fs3 = require("node:fs");
 
 // config.ts
 var import_node_fs = require("node:fs");
@@ -43,9 +42,85 @@ function readPhoneCliConfig() {
     throw new Error(`Failed to read config at ${path}: ${message}`);
   }
 }
+function writePhoneCliConfig(config) {
+  const path = getConfigPath();
+  (0, import_node_fs.writeFileSync)(path, `${JSON.stringify(config, null, 2)}
+`, "utf8");
+}
+
+// lib/cache.ts
+var import_node_fs2 = require("node:fs");
+var import_node_os2 = require("node:os");
+var import_node_path2 = require("node:path");
+var CACHE_DIR_NAME = "phone_cli";
+function getDefaultCacheDir() {
+  const xdgCacheHome = process.env["XDG_CACHE_HOME"]?.trim();
+  if (xdgCacheHome) {
+    return (0, import_node_path2.join)(xdgCacheHome, CACHE_DIR_NAME);
+  }
+  if (process.platform === "darwin") {
+    return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Caches", CACHE_DIR_NAME);
+  }
+  if (process.platform === "win32") {
+    const localAppData = process.env["LOCALAPPDATA"]?.trim();
+    return localAppData ? (0, import_node_path2.join)(localAppData, CACHE_DIR_NAME) : (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local", CACHE_DIR_NAME);
+  }
+  return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".cache", CACHE_DIR_NAME);
+}
+function getCacheDir() {
+  const configured = readPhoneCliConfig().cacheDir?.trim();
+  return configured || getDefaultCacheDir();
+}
+var cachePaths = {
+  octoGasPrices: () => (0, import_node_path2.join)(getCacheDir(), "octo", "gas-prices.json"),
+  octoElectricityPrices: () => (0, import_node_path2.join)(getCacheDir(), "octo", "electricity-prices.json"),
+  octoMonthlyAverages: () => (0, import_node_path2.join)(getCacheDir(), "octo", "monthly-averages.json"),
+  solarMonthlyYield: () => (0, import_node_path2.join)(getCacheDir(), "solar", "monthly-yield.json")
+};
+function readJsonCacheFile(path) {
+  try {
+    const raw = (0, import_node_fs2.readFileSync)(path, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (typeof error === "object" && error != null && "code" in error && error.code === "ENOENT") {
+      return void 0;
+    }
+    return void 0;
+  }
+}
+function writeJsonCacheFile(path, data) {
+  (0, import_node_fs2.mkdirSync)((0, import_node_path2.dirname)(path), { recursive: true });
+  (0, import_node_fs2.writeFileSync)(path, `${JSON.stringify(data, null, 2)}
+`, "utf8");
+}
+function migrateLegacyOctoCacheFromConfig(keys) {
+  const migrated = {
+    gas: void 0,
+    electricity: void 0,
+    monthlyAverageCache: void 0
+  };
+  const config = readPhoneCliConfig();
+  const octo = config.octo;
+  if (!octo || typeof octo !== "object" || Array.isArray(octo)) {
+    return migrated;
+  }
+  let changed = false;
+  const nextOcto = { ...octo };
+  for (const key of keys) {
+    const value = nextOcto[key];
+    if (value === void 0) continue;
+    migrated[key] = value;
+    delete nextOcto[key];
+    changed = true;
+  }
+  if (changed) {
+    config.octo = nextOcto;
+    writePhoneCliConfig(config);
+  }
+  return migrated;
+}
 
 // lib/octoApi.ts
-var import_node_fs2 = require("node:fs");
 var ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"];
 var OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 var DAY_MS = 24 * 60 * 60 * 1e3;
@@ -319,10 +394,16 @@ function normalizeCachedDayPrices(value) {
   const prices = value.filter((entry) => typeof entry === "number" && Number.isFinite(entry));
   return prices.length > 0 ? prices : null;
 }
-function readGasPriceCache(now = /* @__PURE__ */ new Date()) {
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const raw = octo.gas;
+function loadGasPriceCacheRaw(now = /* @__PURE__ */ new Date()) {
+  const path = cachePaths.octoGasPrices();
+  let raw = readJsonCacheFile(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["gas"]).gas;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
@@ -339,17 +420,11 @@ function readGasPriceCache(now = /* @__PURE__ */ new Date()) {
   }
   return pruned;
 }
-function writeOctoConfigSection(section, value) {
-  const configPath = getConfigPath();
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  octo[section] = value;
-  config.octo = octo;
-  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}
-`, "utf8");
+function readGasPriceCache(now = /* @__PURE__ */ new Date()) {
+  return loadGasPriceCacheRaw(now);
 }
 function saveGasPriceCache(cache) {
-  writeOctoConfigSection("gas", cache);
+  writeJsonCacheFile(cachePaths.octoGasPrices(), cache);
 }
 function hasCachedDay(cache, dayYmd) {
   const prices = cache[dayYmd];
@@ -422,10 +497,16 @@ function normalizeCachedElectricityDay(value) {
   }
   return rates.length > 0 ? rates : null;
 }
-function readElectricityPriceCache(now = /* @__PURE__ */ new Date()) {
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const raw = octo.electricity;
+function loadElectricityPriceCacheRaw(now = /* @__PURE__ */ new Date()) {
+  const path = cachePaths.octoElectricityPrices();
+  let raw = readJsonCacheFile(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["electricity"]).electricity;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return {};
   }
@@ -442,8 +523,11 @@ function readElectricityPriceCache(now = /* @__PURE__ */ new Date()) {
   }
   return pruned;
 }
+function readElectricityPriceCache(now = /* @__PURE__ */ new Date()) {
+  return loadElectricityPriceCacheRaw(now);
+}
 function saveElectricityPriceCache(cache) {
-  writeOctoConfigSection("electricity", cache);
+  writeJsonCacheFile(cachePaths.octoElectricityPrices(), cache);
 }
 function hasCachedElectricityDay(cache, dayYmd) {
   const rates = cache[dayYmd];
@@ -794,10 +878,16 @@ function cachedFinishedMonthIsComplete(monthKey, cache) {
   if (!rec) return false;
   return rec.days >= daysInMonthKey(monthKey);
 }
-function monthlyAverageCacheFromConfig() {
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  const raw = octo.monthlyAverageCache;
+function readMonthlyAverageCache() {
+  const path = cachePaths.octoMonthlyAverages();
+  let raw = readJsonCacheFile(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["monthlyAverageCache"]).monthlyAverageCache;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const cache = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -824,13 +914,7 @@ function monthlyAverageCacheFromConfig() {
   return cache;
 }
 function saveMonthlyAverageCache(cache) {
-  const configPath = getConfigPath();
-  const config = readPhoneCliConfig();
-  const octo = config.octo || {};
-  octo.monthlyAverageCache = cache;
-  config.octo = octo;
-  (0, import_node_fs3.writeFileSync)(configPath, `${JSON.stringify(config, null, 2)}
-`, "utf8");
+  writeJsonCacheFile(cachePaths.octoMonthlyAverages(), cache);
 }
 function monthlyAveragesFromDaily(eDailyCost, gDailyCost, eDailyKwh, gDailyKwh) {
   const keys = /* @__PURE__ */ new Set([
@@ -1080,7 +1164,7 @@ async function main() {
     } else {
       const lastUkDayInAvg = latestUkDayKeyIncludedInMonthlyAverages(from);
       const fetchWindowMonths = monthKeysBackInclusive(from, 3);
-      const monthlyCache = monthlyAverageCacheFromConfig();
+      const monthlyCache = readMonthlyAverageCache();
       const unsettledPriorEvicted = evictUnsettledPriorMonthFromCache(
         monthlyCache,
         from

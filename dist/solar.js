@@ -14756,8 +14756,10 @@ function parsePowerDateTimeKey(key) {
   return ukWallTimeToDate(year, month, day, hour, minute);
 }
 
-// lib/solarMonthlyYield.ts
+// lib/cache.ts
 var import_node_fs2 = require("node:fs");
+var import_node_os2 = require("node:os");
+var import_node_path2 = require("node:path");
 
 // config.ts
 var import_node_fs = require("node:fs");
@@ -14783,6 +14785,70 @@ function readPhoneCliConfig() {
     const message = error51 instanceof Error ? error51.message : String(error51);
     throw new Error(`Failed to read config at ${path}: ${message}`);
   }
+}
+function writePhoneCliConfig(config2) {
+  const path = getConfigPath();
+  (0, import_node_fs.writeFileSync)(path, `${JSON.stringify(config2, null, 2)}
+`, "utf8");
+}
+
+// lib/cache.ts
+var CACHE_DIR_NAME = "phone_cli";
+function getDefaultCacheDir() {
+  const xdgCacheHome = process.env["XDG_CACHE_HOME"]?.trim();
+  if (xdgCacheHome) {
+    return (0, import_node_path2.join)(xdgCacheHome, CACHE_DIR_NAME);
+  }
+  if (process.platform === "darwin") {
+    return (0, import_node_path2.join)((0, import_node_os2.homedir)(), "Library", "Caches", CACHE_DIR_NAME);
+  }
+  if (process.platform === "win32") {
+    const localAppData = process.env["LOCALAPPDATA"]?.trim();
+    return localAppData ? (0, import_node_path2.join)(localAppData, CACHE_DIR_NAME) : (0, import_node_path2.join)((0, import_node_os2.homedir)(), "AppData", "Local", CACHE_DIR_NAME);
+  }
+  return (0, import_node_path2.join)((0, import_node_os2.homedir)(), ".cache", CACHE_DIR_NAME);
+}
+function getCacheDir() {
+  const configured = readPhoneCliConfig().cacheDir?.trim();
+  return configured || getDefaultCacheDir();
+}
+var cachePaths = {
+  octoGasPrices: () => (0, import_node_path2.join)(getCacheDir(), "octo", "gas-prices.json"),
+  octoElectricityPrices: () => (0, import_node_path2.join)(getCacheDir(), "octo", "electricity-prices.json"),
+  octoMonthlyAverages: () => (0, import_node_path2.join)(getCacheDir(), "octo", "monthly-averages.json"),
+  solarMonthlyYield: () => (0, import_node_path2.join)(getCacheDir(), "solar", "monthly-yield.json")
+};
+function readJsonCacheFile(path) {
+  try {
+    const raw = (0, import_node_fs2.readFileSync)(path, "utf8");
+    return JSON.parse(raw);
+  } catch (error51) {
+    if (typeof error51 === "object" && error51 != null && "code" in error51 && error51.code === "ENOENT") {
+      return void 0;
+    }
+    return void 0;
+  }
+}
+function writeJsonCacheFile(path, data) {
+  (0, import_node_fs2.mkdirSync)((0, import_node_path2.dirname)(path), { recursive: true });
+  (0, import_node_fs2.writeFileSync)(path, `${JSON.stringify(data, null, 2)}
+`, "utf8");
+}
+function migrateLegacySolarCacheFromConfig() {
+  const config2 = readPhoneCliConfig();
+  const solar = config2.solar;
+  if (!solar || typeof solar !== "object" || Array.isArray(solar)) {
+    return void 0;
+  }
+  const nextSolar = { ...solar };
+  const monthlyYieldCache = nextSolar.monthlyYieldCache;
+  if (monthlyYieldCache === void 0) {
+    return void 0;
+  }
+  delete nextSolar.monthlyYieldCache;
+  config2.solar = nextSolar;
+  writePhoneCliConfig(config2);
+  return { monthlyYieldCache };
 }
 
 // lib/solarMonthlyYield.ts
@@ -14851,9 +14917,15 @@ function normalizeCachedMonthlyYield(value) {
   };
 }
 function readSolarMonthlyYieldCache() {
-  const config2 = readPhoneCliConfig();
-  const solar = config2.solar || {};
-  const raw = solar.monthlyYieldCache;
+  const path = cachePaths.solarMonthlyYield();
+  let raw = readJsonCacheFile(path);
+  if (!raw) {
+    const legacy = migrateLegacySolarCacheFromConfig()?.monthlyYieldCache;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const cache = {};
   for (const [month, value] of Object.entries(raw)) {
@@ -14866,13 +14938,7 @@ function readSolarMonthlyYieldCache() {
   return cache;
 }
 function saveSolarMonthlyYieldCache(cache) {
-  const configPath = getConfigPath();
-  const config2 = readPhoneCliConfig();
-  const solar = config2.solar || {};
-  solar.monthlyYieldCache = cache;
-  config2.solar = solar;
-  (0, import_node_fs2.writeFileSync)(configPath, `${JSON.stringify(config2, null, 2)}
-`, "utf8");
+  writeJsonCacheFile(cachePaths.solarMonthlyYield(), cache);
 }
 function monthlyYieldFromDaily(data, currentMonth, immutableCachedMonths) {
   const sums = {};
