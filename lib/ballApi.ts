@@ -753,6 +753,84 @@ function villaFixtureStatusLine(event: NormalizedEvent): string {
   return `- ${date} ${fixtureLine(event)} (${comp})`;
 }
 
+export const VILLA_RESULTS_HEADING = "== Results ==";
+export const VILLA_FIXTURES_HEADING = "== Fixtures ==";
+
+export function splitVillaStatusSections(lines: string[]): { results: string[]; fixtures: string[] } {
+  const results: string[] = [];
+  const fixtures: string[] = [];
+  let section: "results" | "fixtures" | null = null;
+  for (const line of lines) {
+    if (line === VILLA_RESULTS_HEADING) {
+      section = "results";
+      continue;
+    }
+    if (line === VILLA_FIXTURES_HEADING) {
+      section = "fixtures";
+      continue;
+    }
+    if (line === "" || line.startsWith("===")) continue;
+    if (section === "results") results.push(line);
+    else if (section === "fixtures") fixtures.push(line);
+  }
+  return { results, fixtures };
+}
+
+function allocateVillaSectionLines(
+  results: string[],
+  fixtures: string[],
+  maxItemLines: number,
+): { results: string[]; fixtures: string[] } {
+  if (maxItemLines <= 0) return { results: [], fixtures: [] };
+  if (results.length + fixtures.length <= maxItemLines) {
+    return { results, fixtures };
+  }
+
+  let resultsBudget = Math.floor(maxItemLines / 2);
+  let fixturesBudget = maxItemLines - resultsBudget;
+  let fittedResults = results.slice(-resultsBudget);
+  let fittedFixtures = fixtures.slice(0, fixturesBudget);
+
+  const resultsShortfall = resultsBudget - fittedResults.length;
+  if (resultsShortfall > 0) {
+    fittedFixtures = fixtures.slice(0, fixturesBudget + resultsShortfall);
+  }
+  const fixturesShortfall = fixturesBudget - fittedFixtures.length;
+  if (fixturesShortfall > 0) {
+    fittedResults = results.slice(-(resultsBudget + fixturesShortfall));
+  }
+
+  return { results: fittedResults, fixtures: fittedFixtures };
+}
+
+export function fitVillaStatusLines(lines: string[], maxContentLines: number): string[] {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+
+  const { results, fixtures } = splitVillaStatusSections(lines);
+  const hasResults = results.length > 0;
+  const hasFixtures = fixtures.length > 0;
+  if (!hasResults && !hasFixtures) {
+    return lines.slice(0, maxContentLines);
+  }
+  if (!hasResults) {
+    return fitPanelContentLines([VILLA_FIXTURES_HEADING, "", ...fixtures], maxContentLines);
+  }
+  if (!hasFixtures) {
+    return fitPanelContentLines([VILLA_RESULTS_HEADING, "", ...results], maxContentLines);
+  }
+
+  const sectionOverhead = 5;
+  const maxItemLines = maxContentLines - sectionOverhead;
+  if (maxItemLines <= 0) {
+    return [VILLA_RESULTS_HEADING, "", VILLA_FIXTURES_HEADING];
+  }
+
+  const fitted = allocateVillaSectionLines(results, fixtures, maxItemLines);
+  const output = [VILLA_RESULTS_HEADING, "", ...fitted.results, "", VILLA_FIXTURES_HEADING, "", ...fitted.fixtures];
+  return fitPanelContentLines(output, maxContentLines);
+}
+
 function readRapidApiKey(): string {
   const config = readPhoneCliConfig();
   const ballConfig = config.ball || {};
@@ -807,7 +885,30 @@ export async function loadVillaFixturesStatusLines(): Promise<string[]> {
     });
     if (events.length === 0) return ["none"];
     events.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-    return events.map((event) => villaFixtureStatusLine(event));
+    const results: NormalizedEvent[] = [];
+    const fixtures: NormalizedEvent[] = [];
+    for (const event of events) {
+      if (isResultState(event)) {
+        results.push(event);
+      } else {
+        fixtures.push(event);
+      }
+    }
+    const lines: string[] = [];
+    if (results.length > 0) {
+      lines.push(VILLA_RESULTS_HEADING, "");
+      for (const event of results) {
+        lines.push(villaFixtureStatusLine(event));
+      }
+    }
+    if (fixtures.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push(VILLA_FIXTURES_HEADING, "");
+      for (const event of fixtures) {
+        lines.push(villaFixtureStatusLine(event));
+      }
+    }
+    return lines.length > 0 ? lines : ["none"];
   } catch {
     return ["-"];
   }
