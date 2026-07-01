@@ -204,6 +204,12 @@ function sectionBreak(name: string): string[] {
   return ["", sectionDivider(name)];
 }
 
+function upcomingDatesSectionLines(bdayConfig: BdayConfig | null, now: Date): string[] {
+  const lines = upcomingBdaySectionLines(bdayConfig, now).map(capitalizeBdayLine);
+  if (lines.length === 0) return [];
+  return ["", "=== Upcoming dates ===", ...lines];
+}
+
 type GasSnapshot = {
   line: string;
 };
@@ -238,7 +244,7 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     "",
     `Time: ${formatTime(now)}`,
     formatSunriseSunsetStatusLine(state.sunrise, state.sunset, now, state.todayYmd),
-    ...upcomingBdaySectionLines(state.bdayConfig, now).map(capitalizeBdayLine),
+    ...upcomingDatesSectionLines(state.bdayConfig, now),
     ...sectionBreak("Solar"),
     formatSolarYieldLine(state.solarYield),
     ...formatSolarStatusPowerLines(
