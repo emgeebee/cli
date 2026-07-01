@@ -70,6 +70,109 @@ function truncateToWidth(line: string, maxWidth: number): string {
   return result;
 }
 
+function finalizeAnsiSegment(segment: string, usedAnsi: boolean): string {
+  if (usedAnsi && !segment.endsWith(ANSI_RESET)) {
+    return `${segment}${ANSI_RESET}`;
+  }
+  return segment;
+}
+
+function splitAtVisibleWidth(
+  line: string,
+  maxWidth: number,
+  preferWordBreak: boolean,
+): { head: string; tail: string } {
+  if (visibleLength(line) <= maxWidth) {
+    return { head: line, tail: "" };
+  }
+
+  let index = 0;
+  let width = 0;
+  let result = "";
+  let usedAnsi = false;
+  let activeAnsi = "";
+  let bestBreak: { sourceIndex: number; result: string; activeAnsi: string } | null = null;
+
+  while (index < line.length && width < maxWidth) {
+    const ansiMatch = line.slice(index).match(ANSI_SEQUENCE);
+    if (ansiMatch) {
+      result += ansiMatch[0];
+      if (ansiMatch[0] !== ANSI_RESET) {
+        usedAnsi = true;
+        activeAnsi += ansiMatch[0];
+      } else {
+        activeAnsi = "";
+      }
+      index += ansiMatch[0].length;
+      continue;
+    }
+
+    const grapheme = nextGrapheme(stripAnsi(line.slice(index)));
+    if (!grapheme) break;
+
+    const graphemeWidth = stringWidth(grapheme);
+    if (width + graphemeWidth > maxWidth) break;
+
+    let remaining = grapheme.length;
+    while (remaining > 0 && index < line.length) {
+      const inlineAnsi = line.slice(index).match(ANSI_SEQUENCE);
+      if (inlineAnsi) {
+        result += inlineAnsi[0];
+        if (inlineAnsi[0] !== ANSI_RESET) {
+          usedAnsi = true;
+          activeAnsi += inlineAnsi[0];
+        } else {
+          activeAnsi = "";
+        }
+        index += inlineAnsi[0].length;
+        continue;
+      }
+
+      const character = line[index];
+      result += character;
+      if (preferWordBreak && character === " ") {
+        bestBreak = { sourceIndex: index + 1, result, activeAnsi };
+      }
+      index += 1;
+      remaining -= 1;
+    }
+
+    width += graphemeWidth;
+  }
+
+  const minBreakWidth = Math.max(1, Math.floor(maxWidth * 0.25));
+  const useWordBreak =
+    preferWordBreak &&
+    bestBreak !== null &&
+    visibleLength(bestBreak.result) >= minBreakWidth;
+
+  const headSourceEnd = useWordBreak ? bestBreak!.sourceIndex : index;
+  const head = finalizeAnsiSegment(useWordBreak ? bestBreak!.result : result, usedAnsi);
+  const tailPrefix = useWordBreak ? bestBreak!.activeAnsi : activeAnsi;
+  const tail = `${tailPrefix}${line.slice(headSourceEnd).trimStart()}`;
+
+  return { head, tail };
+}
+
+function wrapToWidth(line: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [line];
+  if (visibleLength(line) <= maxWidth) return [line];
+  if (line.trim() === "") return [""];
+
+  const wrapped: string[] = [];
+  let remaining = line;
+  while (visibleLength(remaining) > maxWidth) {
+    const { head, tail } = splitAtVisibleWidth(remaining, maxWidth, true);
+    wrapped.push(head);
+    remaining = tail;
+    if (!remaining) break;
+  }
+  if (remaining.length > 0 || wrapped.length === 0) {
+    wrapped.push(remaining);
+  }
+  return wrapped;
+}
+
 export function boxOuterWidth(innerWidth: number): number {
   return innerWidth + 4;
 }
@@ -83,7 +186,12 @@ export function statusLeftColumnOuterWidth(): number {
 }
 
 export function statusLayoutInnerWidth(): number {
-  return Math.max(statusLeftColumnOuterWidth() - 4, 20);
+  return Math.max(statusLeftColumnOuterWidth() - 4, 1);
+}
+
+export function isNarrowStatusTerminal(): boolean {
+  const columns = process.stdout.columns ?? 80;
+  return columns < STATUS_LEFT_COLUMN_MAX_OUTER;
 }
 
 /** Target total width for a three-column status layout. */
@@ -229,11 +337,18 @@ function padVisible(line: string, width: number): string {
   return len >= width ? line : `${line}${" ".repeat(width - len)}`;
 }
 
+function fitBoxContentLines(lines: string[], innerWidth: number): string[] {
+  const wrapLines = isNarrowStatusTerminal();
+  return lines.flatMap((line) =>
+    wrapLines ? wrapToWidth(line, innerWidth) : [truncateToWidth(line, innerWidth)],
+  );
+}
+
 export function boxLines(lines: string[], innerWidth: number): string[] {
   if (lines.length === 0 || innerWidth <= 0) return lines;
   const top = `┌${"─".repeat(innerWidth + 2)}┐`;
   const bottom = `└${"─".repeat(innerWidth + 2)}┘`;
-  const body = lines.map((line) => {
+  const body = fitBoxContentLines(lines, innerWidth).map((line) => {
     const fitted = truncateToWidth(line, innerWidth);
     const padding = innerWidth - visibleLength(fitted);
     return `│ ${fitted}${" ".repeat(padding)} │`;
