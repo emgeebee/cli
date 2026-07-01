@@ -285,10 +285,21 @@ export const createFuelService = (
       const selectedPrice = stationDetail.prices.find((price) => price.fuelType === options.fuelType);
 
       if (!selectedPrice) {
-        throw createAppError(
-          "NOT_FOUND",
-          `Station "${stationDetail.tradingName}" from list "${listName}" has no ${options.fuelType} price.`
-        );
+        return {
+          availableFuelTypes: stationDetail.availableFuelTypes,
+          brandName: stationDetail.brandName,
+          ...(queryEntry.display ? { display: queryEntry.display } : {}),
+          freshnessBand: null,
+          freshnessMinutes: null,
+          lastUpdatedAt: null,
+          nodeId: stationDetail.nodeId,
+          postcode: stationDetail.location.postcode,
+          qualityFlags: stationDetail.qualityFlags,
+          selectedFuelType: null,
+          selectedPricePencePerLitre: null,
+          sortOrder: queryEntry.sort ?? Number.POSITIVE_INFINITY,
+          tradingName: stationDetail.tradingName
+        };
       }
 
       const freshness = computeFreshness(selectedPrice.lastUpdatedAt);
