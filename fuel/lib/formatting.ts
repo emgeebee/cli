@@ -63,24 +63,28 @@ const LIST_PRICE_RED_MIN_RANK_FRAC = 0.6;
 
 type PriceRankRow = {
   nodeId: string;
-  selectedPricePencePerLitre: number;
+  selectedPricePencePerLitre: number | null;
 };
 
 const listPriceRankScoreByNodeId = (stations: readonly PriceRankRow[]): Map<string, number> => {
   const scoreByNodeId = new Map<string, number>();
-  const n = stations.length;
+  const stationsWithPrices = stations.filter(
+    (station): station is PriceRankRow & { selectedPricePencePerLitre: number } =>
+      station.selectedPricePencePerLitre !== null
+  );
+  const n = stationsWithPrices.length;
 
   if (n === 0) {
     return scoreByNodeId;
   }
 
   if (n === 1) {
-    scoreByNodeId.set(stations[0]?.nodeId ?? "", 5.5);
+    scoreByNodeId.set(stationsWithPrices[0]?.nodeId ?? "", 5.5);
 
     return scoreByNodeId;
   }
 
-  const sorted = [...stations].sort((left, right) => {
+  const sorted = [...stationsWithPrices].sort((left, right) => {
     if (left.selectedPricePencePerLitre !== right.selectedPricePencePerLitre) {
       return left.selectedPricePencePerLitre - right.selectedPricePencePerLitre;
     }
@@ -336,11 +340,16 @@ export const formatStationListText = (data: StationListCommandData, context: Tex
     const stationNamePlain =
       station.display ?? formatStationTradingDisplay(station.tradingName, station.brandName);
     const left = `${stationNamePlain} (${station.postcode})${hasStationQualityFlag(station.qualityFlags, "likely_test_station") ? ` ${style.warning("[likely test/demo]")}` : ""}`;
-    const right = `${formatListPriceForDisplay(
-      station.selectedPricePencePerLitre,
-      priceScoreByNodeId.get(station.nodeId) ?? 5.5,
-      context
-    )}  ${formatFreshnessPlain(station.freshnessBand, station.freshnessMinutes)}`;
+    const right =
+      station.selectedPricePencePerLitre === null
+        ? context.colorEnabled
+          ? context.text.style.dim("no data")
+          : "no data"
+        : `${formatListPriceForDisplay(
+            station.selectedPricePencePerLitre,
+            priceScoreByNodeId.get(station.nodeId) ?? 5.5,
+            context
+          )}  ${formatFreshnessPlain(station.freshnessBand, station.freshnessMinutes)}`;
 
     return context.text.joinAligned(left, right, context.terminalWidth);
   });

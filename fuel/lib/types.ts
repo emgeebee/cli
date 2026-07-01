@@ -222,7 +222,7 @@ export interface StationListCommandData {
     availableFuelTypes: FuelType[];
     brandName: string;
     display?: string;
-    freshnessBand: FreshnessBand;
+    freshnessBand: FreshnessBand | null;
     freshnessMinutes: number | null;
     lastUpdatedAt: string | null;
     nodeId: string;
@@ -230,8 +230,8 @@ export interface StationListCommandData {
     qualityFlags: StationQualityFlag[];
     /** Config `sort` key; lower first. Omitted in config sorts last. */
     sortOrder: number;
-    selectedFuelType: FuelType;
-    selectedPricePencePerLitre: number;
+    selectedFuelType: FuelType | null;
+    selectedPricePencePerLitre: number | null;
     tradingName: string;
   }>;
 }
