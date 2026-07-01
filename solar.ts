@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { fetchSolarData } from "./lib/solarApi";
+import { flushServiceCache } from "./lib/cache";
 import { solarMonthlyYieldRowsFromData } from "./lib/solarMonthlyYield";
 import { buildSolarCliLines } from "./lib/solarView";
 
@@ -25,10 +26,11 @@ async function main(): Promise<void> {
     }
 
     const data = await fetchSolarData();
-    const monthlyYields = solarMonthlyYieldRowsFromData(data);
+    const monthlyYields = await solarMonthlyYieldRowsFromData(data);
     for (const line of buildSolarCliLines(data, monthlyYields)) {
       console.log(line);
     }
+    await flushServiceCache("solar");
   } catch (error: unknown) {
     const message =
       error instanceof z.ZodError
@@ -39,6 +41,7 @@ async function main(): Promise<void> {
     console.error(message);
     console.error("");
     usage();
+    await flushServiceCache("solar");
     process.exit(1);
   }
 }

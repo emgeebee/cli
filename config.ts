@@ -7,7 +7,7 @@ export type CliConfig = Record<string, unknown>;
 export type PhoneCliConfig = {
   /** UK postcode district for geo lookups (e.g. weather sunrise/sunset). */
   defaultLocation?: string;
-  /** Override default cache directory (see lib/cache.ts). */
+  /** Legacy local cache directory used only for one-time migration (see docs/remote-cache.md). */
   cacheDir?: string;
   octo?: CliConfig;
   cric?: CliConfig;

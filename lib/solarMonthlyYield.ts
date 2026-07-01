@@ -1,8 +1,8 @@
 import {
-  cachePaths,
+  ensureSolarCacheLoaded,
   migrateLegacySolarCacheFromConfig,
-  readJsonCacheFile,
-  writeJsonCacheFile,
+  readServiceCache,
+  updateServiceCache,
 } from "./cache";
 import type { SolarResponse } from "./solarApi";
 
@@ -113,15 +113,7 @@ function normalizeCachedMonthlyYield(value: unknown): CachedSolarMonthlyYield | 
 }
 
 export function readSolarMonthlyYieldCache(): SolarMonthlyYieldCache {
-  const path = cachePaths.solarMonthlyYield();
-  let raw = readJsonCacheFile<SolarMonthlyYieldCache>(path);
-  if (!raw) {
-    const legacy = migrateLegacySolarCacheFromConfig()?.monthlyYieldCache;
-    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
-      raw = legacy as SolarMonthlyYieldCache;
-      writeJsonCacheFile(path, raw);
-    }
-  }
+  const raw = readServiceCache("solar").monthlyYield;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 
   const cache: SolarMonthlyYieldCache = {};
@@ -136,7 +128,7 @@ export function readSolarMonthlyYieldCache(): SolarMonthlyYieldCache {
 }
 
 export function saveSolarMonthlyYieldCache(cache: SolarMonthlyYieldCache): void {
-  writeJsonCacheFile(cachePaths.solarMonthlyYield(), cache);
+  updateServiceCache("solar", { monthlyYield: cache });
 }
 
 function monthlyYieldFromDaily(
@@ -175,11 +167,12 @@ function completedCachedMonths(cache: SolarMonthlyYieldCache, currentMonth: stri
   );
 }
 
-export function solarMonthlyYieldRowsFromData(
+export async function solarMonthlyYieldRowsFromData(
   data: SolarResponse,
   now: Date = new Date(),
   months = SOLAR_MONTHLY_YIELD_MONTHS,
-): SolarMonthlyYieldRow[] {
+): Promise<SolarMonthlyYieldRow[]> {
+  await ensureSolarCacheLoaded();
   const currentMonth = currentMonthKey(now);
   const cache = readSolarMonthlyYieldCache();
   const immutableCachedMonths = completedCachedMonths(cache, currentMonth);

@@ -2,10 +2,10 @@
 
 import { getConfigPath } from "./config";
 import {
-  cachePaths,
-  ensureOctoMonthlyAveragesMigrated,
-  readJsonCacheFile,
-  writeJsonCacheFile,
+  ensureOctoCacheLoaded,
+  flushServiceCache,
+  readServiceCache,
+  updateServiceCache,
 } from "./lib/cache";
 import {
   DAY_MS,
@@ -438,8 +438,7 @@ function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCa
 }
 
 function readMonthlyAverageCache(): MonthlyAverageCache {
-  ensureOctoMonthlyAveragesMigrated();
-  const raw = readJsonCacheFile<MonthlyAverageCache>(cachePaths.octoMonthlyAverages());
+  const raw = readServiceCache("octo").monthlyAverages;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const cache: MonthlyAverageCache = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -474,7 +473,7 @@ function readMonthlyAverageCache(): MonthlyAverageCache {
 }
 
 function saveMonthlyAverageCache(cache: MonthlyAverageCache): void {
-  writeJsonCacheFile(cachePaths.octoMonthlyAverages(), cache);
+  updateServiceCache("octo", { monthlyAverages: cache });
 }
 
 function monthlyAveragesFromDaily(
@@ -660,7 +659,7 @@ async function main(): Promise<void> {
       throw new Error("This command takes no arguments.");
     }
 
-    ensureOctoMonthlyAveragesMigrated();
+    await ensureOctoCacheLoaded();
 
     const { token, accountNumber, gasKwhPerUnit } = resolveOctoCredentials();
 
@@ -954,11 +953,14 @@ async function main(): Promise<void> {
       printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
       printFinalMonthTotals(monthlyForDisplay, from);
     }
+
+    await flushServiceCache("octo");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
     console.error("");
     usage();
+    await flushServiceCache("octo");
     process.exit(1);
   }
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { ensureOctoCacheLoaded, ensureSolarCacheLoaded, flushAllServiceCaches } from "./lib/cache";
 import { getConfigPath } from "./config";
 import {
   fetchBbcWeatherAggregated,
@@ -474,7 +475,7 @@ async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
     return {
       ...solarSnapshotFromData(data, dayKey, now),
       yieldAverages: yieldAveragesFromData(data),
-      monthlyYields: solarMonthlyYieldRowsFromData(data, now),
+      monthlyYields: await solarMonthlyYieldRowsFromData(data, now),
     };
   } catch {
     return {
@@ -608,6 +609,7 @@ async function printOnce(): Promise<void> {
         : null,
     },
   );
+  await flushAllServiceCaches();
 }
 
 function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "shortcuts-menu" | "cmd-menu" | null {
@@ -695,6 +697,7 @@ async function runCmdMenuWfh(
 }
 
 async function runLive(): Promise<void> {
+  await Promise.all([ensureOctoCacheLoaded(), ensureSolarCacheLoaded()]);
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
   let bdayConfig = await fetchBdayConfig();
@@ -1102,7 +1105,9 @@ async function runLive(): Promise<void> {
     if (timer) clearInterval(timer);
     disableRawInput?.();
     leaveFullscreen();
-    process.exit(0);
+    void flushAllServiceCaches().finally(() => {
+      process.exit(0);
+    });
   };
 
   const runShortcut = async (shortcut: StatusShortcut): Promise<void> => {
@@ -1393,7 +1398,7 @@ async function runLive(): Promise<void> {
     yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
-    monthlyYields = solarMonthlyYieldRowsFromData(data, started);
+    monthlyYields = await solarMonthlyYieldRowsFromData(data, started);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
     lastSolarYieldRefreshAt = solarStartedAt;
     lastPowerRefreshAt = solarStartedAt;
@@ -1473,7 +1478,7 @@ async function runLive(): Promise<void> {
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
             yieldAverages = yieldAveragesFromData(data);
-            monthlyYields = solarMonthlyYieldRowsFromData(data, now);
+            monthlyYields = await solarMonthlyYieldRowsFromData(data, now);
             lastSolarYieldRefreshAt = nowMs;
           }
           if (needPowerRefresh) {
