@@ -143,14 +143,19 @@ function formatTime(now: Date): string {
   });
 }
 
-function formatDate(now: Date): string {
-  return now.toLocaleDateString("en-GB", {
-    weekday: "long",
+function formatStatusDate(now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
     day: "numeric",
     month: "long",
     year: "numeric",
     timeZone: UK_TZ,
-  });
+  }).formatToParts(now);
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  return `${weekday} ${day} ${month} ${year}`;
 }
 
 function formatSolarYieldLine(solarYield: number | null): string {
@@ -164,10 +169,10 @@ function formatHouseTempsLine(downstairsTemp: number | null, shedTemp: number | 
 }
 
 function statusBoxTitle(now: Date): string {
-  const date = formatDate(now);
+  const date = formatStatusDate(now);
   const remaining = moneyRemaining(now);
   const money = remaining == null ? "-" : String(remaining);
-  return `=== Status (${date}) // ${money} ===`;
+  return `=== Status (${date}) [${money}] ===`;
 }
 
 function capitalizeHouseSection(label: string): string {
@@ -197,7 +202,7 @@ function capitalizeElectricityLines(lines: string[]): string[] {
 }
 
 function sectionDivider(name: string): string {
-  return `── ${name} ──`;
+  return `=== ${name} ===`;
 }
 
 function sectionBreak(name: string): string[] {
@@ -333,9 +338,9 @@ function withCompactPanelCountdown(
   const label = COMPACT_PANEL_LABELS[countdown.next];
   const suffix = rotationNextLabel(label, countdown.seconds, countdown.paused ?? false);
   const line = lines[0];
-  if (line.startsWith("── ") && line.endsWith(" ──")) {
-    const name = line.slice(3, -3);
-    return [`── ${name} (${suffix}, n) ──`, ...lines.slice(1)];
+  if (line.startsWith("=== ") && line.endsWith(" ===")) {
+    const name = line.slice(4, -4);
+    return [`=== ${name} (${suffix}, n) ===`, ...lines.slice(1)];
   }
   const title = line.replace(/ ===$/, ` (${suffix}, n) ===`);
   return [title, ...lines.slice(1)];

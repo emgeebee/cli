@@ -156,6 +156,11 @@ function splitAtVisibleWidth(
 
 const PREFERRED_LINE_BREAK = " // ";
 
+function shouldNoWrapStatusLine(line: string): boolean {
+  const stripped = stripAnsi(line).trim();
+  return stripped.startsWith("===") || stripped.startsWith("Temp:");
+}
+
 function wrapToWidth(line: string, maxWidth: number): string[] {
   if (maxWidth <= 0) return [line];
   if (line.trim() === "") return [""];
@@ -354,7 +359,11 @@ function padVisible(line: string, width: number): string {
 function fitBoxContentLines(lines: string[], innerWidth: number): string[] {
   const wrapLines = isNarrowStatusTerminal();
   return lines.flatMap((line) =>
-    wrapLines ? wrapToWidth(line, innerWidth) : [truncateToWidth(line, innerWidth)],
+    shouldNoWrapStatusLine(line)
+      ? [truncateToWidth(line, innerWidth)]
+      : wrapLines
+        ? wrapToWidth(line, innerWidth)
+        : [truncateToWidth(line, innerWidth)],
   );
 }
 
