@@ -1,7 +1,8 @@
-import { getConfigPath, readPhoneCliConfig } from "../../config";
 import { parseFuelType } from "./commandUtils";
 import { createAppError } from "./errors";
 import type { FuelType } from "./types";
+
+export const STATIONS_API_URL = "http://api.emgeebee.buzz:1880/api/stations";
 
 export type StationListEntry = {
   display?: string;
@@ -18,23 +19,31 @@ export type StationListDefinition = {
 export type StationListsConfig = Record<string, StationListDefinition>;
 
 export const loadStationListsConfig = async (): Promise<StationListsConfig> => {
-  const configPath = getConfigPath();
-  const rootConfig = readPhoneCliConfig() as Record<string, unknown>;
-  const fuelConfig = rootConfig["fuel"];
-  if (typeof fuelConfig !== "object" || fuelConfig === null || Array.isArray(fuelConfig)) {
-    throw createAppError(
-      "NOT_FOUND",
-      `Missing "fuel" section in ${configPath}. Add fuel.lists with named station lists.`
-    );
+  let response: Response;
+
+  try {
+    response = await fetch(STATIONS_API_URL, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+  } catch {
+    throw createAppError("UPSTREAM_API_ERROR", `Failed to reach stations API at ${STATIONS_API_URL}.`);
   }
-  const listsConfig = (fuelConfig as Record<string, unknown>)["lists"];
-  if (listsConfig === undefined) {
-    throw createAppError(
-      "NOT_FOUND",
-      `Missing fuel.lists in ${configPath}. Add named station lists under fuel.lists.`
-    );
+
+  if (!response.ok) {
+    throw createAppError("UPSTREAM_API_ERROR", `Stations API request failed (${response.status}).`);
   }
-  return validateStationListsConfig(listsConfig, `${configPath} (fuel.lists)`);
+
+  let parsed: unknown;
+
+  try {
+    parsed = await response.json();
+  } catch {
+    throw createAppError("UPSTREAM_API_ERROR", "Stations API returned invalid JSON.");
+  }
+
+  return validateStationListsConfig(parsed, STATIONS_API_URL);
 };
 
 const validateStationListsConfig = (parsed: unknown, configPath: string): StationListsConfig => {
