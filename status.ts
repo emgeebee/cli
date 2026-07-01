@@ -40,7 +40,7 @@ import {
   type OctopusRate,
 } from "./lib/octoApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
-import { readBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib/bdayApi";
+import { fetchBdayConfig, upcomingBdaySectionLines, type BdayConfig } from "./lib/bdayApi";
 import {
   buildStatusCalendarLines,
   loadStatusCalendarData,
@@ -555,9 +555,9 @@ async function loadSportsLines(ymd: string): Promise<{ cricLines: string[]; foot
 async function printOnce(): Promise<void> {
   const now = new Date();
   const dayKey = ukTodayYmd(now);
-  const bdayConfig = readBdayConfig();
   const location = resolveDefaultLocation();
-  const [weatherSnapshot, solar, wfh, temps, houseOcto, sports, plTableLines, villaLines] = await Promise.all([
+  const [bdayConfig, weatherSnapshot, solar, wfh, temps, houseOcto, sports, plTableLines, villaLines] = await Promise.all([
+    fetchBdayConfig(),
     loadWeatherSnapshot(location, dayKey),
     loadSolarSnapshot(dayKey, now),
     fetchWfhStatus(),
@@ -686,7 +686,7 @@ async function runCmdMenuWfh(
 async function runLive(): Promise<void> {
   const location = resolveDefaultLocation();
   let trackedDate = ukTodayYmd();
-  let bdayConfig = readBdayConfig();
+  let bdayConfig = await fetchBdayConfig();
   let fullWeatherLines: string[] = [];
   let sunrise = "-";
   let sunset = "-";
@@ -1410,7 +1410,7 @@ async function runLive(): Promise<void> {
 
       if (dayChanged) {
         trackedDate = today;
-        bdayConfig = readBdayConfig();
+        bdayConfig = await fetchBdayConfig();
         [, wfh] = await Promise.all([
           refreshWeather().catch(() => {
             fullWeatherLines = ["weather unavailable"];

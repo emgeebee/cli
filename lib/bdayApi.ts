@@ -1,7 +1,16 @@
-import { readPhoneCliConfig } from "../config";
+import { z } from "zod";
+
+export const DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UK_TZ = "Europe/London";
+
+const BdayPersonSchema = z.object({
+  bd: z.string().optional(),
+  type: z.number().optional(),
+});
+
+const BdayConfigSchema = z.record(z.string(), BdayPersonSchema);
 
 export type BdayPersonConfig = {
   bd?: string;
@@ -18,13 +27,59 @@ export type UpcomingBirthday = {
   age: number;
 };
 
-export function readBdayConfig(): BdayConfig | null {
-  const config = readPhoneCliConfig();
-  const bday = config.bday;
-  if (!bday || typeof bday !== "object" || Array.isArray(bday)) {
+export function normalizeBirthDateYmd(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
     return null;
   }
-  return bday as BdayConfig;
+  return date.toLocaleDateString("en-CA", { timeZone: UK_TZ });
+}
+
+function normalizeBdayConfig(raw: z.infer<typeof BdayConfigSchema>): BdayConfig {
+  const config: BdayConfig = {};
+  for (const [name, person] of Object.entries(raw)) {
+    const bdYmd = normalizeBirthDateYmd(String(person?.bd || ""));
+    if (!bdYmd) continue;
+    config[name] = {
+      bd: bdYmd,
+      ...(person.type == null ? {} : { type: person.type }),
+    };
+  }
+  return config;
+}
+
+export async function fetchBdayConfig(): Promise<BdayConfig | null> {
+  try {
+    const response = await fetch(DATES_API_URL, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const config = normalizeBdayConfig(BdayConfigSchema.parse(await response.json()));
+    return Object.keys(config).length > 0 ? config : null;
+  } catch {
+    return null;
+  }
+}
+
+export function birthdayMonthDaysFromConfig(config: BdayConfig | null): Set<string> {
+  const birthdayMonthDays = new Set<string>();
+  if (!config) return birthdayMonthDays;
+  for (const person of Object.values(config)) {
+    const bdYmd = String(person?.bd || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(bdYmd)) continue;
+    const [, month, day] = bdYmd.split("-").map(Number);
+    birthdayMonthDays.add(`${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+  }
+  return birthdayMonthDays;
 }
 
 function ukTodayYmd(now: Date = new Date()): string {

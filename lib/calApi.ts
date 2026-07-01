@@ -1,4 +1,5 @@
 import { readPhoneCliConfig } from "../config";
+import { birthdayMonthDaysFromConfig, fetchBdayConfig } from "./bdayApi";
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -25,8 +26,6 @@ export type CalendarColors = {
   bankHolidayDays: Set<string>;
 };
 
-type BdayPersonConfig = { bd?: string };
-type BdayConfig = Record<string, BdayPersonConfig>;
 type HolidayRange = { start?: string; end?: string };
 type BankHoliday = { start?: string };
 type HolidaysResponse = {
@@ -64,17 +63,6 @@ function formatIsoDate(year: number, month: number, day: number): string {
 
 function formatMonthDay(month: number, day: number): string {
   return `${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-function parseIsoBirthDate(value: string): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return null;
-  }
-  const d = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) {
-    return null;
-  }
-  return d;
 }
 
 function parseShortDate(shortDate: string): Date | null {
@@ -337,31 +325,22 @@ export function statusYearWindowFrom(now: Date = new Date()): MonthDef[] {
   });
 }
 
-export function resolveCalConfig(): { token: string; birthdayMonthDays: Set<string> } {
+export async function resolveCalConfig(): Promise<{ token: string; birthdayMonthDays: Set<string> }> {
   const config = readPhoneCliConfig();
   const token = asRecord(config.cal)?.token;
   if (typeof token === "string" && token.trim() !== "") {
-    const birthdayMonthDays = new Set<string>();
-    const bdaySection = asRecord(config.bday) as BdayConfig | null;
-    if (bdaySection) {
-      for (const person of Object.values(bdaySection)) {
-        const raw = String(person?.bd || "").trim();
-        if (!raw) continue;
-        const parsed = parseIsoBirthDate(raw);
-        if (!parsed) continue;
-        birthdayMonthDays.add(
-          formatMonthDay(parsed.getUTCMonth(), parsed.getUTCDate()),
-        );
-      }
-    }
-    return { token: token.trim(), birthdayMonthDays };
+    const bdayConfig = await fetchBdayConfig();
+    return {
+      token: token.trim(),
+      birthdayMonthDays: birthdayMonthDaysFromConfig(bdayConfig),
+    };
   }
   throw new Error('Missing cal token (expected config.cal.token).');
 }
 
-export function readOptionalCalConfig(): { token: string; birthdayMonthDays: Set<string> } | null {
+export async function readOptionalCalConfig(): Promise<{ token: string; birthdayMonthDays: Set<string> } | null> {
   try {
-    return resolveCalConfig();
+    return await resolveCalConfig();
   } catch {
     return null;
   }
@@ -415,7 +394,7 @@ export type StatusCalendarData = {
 export async function loadStatusCalendarData(
   now: Date = new Date(),
 ): Promise<StatusCalendarData | null> {
-  const calConfig = readOptionalCalConfig();
+  const calConfig = await readOptionalCalConfig();
   if (!calConfig) return null;
   try {
     const colors = await fetchCalendarColors(calConfig.token, calConfig.birthdayMonthDays);
