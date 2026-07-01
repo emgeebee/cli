@@ -154,10 +154,24 @@ function splitAtVisibleWidth(
   return { head, tail };
 }
 
+const PREFERRED_LINE_BREAK = " // ";
+
 function wrapToWidth(line: string, maxWidth: number): string[] {
   if (maxWidth <= 0) return [line];
-  if (visibleLength(line) <= maxWidth) return [line];
   if (line.trim() === "") return [""];
+
+  const markerIndex = line.indexOf(PREFERRED_LINE_BREAK);
+  if (markerIndex >= 0) {
+    const head = line.slice(0, markerIndex);
+    const tail = line.slice(markerIndex + PREFERRED_LINE_BREAK.length);
+    const parts = [
+      ...(head.length > 0 ? wrapToWidth(head, maxWidth) : []),
+      ...wrapToWidth(tail, maxWidth),
+    ];
+    return parts.length > 0 ? parts : [""];
+  }
+
+  if (visibleLength(line) <= maxWidth) return [line];
 
   const wrapped: string[] = [];
   let remaining = line;
