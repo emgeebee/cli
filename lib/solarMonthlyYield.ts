@@ -1,6 +1,9 @@
-import { writeFileSync } from "node:fs";
-
-import { getConfigPath, readPhoneCliConfig } from "../config";
+import {
+  cachePaths,
+  migrateLegacySolarCacheFromConfig,
+  readJsonCacheFile,
+  writeJsonCacheFile,
+} from "./cache";
 import type { SolarResponse } from "./solarApi";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -110,9 +113,15 @@ function normalizeCachedMonthlyYield(value: unknown): CachedSolarMonthlyYield | 
 }
 
 export function readSolarMonthlyYieldCache(): SolarMonthlyYieldCache {
-  const config = readPhoneCliConfig();
-  const solar = (config.solar || {}) as Record<string, unknown>;
-  const raw = solar.monthlyYieldCache;
+  const path = cachePaths.solarMonthlyYield();
+  let raw = readJsonCacheFile<SolarMonthlyYieldCache>(path);
+  if (!raw) {
+    const legacy = migrateLegacySolarCacheFromConfig()?.monthlyYieldCache;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy as SolarMonthlyYieldCache;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 
   const cache: SolarMonthlyYieldCache = {};
@@ -127,12 +136,7 @@ export function readSolarMonthlyYieldCache(): SolarMonthlyYieldCache {
 }
 
 export function saveSolarMonthlyYieldCache(cache: SolarMonthlyYieldCache): void {
-  const configPath = getConfigPath();
-  const config = readPhoneCliConfig() as Record<string, unknown>;
-  const solar = (config.solar || {}) as Record<string, unknown>;
-  solar.monthlyYieldCache = cache;
-  config.solar = solar;
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeJsonCacheFile(cachePaths.solarMonthlyYield(), cache);
 }
 
 function monthlyYieldFromDaily(

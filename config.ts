@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -7,6 +7,8 @@ export type CliConfig = Record<string, unknown>;
 export type PhoneCliConfig = {
   /** UK postcode district for geo lookups (e.g. weather sunrise/sunset). */
   defaultLocation?: string;
+  /** Override default cache directory (see lib/cache.ts). */
+  cacheDir?: string;
   octo?: CliConfig;
   cric?: CliConfig;
   ball?: CliConfig;
@@ -45,5 +47,10 @@ export function readPhoneCliConfig(): PhoneCliConfig {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to read config at ${path}: ${message}`);
   }
+}
+
+export function writePhoneCliConfig(config: PhoneCliConfig): void {
+  const path = getConfigPath();
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "node:fs";
-import { getConfigPath, readPhoneCliConfig } from "./config";
+import { getConfigPath } from "./config";
+import {
+  cachePaths,
+  migrateLegacyOctoCacheFromConfig,
+  readJsonCacheFile,
+  writeJsonCacheFile,
+} from "./lib/cache";
 import {
   DAY_MS,
   OCTOPUS_BASE_URL,
@@ -432,10 +437,17 @@ function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCa
   return rec.days >= daysInMonthKey(monthKey);
 }
 
-function monthlyAverageCacheFromConfig(): MonthlyAverageCache {
-  const config = readPhoneCliConfig();
-  const octo = (config.octo || {}) as Record<string, unknown>;
-  const raw = octo.monthlyAverageCache;
+function readMonthlyAverageCache(): MonthlyAverageCache {
+  const path = cachePaths.octoMonthlyAverages();
+  let raw = readJsonCacheFile<MonthlyAverageCache>(path);
+  if (!raw) {
+    const legacy = migrateLegacyOctoCacheFromConfig(["monthlyAverageCache"])
+      .monthlyAverageCache;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) {
+      raw = legacy as MonthlyAverageCache;
+      writeJsonCacheFile(path, raw);
+    }
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const cache: MonthlyAverageCache = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -470,12 +482,7 @@ function monthlyAverageCacheFromConfig(): MonthlyAverageCache {
 }
 
 function saveMonthlyAverageCache(cache: MonthlyAverageCache): void {
-  const configPath = getConfigPath();
-  const config = readPhoneCliConfig() as Record<string, unknown>;
-  const octo = ((config.octo || {}) as Record<string, unknown>);
-  octo.monthlyAverageCache = cache;
-  config.octo = octo;
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeJsonCacheFile(cachePaths.octoMonthlyAverages(), cache);
 }
 
 function monthlyAveragesFromDaily(
@@ -784,7 +791,7 @@ async function main(): Promise<void> {
       const lastUkDayInAvg = latestUkDayKeyIncludedInMonthlyAverages(from);
 
       const fetchWindowMonths = monthKeysBackInclusive(from, 3);
-      const monthlyCache = monthlyAverageCacheFromConfig();
+      const monthlyCache = readMonthlyAverageCache();
       const unsettledPriorEvicted = evictUnsettledPriorMonthFromCache(
         monthlyCache,
         from,
