@@ -403,6 +403,45 @@ export function buildSolarPowerGraphPanelLines(
   ];
 }
 
+export type SolarRotateSummary = {
+  solarYield: number | null;
+  powerNow: number | null;
+  powerHourAvg: number | null;
+  now: Date;
+  yieldAverages: YieldAverage[] | null;
+  monthlyYields: SolarMonthlyYieldRow[] | null;
+};
+
+function formatSolarYieldLine(solarYield: number | null): string {
+  return `Solar Yield: ${solarYield == null ? "-" : formatColoredKwh(solarYield)}`;
+}
+
+function solarSummaryLinesFitWidth(lines: string[], maxLineWidth: number): boolean {
+  return lines.every((line) => visibleLength(line) <= maxLineWidth);
+}
+
+export function buildSolarRotatePanelLines(
+  data: SolarResponse,
+  maxLineWidth?: number,
+  summary?: SolarRotateSummary,
+): string[] {
+  const lines = buildSolarPowerGraphPanelLines(data, maxLineWidth);
+  if (!summary || maxLineWidth == null) return lines;
+
+  const summaryLines = [
+    formatSolarYieldLine(summary.solarYield),
+    ...formatSolarStatusPowerLines(
+      summary.powerNow,
+      summary.powerHourAvg,
+      summary.now,
+      summary.yieldAverages,
+      summary.monthlyYields,
+    ),
+  ];
+  if (!solarSummaryLinesFitWidth(summaryLines, maxLineWidth)) return lines;
+  return [...lines, "", ...summaryLines];
+}
+
 export function buildSolarPanelLines(
   data: SolarResponse,
   countdown?: { seconds: number; next: "weather"; paused?: boolean },

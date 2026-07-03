@@ -230,11 +230,14 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
+const BDAY_DAYS_COL = 2;
 const BDAY_WEEKS_COL = 3;
 const BDAY_MONTHS_COL = 4;
 
-function withoutBdayWeeksMonthsColumns<T>(values: T[]): T[] {
-  return values.filter((_, i) => i !== BDAY_WEEKS_COL && i !== BDAY_MONTHS_COL);
+function narrowBdayTableRow<T>(values: T[]): T[] {
+  return values.filter(
+    (_, i) => i !== BDAY_DAYS_COL && i !== BDAY_WEEKS_COL && i !== BDAY_MONTHS_COL,
+  );
 }
 
 export type BuildBdayTableOptions = {
@@ -277,9 +280,9 @@ export function buildBdayTableLines(
   rows.sort((a, b) => a[0].localeCompare(b[0]));
 
   const headers = narrow
-    ? ["Name", "DOB", "Days", "Normal"]
+    ? ["Name", "DOB", "Normal"]
     : ["Name", "DOB", "Days", "Weeks", "Months", "Normal"];
-  const tableRows = narrow ? rows.map(withoutBdayWeeksMonthsColumns) : rows;
+  const tableRows = narrow ? rows.map(narrowBdayTableRow) : rows;
   const table = makeAsciiTable(headers, tableRows);
   const prefix = withHeader ? ["=== Birthdays ===", ""] : [];
   const lines = [...prefix, ...table];

@@ -1016,6 +1016,53 @@ function readMonthlyAverageCache(): MonthlyAverageCache {
   return cache;
 }
 
+function monthKeyFromDayKey(dayKey: string): string {
+  return dayKey.slice(0, 7);
+}
+
+function monthlyAveragesFromDailyTotals(now: Date = new Date()): MonthlyAverageCache {
+  const { eCost, gCost, eKwh, gKwh } = dailyTotalsMapsFromCache(readDailyTotalsCache(now));
+  const dayKeys = new Set([
+    ...Object.keys(eCost),
+    ...Object.keys(gCost),
+    ...Object.keys(eKwh),
+    ...Object.keys(gKwh),
+  ]);
+  const sums: Record<
+    string,
+    { eCost: number; gCost: number; eKwh: number; gKwh: number; days: number }
+  > = {};
+  for (const dayKey of dayKeys) {
+    const month = monthKeyFromDayKey(dayKey);
+    sums[month] ||= { eCost: 0, gCost: 0, eKwh: 0, gKwh: 0, days: 0 };
+    sums[month].eCost += eCost[dayKey] || 0;
+    sums[month].gCost += gCost[dayKey] || 0;
+    sums[month].eKwh += eKwh[dayKey] || 0;
+    sums[month].gKwh += gKwh[dayKey] || 0;
+    sums[month].days += 1;
+  }
+  const out: MonthlyAverageCache = {};
+  for (const [month, sum] of Object.entries(sums)) {
+    if (sum.days <= 0) continue;
+    out[month] = {
+      eCost: sum.eCost / sum.days,
+      gCost: sum.gCost / sum.days,
+      eKwh: sum.eKwh / sum.days,
+      gKwh: sum.gKwh / sum.days,
+      days: sum.days,
+    };
+  }
+  return out;
+}
+
+function resolveMonthlyAverageRecord(
+  monthKey: string,
+  cached: MonthlyAverageCache,
+  computed: MonthlyAverageCache,
+): MonthlyAverageRecord | undefined {
+  return cached[monthKey] ?? computed[monthKey];
+}
+
 function currentMonthKey(now: Date): string {
   return now.toLocaleDateString("en-CA", { timeZone: UK_TZ }).slice(0, 7);
 }
@@ -1065,11 +1112,12 @@ function formatAverageAndTotalCost(
 }
 
 export function formatMonthlyTotalCostSummaryLines(now: Date = new Date()): string[] {
-  const cache = readMonthlyAverageCache();
+  const cached = readMonthlyAverageCache();
+  const computed = monthlyAveragesFromDailyTotals(now);
   const currentKey = currentMonthKey(now);
   const prevKey = priorCalendarMonthKey(currentKey);
   const rows = [currentKey, prevKey].map((key) => {
-    const rec = cache[key];
+    const rec = resolveMonthlyAverageRecord(key, cached, computed);
     const label = monthLabel(key);
     if (!rec) return [label, "-", "-", "-"];
     const eTotal = rec.eCost * rec.days;
