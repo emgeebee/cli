@@ -134,6 +134,7 @@ function loadOctoFromLocalFiles(): OctoServiceCache {
       !Array.isArray(legacy.monthlyAverageCache)
         ? (legacy.monthlyAverageCache as Record<string, unknown>)
         : undefined),
+    dailyTotals: readLocalJsonFile<Record<string, unknown>>(cachePaths.octoDailyTotals()),
   };
 }
 

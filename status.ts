@@ -400,6 +400,10 @@ function sportsPanelHasContent(lines: string[]): boolean {
   return true;
 }
 
+function mergeSportsStatusLines(current: string[], fetched: string[]): string[] {
+  return sportsPanelHasContent(fetched) ? fetched : current;
+}
+
 function cricketPanelAvailable(lines: string[]): boolean {
   return lines.length > 0 && lines[0] !== "-";
 }
@@ -1183,7 +1187,7 @@ async function runLive(): Promise<void> {
     try {
       const lines = await loadFootballStatusLines(ymd);
       if (generation !== footyRefreshGeneration) return;
-      footyLines = lines;
+      footyLines = mergeSportsStatusLines(footyLines, lines);
       render();
     } catch {
       if (generation !== footyRefreshGeneration) return;
@@ -1199,7 +1203,7 @@ async function runLive(): Promise<void> {
     try {
       const lines = await loadVillaFixturesStatusLines();
       if (generation !== villaRefreshGeneration) return;
-      villaLines = lines;
+      villaLines = mergeSportsStatusLines(villaLines, lines);
       render();
     } catch {
       if (generation !== villaRefreshGeneration) return;
@@ -1560,7 +1564,7 @@ async function runLive(): Promise<void> {
             plTableLines = lines;
           }),
           loadVillaFixturesStatusLines().then((lines) => {
-            villaLines = lines;
+            villaLines = mergeSportsStatusLines(villaLines, lines);
           }),
         ]);
         lastCricRefreshAt = nowMs;
@@ -1585,7 +1589,10 @@ async function runLive(): Promise<void> {
         }
         if (needVillaRefresh) {
           try {
-            villaLines = await loadVillaFixturesStatusLines();
+            villaLines = mergeSportsStatusLines(
+              villaLines,
+              await loadVillaFixturesStatusLines(),
+            );
             lastVillaRefreshAt = nowMs;
           } catch {
             // Keep last known values on transient API errors.
