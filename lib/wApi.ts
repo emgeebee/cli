@@ -476,6 +476,163 @@ export async function buildFullWeatherLines(
   return lines;
 }
 
+function dailyForecastTableLines(data: WeatherResponse): string[] {
+  const reports = (data.forecasts || [])
+    .map((f) => f.summary?.report)
+    .filter((r): r is DailyReport => Boolean(r));
+  if (reports.length === 0) return ["No daily forecast data available."];
+
+  const forecastColWidthFns: ColWidthFns = { 1: emojiTerminalDisplayWidth };
+  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
+  const dayRows = reports.map((report) => formatDayCells(report));
+  const minTempColWidth = Math.max(
+    visibleLength("Min"),
+    ...dayRows.map((r) => visibleLength(r[3] || "")),
+  );
+  const maxTempColWidth = Math.max(
+    visibleLength("Max"),
+    ...dayRows.map((r) => visibleLength(r[4] || "")),
+  );
+  const tempWidth = Math.max(minTempColWidth, maxTempColWidth);
+  const sharedWidths = {
+    dateOrTime: Math.max(
+      visibleLength("Date"),
+      ...dayRows.map((r) => visibleLength(r[0] || "")),
+    ),
+    icon: Math.max(
+      emojiTerminalDisplayWidth("Ic"),
+      ...dayRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+    ),
+    weather: Math.max(
+      visibleLength("Weather"),
+      ...dayRows.map((r) => visibleLength(r[2] || "")),
+    ),
+    rain: Math.max(
+      visibleLength("Rain"),
+      ...dayRows.map((r) => visibleLength(r[5] || "")),
+    ),
+    wind: Math.max(
+      visibleLength("Wind"),
+      ...dayRows.map((r) => visibleLength(r[6] || "")),
+    ),
+  };
+  const dayWidths = [
+    sharedWidths.dateOrTime,
+    sharedWidths.icon,
+    sharedWidths.weather,
+    tempWidth,
+    tempWidth,
+    sharedWidths.rain,
+    sharedWidths.wind,
+  ];
+  return makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
+}
+
+export function buildDailyForecastLines(
+  data: WeatherResponse,
+  requestedPostcode: string,
+  maxContentLines?: number,
+): string[] {
+  const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
+  const lastUpdated = data.lastUpdated || "unknown";
+  const lines = [
+    `=== Weather (${location}, updated ${formatWeatherUpdatedLabel(lastUpdated)}) ===`,
+    "",
+    "Daily forecast",
+    ...dailyForecastTableLines(data),
+  ];
+  if (maxContentLines == null || lines.length <= maxContentLines) return lines;
+  return lines.slice(0, maxContentLines);
+}
+
+export function buildHourlyForecastFromNowLines(
+  data: WeatherResponse,
+  requestedPostcode: string,
+  now: Date = new Date(),
+  maxContentLines?: number,
+): string[] {
+  const location = data.location?.name || data.location?.id || requestedPostcode.toUpperCase();
+  const lastUpdated = data.lastUpdated || "unknown";
+  const reports = (data.forecasts || [])
+    .map((f) => f.summary?.report)
+    .filter((r): r is DailyReport => Boolean(r));
+  const todayDate = reports[0]?.localDate || "";
+  const hourlyReports = (data.forecasts || [])
+    .flatMap((f) => f.detailed?.reports || [])
+    .filter((r): r is HourlyReport => Boolean(r && r.localDate && r.timeslot));
+
+  const nowMinutes = now.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
+  });
+  const nowClock = parseClockMinutes(nowMinutes) ?? 0;
+
+  const todayRows = hourlyReports
+    .filter((r) => r.localDate === todayDate)
+    .sort((a, b) => (a.timeslot || "").localeCompare(b.timeslot || ""))
+    .filter((r) => {
+      const slot = parseClockMinutes(r.timeslot);
+      return slot == null || slot >= nowClock;
+    })
+    .map((report) => formatHourlyCells(report));
+
+  const lines = [
+    `=== Weather (${location}, updated ${formatWeatherUpdatedLabel(lastUpdated)}) ===`,
+    "",
+    `Hourly forecast for ${formatDisplayDate(todayDate || "unknown-date")}`,
+  ];
+
+  if (todayRows.length === 0) {
+    lines.push("No hourly forecast data available.");
+    return lines;
+  }
+
+  const forecastColWidthFns: ColWidthFns = { 1: emojiTerminalDisplayWidth };
+  const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
+  const tempWidth = Math.max(
+    visibleLength("Temp"),
+    ...todayRows.map((r) => visibleLength(r[3] || "")),
+  );
+  const sharedWidths = {
+    dateOrTime: Math.max(
+      visibleLength("Time"),
+      ...todayRows.map((r) => visibleLength(r[0] || "")),
+    ),
+    icon: Math.max(
+      emojiTerminalDisplayWidth("Ic"),
+      ...todayRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+    ),
+    weather: Math.max(
+      visibleLength("Weather"),
+      ...todayRows.map((r) => visibleLength(r[2] || "")),
+    ),
+    rain: Math.max(
+      visibleLength("Rain"),
+      ...todayRows.map((r) => visibleLength(r[4] || "")),
+    ),
+    wind: Math.max(
+      visibleLength("Wind"),
+      ...todayRows.map((r) => visibleLength(r[5] || "")),
+    ),
+  };
+  const hourlyWidths = [
+    sharedWidths.dateOrTime,
+    sharedWidths.icon,
+    sharedWidths.weather,
+    tempWidth,
+    sharedWidths.rain,
+    sharedWidths.wind,
+  ];
+  const table = makeAsciiTable(hourlyHeaders, todayRows, hourlyWidths, forecastColWidthFns);
+  const overhead = lines.length + 1;
+  const maxTableLines =
+    maxContentLines == null ? table.length : Math.max(3, maxContentLines - overhead);
+  lines.push(...table.slice(0, maxTableLines));
+  return lines;
+}
+
 export function withWeatherPanelCountdown(
   lines: string[],
   countdown?: { seconds: number; next: "solar"; paused?: boolean },

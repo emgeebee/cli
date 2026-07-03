@@ -83,6 +83,11 @@ import {
 import { fetchWfhStatus, houseSectionLabel } from "./lib/wfhApi";
 import { buildFullWeatherLines, withWeatherPanelCountdown, type WeatherResponse } from "./lib/wApi";
 import {
+  buildMobileScreenLines,
+  MOBILE_ROTATE_SCREENS,
+  type MobileRotateScreen,
+} from "./lib/mobileStatusScreens";
+import {
   enterFullscreen,
   isNarrowStatusTerminal,
   leaveFullscreen,
@@ -91,7 +96,8 @@ import {
   maxFootballBodyLines,
   resolveStatusLayoutTier,
   shouldStackCalendarUnderStatus,
-  isStatusOnlyTerminal,
+  isMobileStatusTerminal,
+  maxMobileScreenBodyLines,
   statusLayoutInnerWidth,
   statusSideColumnInnerWidth,
   writeCenteredBox,
@@ -416,11 +422,11 @@ function buildSportsPanelLines(
 async function loadWeatherSnapshot(
   location: string,
   todayYmd: string,
-): Promise<{ lines: string[]; sunrise: string; sunset: string }> {
+): Promise<{ lines: string[]; data: WeatherResponse; sunrise: string; sunset: string }> {
   const data = (await fetchBbcWeatherAggregated(location)) as WeatherResponse;
   const { sunrise, sunset } = todaySunriseSunset(data, todayYmd);
   const lines = await buildFullWeatherLines(data, location);
-  return { lines, sunrise, sunset };
+  return { lines, data, sunrise, sunset };
 }
 
 function solarSnapshotFromData(data: SolarResponse, dayKey: string, now: Date): {
@@ -709,6 +715,7 @@ async function runLive(): Promise<void> {
   let trackedDate = ukTodayYmd();
   let bdayConfig = await fetchBdayConfig();
   let fullWeatherLines: string[] = [];
+  let weatherData: WeatherResponse | null = null;
   let sunrise = "-";
   let sunset = "-";
   let wfh: boolean | null = null;
@@ -740,6 +747,8 @@ async function runLive(): Promise<void> {
   let lastMiddleAlternateAt = Date.now();
   let compactRotatePhase: CompactRotatePanel = "weather";
   let lastCompactRotateAt = Date.now();
+  let mobileRotatePhase: MobileRotateScreen = "status";
+  let lastMobileRotateAt = Date.now();
   let rotationPaused = false;
   let rotationPausedAt = 0;
   let footyPanelWasVisible: boolean | null = null;
@@ -808,7 +817,7 @@ async function runLive(): Promise<void> {
     const hasFootyRaw = sportsPanelHasContent(footyLines);
     const hasPlTableRaw = plTablePanelAvailable(plTableLines);
     const hasVillaRaw = sportsPanelHasContent(villaLines);
-    const statusOnly = isStatusOnlyTerminal();
+    const statusOnly = isMobileStatusTerminal(panelWidth);
     const stackCalendar =
       !statusOnly &&
       shouldStackCalendarUnderStatus(statusLines.length, shortcutContentLineCount) &&
@@ -1007,6 +1016,64 @@ async function runLive(): Promise<void> {
 
     const shortcutLines = buildStatusBarShortcutLines();
 
+    let mobileDisplay: MobileRotateScreen | undefined;
+    let mobileScreenLines: string[] | null = null;
+    let mobileSwitchCountdown:
+      | { seconds: number; next: MobileRotateScreen; paused?: boolean }
+      | undefined;
+    if (statusOnly) {
+      const mobilePool = MOBILE_ROTATE_SCREENS;
+      if (!mobilePool.includes(mobileRotatePhase)) {
+        mobileRotatePhase = mobilePool[0];
+      }
+      if (mobilePool.length > 1) {
+        const nowMs = rotationPaused ? rotationPausedAt : Date.now();
+        if (!rotationPaused && nowMs - lastMobileRotateAt >= PANEL_ALTERNATE_MS) {
+          const index = mobilePool.indexOf(mobileRotatePhase);
+          mobileRotatePhase = mobilePool[(index + 1) % mobilePool.length];
+          lastMobileRotateAt = nowMs;
+        }
+        mobileDisplay = mobileRotatePhase;
+        const secondsLeft = Math.max(
+          0,
+          Math.ceil((PANEL_ALTERNATE_MS - (nowMs - lastMobileRotateAt)) / 1000),
+        );
+        const nextIndex = (mobilePool.indexOf(mobileRotatePhase) + 1) % mobilePool.length;
+        mobileSwitchCountdown = {
+          seconds: secondsLeft,
+          next: mobilePool[nextIndex],
+          paused: rotationPaused,
+        };
+      } else {
+        mobileDisplay = mobilePool[0];
+      }
+
+      if (mobileDisplay !== "status") {
+        mobileScreenLines = buildMobileScreenLines(
+          mobileDisplay,
+          {
+            now: state.now,
+            panelWidth,
+            maxBodyLines: maxMobileScreenBodyLines(false),
+            statusLines,
+            footyLines,
+            villaLines,
+            cricLines,
+            gasLine: houseOcto.gas.line,
+            todayElectricity: houseOcto.electricityRates.today,
+            tomorrowElectricity: houseOcto.electricityRates.tomorrow,
+            solarData,
+            weatherData,
+            weatherLocation: location,
+            calendarColors: calendarData?.colors ?? null,
+            bdayConfig,
+            narrowOcto: isNarrowStatusTerminal(),
+          },
+          mobileSwitchCountdown,
+        );
+      }
+    }
+
     const compactCountdown = compactSwitchCountdown;
     const panelLines = (
       panel: CompactRotatePanel,
@@ -1026,6 +1093,8 @@ async function runLive(): Promise<void> {
       layoutTier: tier,
       stackCalendar,
       compactDisplay,
+      mobileDisplay,
+      mobileScreenLines,
       pageOffsets: panelPageOffsets,
       calendarLines,
       calendarInnerWidth: panelWidth,
@@ -1040,13 +1109,17 @@ async function runLive(): Promise<void> {
       sportsDisplay: tier === "threeColumn" ? sportsDisplay : undefined,
     });
 
-    const footyVisible = isSportsPanelVisible(tier, "footy", hasFooty, compactDisplay, sportsDisplay);
+    const footyVisible =
+      isSportsPanelVisible(tier, "footy", hasFooty, compactDisplay, sportsDisplay) ||
+      (statusOnly && mobileDisplay === "footy");
     if (footyVisible && footyPanelWasVisible === false) {
       void refreshFootball(trackedDate);
     }
     footyPanelWasVisible = footyVisible;
 
-    const villaVisible = isSportsPanelVisible(tier, "villa", hasVilla, compactDisplay, sportsDisplay);
+    const villaVisible =
+      isSportsPanelVisible(tier, "villa", hasVilla, compactDisplay, sportsDisplay) ||
+      (statusOnly && mobileDisplay === "villa");
     if (villaVisible && villaPanelWasVisible === false) {
       void refreshVilla();
     }
@@ -1068,6 +1141,7 @@ async function runLive(): Promise<void> {
   const refreshWeather = async (): Promise<void> => {
     const snapshot = await loadWeatherSnapshot(location, trackedDate);
     fullWeatherLines = snapshot.lines;
+    weatherData = snapshot.data;
     sunrise = snapshot.sunrise;
     sunset = snapshot.sunset;
   };
@@ -1258,6 +1332,7 @@ async function runLive(): Promise<void> {
       lastCompactRotateAt += pausedDuration;
       lastSportsAlternateAt += pausedDuration;
       lastMiddleAlternateAt += pausedDuration;
+      lastMobileRotateAt += pausedDuration;
       rotationPaused = false;
     } else {
       rotationPausedAt = Date.now();
@@ -1294,16 +1369,19 @@ async function runLive(): Promise<void> {
     const hasVilla = sportsPanelHasContent(villaLines);
     const stackCalendar =
       shouldStackCalendarUnderStatus(statusLines.length) && Boolean(calendarLines?.length);
-    const tier = resolveStatusLayoutTier(statusLines.length, panelWidth, {
-      calendarLines,
-      calendarInnerWidth: panelWidth,
-      weatherLines: hasWeather ? fullWeatherLines : null,
-      solarLines: hasSolar ? baseSolarPanel : null,
-      cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
-      footyLines: hasFooty ? buildSportsPanelLines("footy", footyLines) : null,
-      plTableLines: hasPlTable ? buildSportsPanelLines("plTable", plTableLines) : null,
-      villaLines: hasVilla ? buildSportsPanelLines("villa", villaLines) : null,
-    });
+    const statusOnly = isMobileStatusTerminal(panelWidth);
+    const tier = statusOnly
+      ? "statusOnly"
+      : resolveStatusLayoutTier(statusLines.length, panelWidth, {
+          calendarLines,
+          calendarInnerWidth: panelWidth,
+          weatherLines: hasWeather ? fullWeatherLines : null,
+          solarLines: hasSolar ? baseSolarPanel : null,
+          cricLines: hasCric ? buildSportsPanelLines("cric", cricLines) : null,
+          footyLines: hasFooty ? buildSportsPanelLines("footy", footyLines) : null,
+          plTableLines: hasPlTable ? buildSportsPanelLines("plTable", plTableLines) : null,
+          villaLines: hasVilla ? buildSportsPanelLines("villa", villaLines) : null,
+        });
     const compactPool = buildCompactRotationPool(
       stackCalendar,
       calendarLines,
@@ -1315,7 +1393,12 @@ async function runLive(): Promise<void> {
       hasVilla,
     );
 
-    if (usesCompactRotation(tier) && compactPool.length > 1) {
+    if (statusOnly) {
+      const mobilePool = MOBILE_ROTATE_SCREENS;
+      const index = mobilePool.indexOf(mobileRotatePhase);
+      mobileRotatePhase = mobilePool[(index + 1) % mobilePool.length];
+      lastMobileRotateAt = nowMs;
+    } else if (usesCompactRotation(tier) && compactPool.length > 1) {
       const index = compactPool.indexOf(compactRotatePhase);
       compactRotatePhase = compactPool[(index + 1) % compactPool.length];
       lastCompactRotateAt = nowMs;

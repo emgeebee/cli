@@ -308,6 +308,16 @@ export function defaultYearWindowFrom(now: Date): MonthDef[] {
   });
 }
 
+/** Mobile calendar: 2 prior months, then current month and future months until clipped. */
+export function mobileCalendarWindowFrom(now: Date = new Date()): MonthDef[] {
+  const months: MonthDef[] = [];
+  for (let offset = -2; offset <= 24; offset += 1) {
+    const t = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    months.push({ year: t.getFullYear(), month: t.getMonth() });
+  }
+  return months;
+}
+
 /** Status panel: 3 prior months, then current month first in row 2; future months fill complete rows. */
 export function statusYearWindowFrom(now: Date = new Date()): MonthDef[] {
   const priorFutureEnd = 10;
