@@ -193,7 +193,9 @@ function buildCalendarScreenLines(ctx: MobileScreenContext): string[] {
 }
 
 function buildBirthdaysScreenLines(ctx: MobileScreenContext): string[] {
-  return buildBdayTableLines(ctx.bdayConfig, ctx.now, ctx.maxBodyLines);
+  return buildBdayTableLines(ctx.bdayConfig, ctx.now, ctx.maxBodyLines, {
+    narrow: ctx.narrowOcto,
+  });
 }
 
 export function buildMobileScreenLines(

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isNarrowStatusTerminal } from "./terminal";
 
 export const DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 
@@ -229,11 +230,26 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
+const BDAY_WEEKS_COL = 3;
+const BDAY_MONTHS_COL = 4;
+
+function withoutBdayWeeksMonthsColumns<T>(values: T[]): T[] {
+  return values.filter((_, i) => i !== BDAY_WEEKS_COL && i !== BDAY_MONTHS_COL);
+}
+
+export type BuildBdayTableOptions = {
+  narrow?: boolean;
+  header?: boolean;
+};
+
 export function buildBdayTableLines(
   config: BdayConfig | null,
   now: Date = new Date(),
   maxContentLines?: number,
+  options?: BuildBdayTableOptions,
 ): string[] {
+  const narrow = options?.narrow ?? isNarrowStatusTerminal();
+  const withHeader = options?.header ?? true;
   if (!config) return ["No birthdays configured."];
   const today = utcStartOfToday(now);
   const rows: string[][] = [];
@@ -260,15 +276,17 @@ export function buildBdayTableLines(
   if (rows.length === 0) return ["No valid birthdays found."];
   rows.sort((a, b) => a[0].localeCompare(b[0]));
 
-  const table = makeAsciiTable(
-    ["Name", "DOB", "Days", "Weeks", "Months", "Normal"],
-    rows,
-  );
-  const lines = ["=== Birthdays ===", "", ...table];
+  const headers = narrow
+    ? ["Name", "DOB", "Days", "Normal"]
+    : ["Name", "DOB", "Days", "Weeks", "Months", "Normal"];
+  const tableRows = narrow ? rows.map(withoutBdayWeeksMonthsColumns) : rows;
+  const table = makeAsciiTable(headers, tableRows);
+  const prefix = withHeader ? ["=== Birthdays ===", ""] : [];
+  const lines = [...prefix, ...table];
   if (maxContentLines == null || lines.length <= maxContentLines) {
     return lines;
   }
-  const tableStart = 2;
+  const tableStart = prefix.length;
   const tableOverhead = tableStart + 3;
   const maxTableLines = Math.max(3, maxContentLines - tableOverhead);
   if (maxTableLines >= table.length) return lines.slice(0, maxContentLines);
