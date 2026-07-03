@@ -15,8 +15,13 @@ import {
   formatMonthlyTotalCostSummaryLines,
   type OctopusRate,
 } from "./octoApi";
-import { buildSolarPowerGraphPanelLines } from "./solarView";
 import type { SolarResponse } from "./solarApi";
+import type { SolarMonthlyYieldRow } from "./solarMonthlyYield";
+import {
+  buildSolarRotatePanelLines,
+  type SolarRotateSummary,
+  type YieldAverage,
+} from "./solarView";
 import {
   buildDailyForecastLines,
   buildHourlyForecastFromNowLines,
@@ -79,6 +84,7 @@ export type MobileScreenContext = {
   todayElectricity: OctopusRate[];
   tomorrowElectricity: OctopusRate[];
   solarData: SolarResponse | null;
+  solarRotateSummary: SolarRotateSummary | null;
   weatherData: WeatherResponse | null;
   weatherLocation: string;
   calendarColors: CalendarColors | null;
@@ -155,7 +161,7 @@ function buildOctoScreenLines(ctx: MobileScreenContext): string[] {
 function buildSolarScreenLines(ctx: MobileScreenContext): string[] {
   if (!ctx.solarData) return ["=== Solar ===", "", "Solar unavailable."];
   return fitPanelContentLines(
-    buildSolarPowerGraphPanelLines(ctx.solarData, ctx.panelWidth),
+    buildSolarRotatePanelLines(ctx.solarData, ctx.panelWidth, ctx.solarRotateSummary ?? undefined),
     ctx.maxBodyLines,
   );
 }
