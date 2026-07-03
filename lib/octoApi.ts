@@ -1060,7 +1060,12 @@ function resolveMonthlyAverageRecord(
   cached: MonthlyAverageCache,
   computed: MonthlyAverageCache,
 ): MonthlyAverageRecord | undefined {
-  return cached[monthKey] ?? computed[monthKey];
+  const cachedRec = cached[monthKey];
+  const computedRec = computed[monthKey];
+  if (!cachedRec) return computedRec;
+  if (!computedRec) return cachedRec;
+  if (computedRec.days > cachedRec.days) return computedRec;
+  return cachedRec;
 }
 
 function currentMonthKey(now: Date): string {

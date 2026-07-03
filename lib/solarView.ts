@@ -438,7 +438,13 @@ export function buildSolarRotatePanelLines(
       summary.monthlyYields,
     ),
   ];
-  if (!solarSummaryLinesFitWidth(summaryLines, maxLineWidth)) return lines;
+  if (!solarSummaryLinesFitWidth(summaryLines, maxLineWidth)) {
+    const yieldLine = formatSolarYieldLine(summary.solarYield);
+    if (solarSummaryLinesFitWidth([yieldLine], maxLineWidth)) {
+      return [...lines, "", yieldLine];
+    }
+    return lines;
+  }
   return [...lines, "", ...summaryLines];
 }
 
