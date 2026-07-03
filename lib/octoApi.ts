@@ -915,8 +915,8 @@ export function averageElectricityByPeriod(
   ) as Record<(typeof ELECTRICITY_PERIOD_LABELS)[number], number | null>;
 }
 
-function formatElectricityPrice(pence: number): string {
-  const text = `${pence.toFixed(2)}p`;
+function formatElectricityPrice(pence: number, narrow = false): string {
+  const text = narrow ? `${Math.round(pence)}p` : `${pence.toFixed(2)}p`;
   return colorize(text, colorForRate(pence, "electricity"));
 }
 
@@ -952,13 +952,13 @@ const ELECTRICITY_TABLE_HEADERS = [
   ...ELECTRICITY_PERIOD_LABELS.map(formatElectricityPeriodLabel),
 ];
 
-function electricityTableRow(dayName: string, rates: OctopusRate[]): string[] {
+function electricityTableRow(dayName: string, rates: OctopusRate[], narrow: boolean): string[] {
   const averages = averageElectricityByPeriod(rates);
   return [
     dayName,
     ...ELECTRICITY_PERIOD_LABELS.map((label) => {
       const pence = averages[label];
-      return pence == null ? "-" : formatElectricityPrice(pence);
+      return pence == null ? "-" : formatElectricityPrice(pence, narrow);
     }),
   ];
 }
@@ -966,10 +966,12 @@ function electricityTableRow(dayName: string, rates: OctopusRate[]): string[] {
 export function formatElectricityPeriodAvgTable(
   today: OctopusRate[],
   tomorrow: OctopusRate[],
+  options?: { narrow?: boolean },
 ): string[] {
+  const narrow = options?.narrow ?? false;
   const rows = [
-    electricityTableRow("today", today),
-    electricityTableRow("tomorrow", tomorrow),
+    electricityTableRow("today", today, narrow),
+    electricityTableRow(narrow ? "tomo" : "tomorrow", tomorrow, narrow),
   ];
   const hasValue = rows.some((row) => row.slice(1).some((cell) => cell !== "-"));
   if (!hasValue) return [];
