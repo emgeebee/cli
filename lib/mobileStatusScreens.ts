@@ -129,21 +129,9 @@ function buildFootyScreenLines(ctx: MobileScreenContext): string[] {
   return ["=== Football ===", "", ...body];
 }
 
-function villaGameLimitsForContentLines(maxContentLines: number): {
-  maxResults: number;
-  maxFixtures: number;
-} {
-  const sectionOverhead = 5;
-  const maxItemLines = Math.max(0, maxContentLines - sectionOverhead);
-  const maxEach = Math.max(1, Math.floor(maxItemLines / 2));
-  return { maxResults: maxEach, maxFixtures: maxEach };
-}
-
 function buildVillaScreenLines(ctx: MobileScreenContext): string[] {
   const maxContentLines = ctx.maxBodyLines - 2;
-  const body = fitVillaStatusLines(ctx.villaLines, maxContentLines, {
-    ...villaGameLimitsForContentLines(maxContentLines),
-  });
+  const body = fitVillaStatusLines(ctx.villaLines, maxContentLines);
   return ["=== Villa ===", "", ...body];
 }
 
