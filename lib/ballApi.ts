@@ -881,8 +881,41 @@ function allocateVillaSectionLines(
   return { results: fittedResults, fixtures: fittedFixtures };
 }
 
-export function fitVillaStatusLines(lines: string[], maxContentLines: number): string[] {
+export type FitVillaStatusLinesOptions = {
+  maxResults?: number;
+  maxFixtures?: number;
+};
+
+function buildVillaStatusSectionLines(results: string[], fixtures: string[]): string[] {
+  const lines: string[] = [];
+  if (results.length > 0) {
+    lines.push(VILLA_RESULTS_HEADING, "", ...results);
+  }
+  if (fixtures.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(VILLA_FIXTURES_HEADING, "", ...fixtures);
+  }
+  return lines;
+}
+
+function limitVillaStatusSections(lines: string[], options?: FitVillaStatusLinesOptions): string[] {
+  if (options?.maxResults === undefined && options?.maxFixtures === undefined) return lines;
+  const { results, fixtures } = splitVillaStatusSections(lines);
+  const limitedResults =
+    options?.maxResults !== undefined ? results.slice(-options.maxResults) : results;
+  const limitedFixtures =
+    options?.maxFixtures !== undefined ? fixtures.slice(0, options.maxFixtures) : fixtures;
+  const rebuilt = buildVillaStatusSectionLines(limitedResults, limitedFixtures);
+  return rebuilt.length > 0 ? rebuilt : lines;
+}
+
+export function fitVillaStatusLines(
+  lines: string[],
+  maxContentLines: number,
+  options?: FitVillaStatusLinesOptions,
+): string[] {
   if (maxContentLines <= 0) return [];
+  lines = limitVillaStatusSections(lines, options);
   if (lines.length <= maxContentLines) return lines;
 
   const { results, fixtures } = splitVillaStatusSections(lines);
