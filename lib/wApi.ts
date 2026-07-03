@@ -2,6 +2,7 @@ import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
 import { readPhoneCliConfig } from "../config";
+import { isNarrowStatusTerminal } from "./terminal";
 import { formatTemperatureText } from "./temperatureColours";
 
 type DailyReport = {
@@ -270,6 +271,42 @@ function formatPollen(report?: DailyReport): string {
 
 type ColWidthFns = Partial<Record<number, (value: string) => number>>;
 
+const FORECAST_WEATHER_DESCRIPTION_COL = 2;
+
+function withoutForecastWeatherColumn<T extends string | number>(values: T[]): T[] {
+  return values.filter((_, i) => i !== FORECAST_WEATHER_DESCRIPTION_COL);
+}
+
+function forecastColWidthFnsForTable(colWidthFns?: ColWidthFns, narrow?: boolean): ColWidthFns | undefined {
+  if (!narrow || !colWidthFns) return colWidthFns;
+  const adjusted: ColWidthFns = {};
+  for (const [key, fn] of Object.entries(colWidthFns)) {
+    const idx = Number(key);
+    if (idx < FORECAST_WEATHER_DESCRIPTION_COL) {
+      adjusted[idx] = fn;
+    } else if (idx > FORECAST_WEATHER_DESCRIPTION_COL) {
+      adjusted[idx - 1] = fn;
+    }
+  }
+  return adjusted;
+}
+
+function forecastTableForTerminal(
+  headers: string[],
+  rows: string[][],
+  widths: number[],
+  colWidthFns?: ColWidthFns,
+  narrow = isNarrowStatusTerminal(),
+): string[] {
+  if (narrow) {
+    headers = withoutForecastWeatherColumn(headers);
+    rows = rows.map((row) => withoutForecastWeatherColumn(row));
+    widths = withoutForecastWeatherColumn(widths);
+    colWidthFns = forecastColWidthFnsForTable(colWidthFns, true);
+  }
+  return makeAsciiTable(headers, rows, widths, colWidthFns);
+}
+
 function cellWidthForTable(colIdx: number, value: string, colWidthFns?: ColWidthFns): number {
   const fn = colWidthFns?.[colIdx];
   if (fn) return fn(value);
@@ -433,7 +470,7 @@ export async function buildFullWeatherLines(
   const appendHourlySection = (date: string, rows: string[][]): void => {
     if (!date || rows.length === 0) return;
     lines.push(`Hourly forecast for ${formatDisplayDate(date)}`);
-    lines.push(...makeAsciiTable(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
+    lines.push(...forecastTableForTerminal(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
     lines.push("");
   };
 
@@ -472,7 +509,7 @@ export async function buildFullWeatherLines(
     sharedWidths.rain,
     sharedWidths.wind,
   ];
-  lines.push(...makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
+  lines.push(...forecastTableForTerminal(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
   return lines;
 }
 
@@ -525,7 +562,7 @@ function dailyForecastTableLines(data: WeatherResponse): string[] {
     sharedWidths.rain,
     sharedWidths.wind,
   ];
-  return makeAsciiTable(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
+  return forecastTableForTerminal(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
 }
 
 export function buildDailyForecastLines(
@@ -625,7 +662,7 @@ export function buildHourlyForecastFromNowLines(
     sharedWidths.rain,
     sharedWidths.wind,
   ];
-  const table = makeAsciiTable(hourlyHeaders, todayRows, hourlyWidths, forecastColWidthFns);
+  const table = forecastTableForTerminal(hourlyHeaders, todayRows, hourlyWidths, forecastColWidthFns);
   const overhead = lines.length + 1;
   const maxTableLines =
     maxContentLines == null ? table.length : Math.max(3, maxContentLines - overhead);
