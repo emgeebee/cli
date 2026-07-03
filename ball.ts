@@ -2,6 +2,11 @@
 
 import { fetchBbcJson, toYmd } from "./bbc";
 import { getConfigPath, readPhoneCliConfig } from "./config";
+import {
+  competitionAllowed,
+  competitionLabel,
+  competitionSortRank,
+} from "./lib/ballCompetitions";
 import { matchEventLines } from "./lib/ballEvents";
 
 type JsonRecord = Record<string, unknown>;
@@ -150,35 +155,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const TEAM_QUERY_ALIASES: Record<string, string> = {
   avfc: "aston-villa",
 };
-const COMPETITION_ALLOWLIST = new Set([
-  "premierleague",
-  "championship",
-  "leagueone",
-  "facup",
-  "leaguecup",
-  "championsleague",
-  "europaleague",
-  "scottishpremiership",
-  "englishpremierleague",
-  "englishchampionship",
-  "englishleagueone",
-  "eflcup",
-  "uefachampionsleague",
-  "uefaeuropaleague",
-  "worldcup",
-  "fifaworldcup",
-]);
-const COMPETITION_ORDER = [
-  "FIFA World Cup",
-  "Premier League",
-  "FA Cup",
-  "League Cup",
-  "UEFA Champions League",
-  "UEFA Europa League",
-  "Championship",
-  "League One",
-  "Scottish Premiership",
-];
 
 const BBC_BASE_URL =
   "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
@@ -423,27 +399,6 @@ function highlightEngland(name: string): string {
   return `${ANSI_PURPLE}${name}${ANSI_RESET}`;
 }
 
-function competitionLabel(event: ApiEvent): string {
-  return (
-    event?.tournament?.disambiguatedName ||
-    event?.tournament?.name ||
-    event?.eventGroupingLabel ||
-    "Other"
-  );
-}
-
-function competitionAllowed(event: ApiEvent): boolean {
-  const candidates = [
-    event?.tournament?.disambiguatedName,
-    event?.tournament?.name,
-    urnSlug(event?.tournament?.urn),
-  ]
-    .filter(Boolean)
-    .map(normalizeText);
-
-  return candidates.some((candidate) => COMPETITION_ALLOWLIST.has(candidate));
-}
-
 function teamScore(team: ApiTeam | undefined, event: NormalizedEvent): string | null {
   const direct = team?.scores?.score ?? team?.runningScores?.score ?? team?.score ?? null;
   if (direct != null) return String(direct);
@@ -508,8 +463,13 @@ function fixtureLine(event: NormalizedEvent, options: FixtureOptions = {}): stri
   const time = eventTime(event);
   const timeDisplay = time;
   const isScheduled = normalizeText(statusLabel) === "scheduled";
+  const isFinished = isFinishedState(event);
   const liveStatusLabel = shouldUseColor() && isLive ? `${ANSI_BLUE}${statusLabel}${ANSI_RESET}` : statusLabel;
-  const suffix = showCompetitionTag ? `(${competitionTag})` : isScheduled ? "" : `(${liveStatusLabel})`;
+  const suffix = showCompetitionTag
+    ? `(${competitionTag})`
+    : isScheduled || isFinished
+      ? ""
+      : `(${liveStatusLabel})`;
   const suffixWithSpace = suffix ? ` ${suffix}` : "";
 
   if (isResultState(event) && hasScore) {
@@ -580,10 +540,8 @@ function buildTeamCompetitionRecords(events: NormalizedEvent[], teamUrn: string)
   }
 
   return [...stats.values()].sort((a, b) => {
-    const aRank = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a.comp));
-    const bRank = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b.comp));
-    const aOrder = aRank === -1 ? Number.MAX_SAFE_INTEGER : aRank;
-    const bOrder = bRank === -1 ? Number.MAX_SAFE_INTEGER : bRank;
+    const aOrder = competitionSortRank(a.comp);
+    const bOrder = competitionSortRank(b.comp);
     if (aOrder !== bOrder) return aOrder - bOrder;
     if (a.venue !== b.venue) return a.venue === "H" ? -1 : 1;
     return a.comp.localeCompare(b.comp);
@@ -634,10 +592,8 @@ function printGroupedFixtures(
   }
 
   const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
-    const ai = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a));
-    const bi = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b));
-    const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
-    const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    const aRank = competitionSortRank(a);
+    const bRank = competitionSortRank(b);
     if (aRank !== bRank) return bRank - aRank;
     return b.localeCompare(a);
   });

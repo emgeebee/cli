@@ -1,5 +1,10 @@
 import { fetchBbcJson, toYmd } from "../bbc";
 import { readPhoneCliConfig } from "../config";
+import {
+  competitionAllowed,
+  competitionLabel,
+  competitionSortRank,
+} from "./ballCompetitions";
 import { matchEventLines } from "./ballEvents";
 
 type JsonRecord = Record<string, unknown>;
@@ -124,39 +129,8 @@ type NormalizedEvent = ApiEvent & {
   participants: ApiParticipant[];
 };
 
-const COMPETITION_ORDER = [
-  "FIFA World Cup",
-  "Premier League",
-  "FA Cup",
-  "League Cup",
-  "UEFA Champions League",
-  "UEFA Europa League",
-  "Championship",
-  "League One",
-  "Scottish Premiership",
-];
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STATUS_FORWARD_DAYS = 59;
-
-const COMPETITION_ALLOWLIST = new Set([
-  "premierleague",
-  "championship",
-  "leagueone",
-  "facup",
-  "leaguecup",
-  "championsleague",
-  "europaleague",
-  "scottishpremiership",
-  "englishpremierleague",
-  "englishchampionship",
-  "englishleagueone",
-  "eflcup",
-  "uefachampionsleague",
-  "uefaeuropaleague",
-  "worldcup",
-  "fifaworldcup",
-]);
 
 const BBC_BASE_URL =
   "https://www.bbc.co.uk/wc-data/container/sport-data-scores-fixtures";
@@ -179,12 +153,6 @@ function normalizeText(value: unknown): string {
   return String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "");
-}
-
-function urnSlug(urn: unknown): string {
-  if (!urn) return "";
-  const parts = String(urn).split(":");
-  return parts[parts.length - 1] || "";
 }
 
 function shouldUseColor(): boolean {
@@ -222,27 +190,6 @@ function teamLabel(team: ApiTeam | undefined): string {
     "unknown-team"
   );
   return highlightEngland(highlightAstonVilla(base));
-}
-
-function competitionLabel(event: ApiEvent): string {
-  return (
-    event?.tournament?.disambiguatedName ||
-    event?.tournament?.name ||
-    event?.eventGroupingLabel ||
-    "Other"
-  );
-}
-
-function competitionAllowed(event: ApiEvent): boolean {
-  const candidates = [
-    event?.tournament?.disambiguatedName,
-    event?.tournament?.name,
-    urnSlug(event?.tournament?.urn),
-  ]
-    .filter(Boolean)
-    .map(normalizeText);
-
-  return candidates.some((candidate) => COMPETITION_ALLOWLIST.has(candidate));
 }
 
 function eventTime(event: ApiEvent): string {
@@ -325,8 +272,9 @@ function fixtureLine(event: NormalizedEvent): string {
   const isLive = isResultState(event) && !isFinishedState(event);
   const time = eventTime(event);
   const isScheduled = normalizeText(statusLabel) === "scheduled";
+  const isFinished = isFinishedState(event);
   const liveStatusLabel = shouldUseColor() && isLive ? `${ANSI_BLUE}${statusLabel}${ANSI_RESET}` : statusLabel;
-  const suffix = isScheduled ? "" : `(${liveStatusLabel})`;
+  const suffix = isScheduled || isFinished ? "" : `(${liveStatusLabel})`;
   const suffixWithSpace = suffix ? ` ${suffix}` : "";
 
   if (isResultState(event) && hasScore) {
@@ -614,10 +562,8 @@ function groupedFootballLines(events: NormalizedEvent[]): string[] {
   }
 
   const sortedGroups = [...groups.entries()].sort(([a], [b]) => {
-    const ai = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(a));
-    const bi = COMPETITION_ORDER.findIndex((name) => normalizeText(name) === normalizeText(b));
-    const aRank = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
-    const bRank = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    const aRank = competitionSortRank(a);
+    const bRank = competitionSortRank(b);
     if (aRank !== bRank) return bRank - aRank;
     return b.localeCompare(a);
   });
@@ -866,6 +812,10 @@ function allocateVillaSectionLines(
 
   let resultsBudget = Math.floor(maxItemLines / 2);
   let fixturesBudget = maxItemLines - resultsBudget;
+  if (maxItemLines >= 3 && results.length > 0 && fixtures.length > 0 && resultsBudget > 0) {
+    resultsBudget -= 1;
+    fixturesBudget += 1;
+  }
   let fittedResults = results.slice(-resultsBudget);
   let fittedFixtures = fixtures.slice(0, fixturesBudget);
 
@@ -938,7 +888,7 @@ export function fitVillaStatusLines(
   }
 
   const fitted = allocateVillaSectionLines(results, fixtures, maxItemLines);
-  const output = [VILLA_RESULTS_HEADING, "", ...fitted.results, "", VILLA_FIXTURES_HEADING, "", ...fitted.fixtures];
+  const output = buildVillaStatusSectionLines(fitted.results, fitted.fixtures);
   if (output.length <= maxContentLines) return output;
   return output.slice(0, maxContentLines);
 }
