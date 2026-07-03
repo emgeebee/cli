@@ -84,6 +84,7 @@ import { fetchWfhStatus, houseSectionLabel } from "./lib/wfhApi";
 import { buildFullWeatherLines, withWeatherPanelCountdown, type WeatherResponse } from "./lib/wApi";
 import {
   enterFullscreen,
+  isNarrowStatusTerminal,
   leaveFullscreen,
   maxCalendarContentLines,
   maxCompactPanelBodyLines,
@@ -198,6 +199,7 @@ function capitalizeElectricityLines(lines: string[]): string[] {
     line
       .replace("| day ", "| Day ")
       .replace("| today ", "| Today ")
+      .replace("| tomo ", "| Tomo ")
       .replace("| tomorrow ", "| Tomorrow "),
   );
 }
@@ -222,7 +224,10 @@ type GasSnapshot = {
 
 type HouseOctoSnapshot = {
   gas: GasSnapshot;
-  electricityLines: string[];
+  electricityRates: {
+    today: OctopusRate[];
+    tomorrow: OctopusRate[];
+  };
 };
 
 type StatusDisplayState = {
@@ -263,7 +268,13 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
     capitalizeGasLine(state.houseOcto.gas.line),
-    ...capitalizeElectricityLines(state.houseOcto.electricityLines),
+    ...capitalizeElectricityLines(
+      formatElectricityPeriodAvgTable(
+        state.houseOcto.electricityRates.today,
+        state.houseOcto.electricityRates.tomorrow,
+        { narrow: isNarrowStatusTerminal() },
+      ),
+    ),
   ];
 }
 
@@ -524,14 +535,10 @@ function gasSnapshotFromRates(rates: {
   };
 }
 
-function emptyElectricityLines(): string[] {
-  return [];
-}
-
 function emptyHouseOctoSnapshot(): HouseOctoSnapshot {
   return {
     gas: emptyGasSnapshot(),
-    electricityLines: emptyElectricityLines(),
+    electricityRates: { today: [], tomorrow: [] },
   };
 }
 
@@ -543,10 +550,10 @@ async function loadHouseOctoPrices(now: Date = new Date()): Promise<HouseOctoSna
     ]);
     return {
       gas: gasSnapshotFromRates(gasRates),
-      electricityLines: formatElectricityPeriodAvgTable(
-        electricityRates.today,
-        electricityRates.tomorrow,
-      ),
+      electricityRates: {
+        today: electricityRates.today,
+        tomorrow: electricityRates.tomorrow,
+      },
     };
   } catch {
     return emptyHouseOctoSnapshot();
