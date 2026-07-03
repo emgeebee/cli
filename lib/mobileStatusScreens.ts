@@ -129,8 +129,14 @@ function buildFootyScreenLines(ctx: MobileScreenContext): string[] {
   return ["=== Football ===", "", ...body];
 }
 
+const MOBILE_VILLA_MAX_RESULTS = 5;
+const MOBILE_VILLA_MAX_FIXTURES = 5;
+
 function buildVillaScreenLines(ctx: MobileScreenContext): string[] {
-  const body = fitVillaStatusLines(ctx.villaLines, ctx.maxBodyLines - 2);
+  const body = fitVillaStatusLines(ctx.villaLines, ctx.maxBodyLines - 2, {
+    maxResults: MOBILE_VILLA_MAX_RESULTS,
+    maxFixtures: MOBILE_VILLA_MAX_FIXTURES,
+  });
   return ["=== Villa ===", "", ...body];
 }
 
