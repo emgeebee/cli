@@ -162,7 +162,9 @@ function shouldNoWrapStatusLine(line: string): boolean {
   return (
     stripped.startsWith("===") ||
     stripped.startsWith("Temp:") ||
-    stripped.startsWith("Solar:")
+    stripped.startsWith("Solar:") ||
+    stripped.startsWith("Mo Tu We Th Fr Sa Su") ||
+    stripped.startsWith("Key:")
   );
 }
 

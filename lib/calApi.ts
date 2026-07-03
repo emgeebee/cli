@@ -186,11 +186,25 @@ export const STATUS_CALENDAR_COLUMNS = 3;
 export const STATUS_CALENDAR_MONTH_WIDTH = 20;
 export const STATUS_CALENDAR_GUTTER = "  ";
 
-export function statusCalendarInnerWidth(): number {
+export function statusCalendarInnerWidthForColumns(columns: number): number {
   return (
-    STATUS_CALENDAR_COLUMNS * STATUS_CALENDAR_MONTH_WIDTH +
-    (STATUS_CALENDAR_COLUMNS - 1) * STATUS_CALENDAR_GUTTER.length
+    columns * STATUS_CALENDAR_MONTH_WIDTH +
+    Math.max(0, columns - 1) * STATUS_CALENDAR_GUTTER.length
   );
+}
+
+export function statusCalendarInnerWidth(): number {
+  return statusCalendarInnerWidthForColumns(STATUS_CALENDAR_COLUMNS);
+}
+
+/** Fit as many months per row as the panel width allows, down to one. */
+export function statusCalendarColumnsForWidth(innerWidth: number): number {
+  for (let columns = STATUS_CALENDAR_COLUMNS; columns > 1; columns -= 1) {
+    if (statusCalendarInnerWidthForColumns(columns) <= innerWidth) {
+      return columns;
+    }
+  }
+  return 1;
 }
 
 function columnWidthsForRow(
@@ -243,10 +257,11 @@ export function buildStatusCalendarLines(
   innerWidth?: number,
 ): string[] {
   const calendarWidth = innerWidth ?? statusCalendarInnerWidth();
+  const columns = statusCalendarColumnsForWidth(calendarWidth);
   const legend = buildCalendarLegendLine();
   const lines: string[] = ["=== Dates ===", "", padRightVisible(legend, calendarWidth)];
-  for (let i = 0; i < months.length; i += STATUS_CALENDAR_COLUMNS) {
-    const rowMonths = months.slice(i, i + STATUS_CALENDAR_COLUMNS).map(({ year, month }) =>
+  for (let i = 0; i < months.length; i += columns) {
+    const rowMonths = months.slice(i, i + columns).map(({ year, month }) =>
       buildCalendarLines(year, month, today, colors),
     );
     const rowLines = joinMonthRow(rowMonths, calendarWidth, STATUS_CALENDAR_GUTTER);
