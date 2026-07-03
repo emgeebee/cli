@@ -5,8 +5,8 @@ import {
 } from "./cache";
 import { getConfigPath, readPhoneCliConfig } from "../config";
 
-/** Cached gas prices — YYYY-MM-DD to inc-VAT pence rate(s). */
-export type GasPriceCache = Record<string, number[]>;
+/** Cached gas prices — YYYY-MM-DD to unit rate slot(s) for that UK day. */
+export type GasPriceCache = Record<string, OctopusRate[]>;
 
 /** Cached electricity prices — YYYY-MM-DD to half-hourly rate slots. */
 export type CachedElectricityRate = {
@@ -16,6 +16,16 @@ export type CachedElectricityRate = {
 };
 
 export type ElectricityPriceCache = Record<string, CachedElectricityRate[]>;
+
+/** Cached billed daily totals for a UK calendar day (inc VAT pence + kWh). */
+export type DailyDayTotals = {
+  eCost: number;
+  gCost: number;
+  eKwh: number;
+  gKwh: number;
+};
+
+export type DailyTotalsCache = Record<string, DailyDayTotals>;
 
 export const ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"] as const;
 
@@ -72,7 +82,12 @@ export type TariffDerivation = {
 
 export const OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
 export const DAY_MS = 24 * 60 * 60 * 1000;
-const CACHE_MAX_AGE_DAYS = 2;
+/** Keep the last 14 UK calendar days (today + 13 prior); drop older day keys. */
+export const DAILY_PRICE_CACHE_MAX_AGE_DAYS = 13;
+export const DAILY_PRICE_CACHE_HISTORY_DAYS = 14;
+/** Finished daily cost/kWh rows for the octo billing lookback window. */
+export const DAILY_TOTALS_BILLING_LOOKBACK_DAYS = 35;
+export const DAILY_TOTALS_CACHE_MAX_AGE_DAYS = 34;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -389,7 +404,7 @@ function pruneStaleDateKeyedCache<T extends Record<string, unknown>>(
   const next = { ...cache };
   for (const dayKey of Object.keys(next)) {
     const ageDays = cacheEntryAgeDays(dayKey, now);
-    if (ageDays != null && ageDays > CACHE_MAX_AGE_DAYS) {
+    if (ageDays != null && ageDays > DAILY_PRICE_CACHE_MAX_AGE_DAYS) {
       delete next[dayKey];
       pruned = true;
     }
@@ -397,13 +412,59 @@ function pruneStaleDateKeyedCache<T extends Record<string, unknown>>(
   return { cache: next, pruned };
 }
 
-function normalizeCachedDayPrices(value: unknown): number[] | null {
+function normalizeCachedGasDay(value: unknown): OctopusRate[] | null {
   if (typeof value === "number" && Number.isFinite(value)) {
-    return [value];
+    return [{ value_inc_vat: value }];
   }
-  if (!Array.isArray(value)) return null;
-  const prices = value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
-  return prices.length > 0 ? prices : null;
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (typeof value[0] === "number") {
+    const prices = value.filter(
+      (entry): entry is number => typeof entry === "number" && Number.isFinite(entry),
+    );
+    return prices.length > 0
+      ? prices.map((price) => ({ value_inc_vat: price }))
+      : null;
+  }
+  const rates: OctopusRate[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const price = record.value_inc_vat;
+    if (typeof price !== "number" || !Number.isFinite(price)) continue;
+    rates.push({
+      valid_from: record.valid_from ? String(record.valid_from) : undefined,
+      valid_to: record.valid_to ? String(record.valid_to) : undefined,
+      value_inc_vat: price,
+    });
+  }
+  return rates.length > 0 ? rates : null;
+}
+
+export function dayKeysBackInclusive(now: Date, days: number): string[] {
+  const keys: string[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    const d = new Date(now.getTime() - i * DAY_MS);
+    keys.push(dayKeyUK(d));
+  }
+  return keys;
+}
+
+function fetchWindowForDayKeys(dayKeys: string[], now: Date): { from: Date; to: Date } {
+  if (dayKeys.length === 0) {
+    const from = new Date(now);
+    return { from, to: new Date(from.getTime() + 2 * DAY_MS) };
+  }
+  let minMs = Number.POSITIVE_INFINITY;
+  let maxMs = Number.NEGATIVE_INFINITY;
+  for (const key of dayKeys) {
+    const [y, m, d] = key.split("-").map(Number);
+    const ms = Date.UTC(y, m - 1, d);
+    if (ms < minMs) minMs = ms;
+    if (ms > maxMs) maxMs = ms;
+  }
+  const from = new Date(minMs);
+  const to = new Date(Math.max(maxMs + DAY_MS, now.getTime() + 2 * DAY_MS));
+  return { from, to };
 }
 
 function loadGasPriceCacheRaw(now: Date = new Date()): GasPriceCache {
@@ -413,9 +474,9 @@ function loadGasPriceCacheRaw(now: Date = new Date()): GasPriceCache {
   }
   const cache: GasPriceCache = {};
   for (const [dayKey, value] of Object.entries(raw)) {
-    const prices = normalizeCachedDayPrices(value);
-    if (prices) {
-      cache[dayKey] = prices;
+    const rates = normalizeCachedGasDay(value);
+    if (rates) {
+      cache[dayKey] = rates;
     }
   }
   const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
@@ -429,23 +490,14 @@ export function readGasPriceCache(now: Date = new Date()): GasPriceCache {
   return loadGasPriceCacheRaw(now);
 }
 
-export function saveGasPriceCache(cache: GasPriceCache): void {
-  updateServiceCache("octo", { gasPrices: cache });
+export function saveGasPriceCache(cache: GasPriceCache, now: Date = new Date()): void {
+  const { cache: pruned } = pruneStaleDateKeyedCache(cache, now);
+  updateServiceCache("octo", { gasPrices: pruned });
 }
 
 function hasCachedDay(cache: GasPriceCache, dayYmd: string): boolean {
-  const prices = cache[dayYmd];
-  return Array.isArray(prices) && prices.length > 0;
-}
-
-function pricesFromDayRates(rates: OctopusRate[], dayYmd: string): number[] {
-  return gasRatesForDay(rates, dayYmd)
-    .map((rate) => rate.value_inc_vat)
-    .filter((value): value is number => value != null && Number.isFinite(value));
-}
-
-function syntheticRatesFromPrices(prices: number[]): OctopusRate[] {
-  return prices.map((value) => ({ value_inc_vat: value }));
+  const rates = cache[dayYmd];
+  return Array.isArray(rates) && rates.length > 0;
 }
 
 async function ensureGasPricesCached(dayKeys: string[], now: Date): Promise<GasPriceCache> {
@@ -456,14 +508,13 @@ async function ensureGasPricesCached(dayKeys: string[], now: Date): Promise<GasP
     return cache;
   }
 
-  const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const { from, to } = fetchWindowForDayKeys(missing, now);
   const fetched = await fetchGasRates(from, to);
   let updated = false;
   for (const dayKey of missing) {
-    const prices = pricesFromDayRates(fetched, dayKey);
-    if (prices.length > 0) {
-      cache[dayKey] = prices;
+    const dayRates = gasRatesForDay(fetched, dayKey);
+    if (dayRates.length > 0) {
+      cache[dayKey] = dayRates;
       updated = true;
     }
   }
@@ -480,9 +531,9 @@ export async function loadGasRatesForDays(
   const cache = await ensureGasPricesCached(dayKeys, now);
   const rates: OctopusRate[] = [];
   for (const dayKey of dayKeys) {
-    const prices = cache[dayKey];
-    if (prices?.length) {
-      rates.push(...syntheticRatesFromPrices(prices));
+    const dayRates = cache[dayKey];
+    if (dayRates?.length) {
+      rates.push(...dayRates);
     }
   }
   return rates;
@@ -505,8 +556,8 @@ export async function loadTodayTomorrowGasRates(now: Date = new Date()): Promise
   const tomorrowYmd = ukTomorrowYmd(now);
   const cache = await ensureGasPricesCached([todayYmd, tomorrowYmd], now);
   return {
-    today: syntheticRatesFromPrices(cache[todayYmd] ?? []),
-    tomorrow: syntheticRatesFromPrices(cache[tomorrowYmd] ?? []),
+    today: cache[todayYmd] ?? [],
+    tomorrow: cache[tomorrowYmd] ?? [],
   };
 }
 
@@ -561,12 +612,13 @@ function loadElectricityPriceCacheRaw(now: Date = new Date()): ElectricityPriceC
   }
   const cache: ElectricityPriceCache = {};
   for (const [dayKey, value] of Object.entries(raw)) {
+    if (!isPublishSensitiveElectricityDay(dayKey, now)) continue;
     const rates = normalizeCachedElectricityDay(value);
     if (rates) {
       cache[dayKey] = rates;
     }
   }
-  const { cache: pruned, pruned: didPrune } = pruneStaleDateKeyedCache(cache, now);
+  const { cache: pruned, pruned: didPrune } = pruneElectricityPriceCache(cache, now);
   if (didPrune) {
     saveElectricityPriceCache(pruned);
   }
@@ -577,13 +629,56 @@ export function readElectricityPriceCache(now: Date = new Date()): ElectricityPr
   return loadElectricityPriceCacheRaw(now);
 }
 
-export function saveElectricityPriceCache(cache: ElectricityPriceCache): void {
-  updateServiceCache("octo", { electricityPrices: cache });
+export function saveElectricityPriceCache(cache: ElectricityPriceCache, now: Date = new Date()): void {
+  const { cache: pruned } = pruneElectricityPriceCache(cache, now);
+  updateServiceCache("octo", { electricityPrices: pruned });
 }
 
 function hasCachedElectricityDay(cache: ElectricityPriceCache, dayYmd: string): boolean {
   const rates = cache[dayYmd];
   return Array.isArray(rates) && rates.length > 0;
+}
+
+function ukHourNow(now: Date): number {
+  return Number(
+    now.toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: UK_TZ,
+    }),
+  );
+}
+
+/** Tomorrow's unit rates are not published until ~4pm UK — use cache before then. */
+function shouldUseElectricityCacheOnly(now: Date, cache: ElectricityPriceCache): boolean {
+  if (hasCachedElectricityDay(cache, ukTomorrowYmd(now))) return true;
+  return ukHourNow(now) < 15;
+}
+
+/** Half-hour slots are only cached for today and tomorrow (~36h ahead). */
+function isPublishSensitiveElectricityDay(dayKey: string, now: Date): boolean {
+  const todayYmd = dayKeyUK(now);
+  const tomorrowYmd = ukTomorrowYmd(now);
+  return dayKey === todayYmd || dayKey === tomorrowYmd;
+}
+
+function pruneElectricityPriceCache(
+  cache: ElectricityPriceCache,
+  now: Date = new Date(),
+): { cache: ElectricityPriceCache; pruned: boolean } {
+  const next: ElectricityPriceCache = {};
+  let pruned = false;
+  for (const [dayKey, rates] of Object.entries(cache)) {
+    if (isPublishSensitiveElectricityDay(dayKey, now) && rates.length > 0) {
+      next[dayKey] = rates;
+    } else {
+      pruned = true;
+    }
+  }
+  if (!pruned && Object.keys(next).length !== Object.keys(cache).length) {
+    pruned = true;
+  }
+  return { cache: next, pruned };
 }
 
 function electricityRatesToCache(rates: OctopusRate[]): CachedElectricityRate[] {
@@ -616,16 +711,22 @@ export async function fetchElectricityRates(from: Date, to: Date): Promise<Octop
 async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Promise<ElectricityPriceCache> {
   await ensureOctoCacheLoaded();
   const cache = readElectricityPriceCache(now);
-  const missing = dayKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
+  const cacheableKeys = dayKeys.filter((dayKey) => isPublishSensitiveElectricityDay(dayKey, now));
+  const missing = cacheableKeys.filter((dayKey) => !hasCachedElectricityDay(cache, dayKey));
   if (missing.length === 0) {
     return cache;
   }
 
-  const from = new Date(now);
-  const to = new Date(from.getTime() + 2 * DAY_MS);
+  const cacheOnly = shouldUseElectricityCacheOnly(now, cache);
+  const toFetch = cacheOnly ? [] : missing;
+  if (toFetch.length === 0) {
+    return cache;
+  }
+
+  const { from, to } = fetchWindowForDayKeys(toFetch, now);
   const fetched = await fetchElectricityRates(from, to);
   let updated = false;
-  for (const dayKey of missing) {
+  for (const dayKey of toFetch) {
     const cached = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
     if (cached.length > 0) {
       cache[dayKey] = cached;
@@ -642,14 +743,31 @@ export async function loadElectricityRatesForDays(
   dayKeys: string[],
   now: Date = new Date(),
 ): Promise<OctopusRate[]> {
-  const cache = await ensureElectricityPricesCached(dayKeys, now);
+  const cacheKeys = dayKeys.filter((dayKey) => isPublishSensitiveElectricityDay(dayKey, now));
+  const ephemeralKeys = dayKeys.filter((dayKey) => !isPublishSensitiveElectricityDay(dayKey, now));
   const rates: OctopusRate[] = [];
-  for (const dayKey of dayKeys) {
-    const cached = cache[dayKey];
-    if (cached?.length) {
-      rates.push(...cachedElectricityToRates(cached));
+
+  if (cacheKeys.length > 0) {
+    const cache = await ensureElectricityPricesCached(cacheKeys, now);
+    for (const dayKey of cacheKeys) {
+      const cached = cache[dayKey];
+      if (cached?.length) {
+        rates.push(...cachedElectricityToRates(cached));
+      }
     }
   }
+
+  if (ephemeralKeys.length > 0) {
+    const { from, to } = fetchWindowForDayKeys(ephemeralKeys, now);
+    const fetched = await fetchElectricityRates(from, to);
+    for (const dayKey of ephemeralKeys) {
+      const cached = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
+      if (cached.length > 0) {
+        rates.push(...cachedElectricityToRates(cached));
+      }
+    }
+  }
+
   return rates;
 }
 
@@ -668,6 +786,92 @@ export async function loadTodayTomorrowElectricityRates(now: Date = new Date()):
     today: cachedElectricityToRates(cache[todayYmd] ?? []),
     tomorrow: cachedElectricityToRates(cache[tomorrowYmd] ?? []),
   };
+}
+
+function normalizeDailyDayTotals(value: unknown): DailyDayTotals | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rec = value as Record<string, unknown>;
+  const eCost = Number(rec.eCost);
+  const gCost = Number(rec.gCost);
+  const eKwh = Number(rec.eKwh);
+  const gKwh = Number(rec.gKwh);
+  if (
+    !Number.isFinite(eCost) ||
+    !Number.isFinite(gCost) ||
+    !Number.isFinite(eKwh) ||
+    !Number.isFinite(gKwh)
+  ) {
+    return null;
+  }
+  return { eCost, gCost, eKwh, gKwh };
+}
+
+export function isDailyTotalsCacheableDay(dayKey: string, now: Date = new Date()): boolean {
+  return dayKey < dayKeyUK(now);
+}
+
+function pruneDailyTotalsCache(
+  cache: DailyTotalsCache,
+  now: Date = new Date(),
+): { cache: DailyTotalsCache; pruned: boolean } {
+  let pruned = false;
+  const next: DailyTotalsCache = {};
+  for (const [dayKey, value] of Object.entries(cache)) {
+    const ageDays = cacheEntryAgeDays(dayKey, now);
+    if (ageDays != null && ageDays > DAILY_TOTALS_CACHE_MAX_AGE_DAYS) {
+      pruned = true;
+      continue;
+    }
+    next[dayKey] = value;
+  }
+  return { cache: next, pruned };
+}
+
+function loadDailyTotalsCacheRaw(now: Date = new Date()): DailyTotalsCache {
+  const raw = readServiceCache("octo").dailyTotals;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const cache: DailyTotalsCache = {};
+  for (const [dayKey, value] of Object.entries(raw)) {
+    const totals = normalizeDailyDayTotals(value);
+    if (totals) {
+      cache[dayKey] = totals;
+    }
+  }
+  const { cache: pruned, pruned: didPrune } = pruneDailyTotalsCache(cache, now);
+  if (didPrune) {
+    saveDailyTotalsCache(pruned);
+  }
+  return pruned;
+}
+
+export function readDailyTotalsCache(now: Date = new Date()): DailyTotalsCache {
+  return loadDailyTotalsCacheRaw(now);
+}
+
+export function saveDailyTotalsCache(cache: DailyTotalsCache, now: Date = new Date()): void {
+  const { cache: pruned } = pruneDailyTotalsCache(cache, now);
+  updateServiceCache("octo", { dailyTotals: pruned });
+}
+
+export function dailyTotalsMapsFromCache(cache: DailyTotalsCache): {
+  eCost: Record<string, number>;
+  gCost: Record<string, number>;
+  eKwh: Record<string, number>;
+  gKwh: Record<string, number>;
+} {
+  const eCost: Record<string, number> = {};
+  const gCost: Record<string, number> = {};
+  const eKwh: Record<string, number> = {};
+  const gKwh: Record<string, number> = {};
+  for (const [dayKey, totals] of Object.entries(cache)) {
+    eCost[dayKey] = totals.eCost;
+    gCost[dayKey] = totals.gCost;
+    eKwh[dayKey] = totals.eKwh;
+    gKwh[dayKey] = totals.gKwh;
+  }
+  return { eCost, gCost, eKwh, gKwh };
 }
 
 function ukHourFromIso(iso: string): number | null {

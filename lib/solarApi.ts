@@ -165,6 +165,39 @@ export function formatUkHourLabel(ms: number): string {
   });
 }
 
+export function dayKeyUK(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-CA", { timeZone: UK_TZ });
+}
+
+export function ukHourNow(now: Date = new Date()): number {
+  return Number(
+    now.toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: UK_TZ,
+    }),
+  );
+}
+
+export function ukDayKeyMinusCalendarDays(dayKey: string, subtractDays: number): string {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() - subtractDays);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + 1;
+  const day = date.getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Today counts toward averages only from 8pm UK — generation is still in progress before then. */
+export const SOLAR_INCLUDE_TODAY_FROM_UK_HOUR = 20;
+
+export function latestUkDayKeyForSolarAverages(now: Date = new Date()): string {
+  const today = dayKeyUK(now);
+  if (ukHourNow(now) >= SOLAR_INCLUDE_TODAY_FROM_UK_HOUR) return today;
+  return ukDayKeyMinusCalendarDays(today, 1);
+}
+
 /** Hourly average power for the current UK hour from powerAvg. */
 export function currentHourPowerAvgWatts(data: SolarResponse, now: Date = new Date()): number | null {
   const hourStart = ukHourStartMs(now);

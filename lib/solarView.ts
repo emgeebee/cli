@@ -6,6 +6,8 @@ import {
   formatColoredWattsPrecise,
   formatKwh,
   formatUkHourLabel,
+  latestUkDayKeyForSolarAverages,
+  ukDayKeyMinusCalendarDays,
   ukHourStartMs,
   ukWallTimeToDate,
   parsePowerDateTimeKey,
@@ -229,14 +231,14 @@ function buildDailyYieldRows(yields: DailyYield[]): string[][] {
   return rows;
 }
 
-function yieldAveragesFromYields(yields: DailyYield[]): YieldAverage[] {
+function yieldAveragesFromYields(yields: DailyYield[], now: Date = new Date()): YieldAverage[] {
   const byDate = new Map(yields.map((entry) => [entry.date, entry.value] as const));
-  const todayKey = dayKeyUK();
+  const latestKey = latestUkDayKeyForSolarAverages(now);
 
   return AVERAGE_WINDOWS.map((days) => {
     const values: number[] = [];
-    for (let back = 1; back <= days; back += 1) {
-      const value = byDate.get(subtractDayKey(todayKey, back));
+    for (let back = 0; back < days; back += 1) {
+      const value = byDate.get(ukDayKeyMinusCalendarDays(latestKey, back));
       if (value != null) values.push(value);
     }
     const average =
@@ -245,8 +247,8 @@ function yieldAveragesFromYields(yields: DailyYield[]): YieldAverage[] {
   });
 }
 
-export function yieldAveragesFromData(data: SolarResponse): YieldAverage[] {
-  return yieldAveragesFromYields(normalizeDailyYield(data));
+export function yieldAveragesFromData(data: SolarResponse, now: Date = new Date()): YieldAverage[] {
+  return yieldAveragesFromYields(normalizeDailyYield(data), now);
 }
 
 function buildAverageRows(yields: DailyYield[]): string[][] {

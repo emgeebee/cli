@@ -19,6 +19,7 @@ export type OctoServiceCache = {
   gasPrices?: Record<string, unknown>;
   electricityPrices?: Record<string, unknown>;
   monthlyAverages?: Record<string, unknown>;
+  dailyTotals?: Record<string, unknown>;
 };
 
 export type SolarServiceCache = {
@@ -67,6 +68,7 @@ export const cachePaths = {
   octoGasPrices: () => join(getCacheDir(), "octo", "gas-prices.json"),
   octoElectricityPrices: () => join(getCacheDir(), "octo", "electricity-prices.json"),
   octoMonthlyAverages: () => join(getCacheDir(), "octo", "monthly-averages.json"),
+  octoDailyTotals: () => join(getCacheDir(), "octo", "daily-totals.json"),
   solarMonthlyYield: () => join(getCacheDir(), "solar", "monthly-yield.json"),
 } as const;
 
@@ -100,7 +102,8 @@ function hasOctoLocalData(data: OctoServiceCache): boolean {
   return Boolean(
     (data.gasPrices && Object.keys(data.gasPrices).length > 0) ||
       (data.electricityPrices && Object.keys(data.electricityPrices).length > 0) ||
-      (data.monthlyAverages && Object.keys(data.monthlyAverages).length > 0),
+      (data.monthlyAverages && Object.keys(data.monthlyAverages).length > 0) ||
+      (data.dailyTotals && Object.keys(data.dailyTotals).length > 0),
   );
 }
 
@@ -159,32 +162,99 @@ function serviceHasData<S extends ServiceName>(service: S, data: ServiceCacheMap
   return hasSolarLocalData(data as SolarServiceCache);
 }
 
+function mergeRecordFields(
+  local?: Record<string, unknown>,
+  remote?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const l = local && typeof local === "object" && !Array.isArray(local) ? local : {};
+  const r = remote && typeof remote === "object" && !Array.isArray(remote) ? remote : {};
+  const merged = { ...l, ...r };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function mergeOctoServiceCache(
+  remote: OctoServiceCache | null | undefined,
+  local: OctoServiceCache,
+): OctoServiceCache {
+  const r = remote ?? {};
+  return {
+    gasPrices: mergeRecordFields(
+      local.gasPrices as Record<string, unknown> | undefined,
+      r.gasPrices as Record<string, unknown> | undefined,
+    ),
+    electricityPrices: mergeRecordFields(
+      local.electricityPrices as Record<string, unknown> | undefined,
+      r.electricityPrices as Record<string, unknown> | undefined,
+    ),
+    monthlyAverages: mergeRecordFields(
+      local.monthlyAverages as Record<string, unknown> | undefined,
+      r.monthlyAverages as Record<string, unknown> | undefined,
+    ),
+    dailyTotals: mergeRecordFields(
+      local.dailyTotals as Record<string, unknown> | undefined,
+      r.dailyTotals as Record<string, unknown> | undefined,
+    ),
+  };
+}
+
+function mergeSolarServiceCache(
+  remote: SolarServiceCache | null | undefined,
+  local: SolarServiceCache,
+): SolarServiceCache {
+  const r = remote ?? {};
+  return {
+    monthlyYield: mergeRecordFields(
+      local.monthlyYield as Record<string, unknown> | undefined,
+      r.monthlyYield as Record<string, unknown> | undefined,
+    ),
+  };
+}
+
+function mergeServiceCacheData<S extends ServiceName>(
+  service: S,
+  remote: ServiceCacheMap[S] | null | undefined,
+  local: ServiceCacheMap[S],
+): ServiceCacheMap[S] {
+  if (service === "octo") {
+    return mergeOctoServiceCache(
+      remote as OctoServiceCache | null | undefined,
+      local as OctoServiceCache,
+    ) as ServiceCacheMap[S];
+  }
+  return mergeSolarServiceCache(
+    remote as SolarServiceCache | null | undefined,
+    local as SolarServiceCache,
+  ) as ServiceCacheMap[S];
+}
+
 async function loadServiceCache<S extends ServiceName>(service: S): Promise<void> {
   if (loaded.has(service)) return;
   loaded.add(service);
 
+  const local = loadServiceFromLocalFiles(service);
   const token = await readOptionalDocsToken();
+
+  let remote: ServiceCacheMap[S] | null = null;
   if (token) {
     try {
-      const remote = await getDocument<ServiceCacheMap[S]>(SERVICE_DOC_IDS[service], token);
-      if (remote && typeof remote === "object") {
-        memory[service] = remote;
-        return;
-      }
+      remote = await getDocument<ServiceCacheMap[S]>(SERVICE_DOC_IDS[service], token);
     } catch {
-      // Fall through to local migration.
+      // Fall through to local merge.
     }
   }
 
-  const local = loadServiceFromLocalFiles(service);
-  memory[service] = local;
+  const merged = mergeServiceCacheData(service, remote, local);
+  memory[service] = merged;
 
-  if (token && serviceHasData(service, local)) {
-    try {
-      await saveDocument(SERVICE_DOC_IDS[service], SERVICE_TITLES[service], local, token);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Cache migration upload failed (${service}): ${message}`);
+  if (token && serviceHasData(service, merged)) {
+    const baseline = remote ?? emptyServiceData(service);
+    if (JSON.stringify(merged) !== JSON.stringify(baseline)) {
+      try {
+        await saveDocument(SERVICE_DOC_IDS[service], SERVICE_TITLES[service], merged, token);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`Cache migration upload failed (${service}): ${message}`);
+      }
     }
   }
 }
@@ -244,7 +314,35 @@ export async function flushServiceCache(service: ServiceName): Promise<void> {
   }
   const data = readServiceCache(service);
   await saveDocument(SERVICE_DOC_IDS[service], SERVICE_TITLES[service], data, token);
+  mirrorServiceCacheToLocalFiles(service, data);
   dirty.delete(service);
+}
+
+function mirrorServiceCacheToLocalFiles<S extends ServiceName>(
+  service: S,
+  data: ServiceCacheMap[S],
+): void {
+  if (service === "solar") {
+    const solar = data as SolarServiceCache;
+    if (solar.monthlyYield && Object.keys(solar.monthlyYield).length > 0) {
+      writeLocalJsonFile(cachePaths.solarMonthlyYield(), solar.monthlyYield);
+    }
+    return;
+  }
+
+  const octo = data as OctoServiceCache;
+  if (octo.gasPrices && Object.keys(octo.gasPrices).length > 0) {
+    writeLocalJsonFile(cachePaths.octoGasPrices(), octo.gasPrices);
+  }
+  if (octo.electricityPrices && Object.keys(octo.electricityPrices).length > 0) {
+    writeLocalJsonFile(cachePaths.octoElectricityPrices(), octo.electricityPrices);
+  }
+  if (octo.monthlyAverages && Object.keys(octo.monthlyAverages).length > 0) {
+    writeLocalJsonFile(cachePaths.octoMonthlyAverages(), octo.monthlyAverages);
+  }
+  if (octo.dailyTotals && Object.keys(octo.dailyTotals).length > 0) {
+    writeLocalJsonFile(cachePaths.octoDailyTotals(), octo.dailyTotals);
+  }
 }
 
 export async function flushAllServiceCaches(): Promise<void> {

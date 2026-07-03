@@ -1,13 +1,15 @@
 import {
   ensureSolarCacheLoaded,
-  migrateLegacySolarCacheFromConfig,
   readServiceCache,
   updateServiceCache,
 } from "./cache";
 import type { SolarResponse } from "./solarApi";
+import {
+  dayKeyUK,
+  latestUkDayKeyForSolarAverages,
+} from "./solarApi";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const UK_TZ = "Europe/London";
 
 export const SOLAR_MONTHLY_YIELD_MONTHS = 6;
 
@@ -43,10 +45,6 @@ function parseDateKey(key: string): Date | null {
   const day = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day));
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function dayKeyUK(date: Date = new Date()): string {
-  return date.toLocaleDateString("en-CA", { timeZone: UK_TZ });
 }
 
 function currentMonthKey(now: Date): string {
@@ -135,9 +133,12 @@ function monthlyYieldFromDaily(
   data: SolarResponse,
   currentMonth: string,
   immutableCachedMonths: Set<string>,
+  now: Date,
 ): SolarMonthlyYieldCache {
+  const latestDay = latestUkDayKeyForSolarAverages(now);
   const sums: Record<string, { total: number; days: number }> = {};
   for (const entry of normalizeDailyYields(data)) {
+    if (entry.date > latestDay) continue;
     const month = entry.date.slice(0, 7);
     if (month < currentMonth && immutableCachedMonths.has(month)) continue;
     sums[month] ||= { total: 0, days: 0 };
@@ -159,12 +160,27 @@ function monthlyYieldFromDaily(
   return monthly;
 }
 
-function completedCachedMonths(cache: SolarMonthlyYieldCache, currentMonth: string): Set<string> {
-  return new Set(
-    Object.entries(cache)
-      .filter(([month, record]) => month < currentMonth && record.days >= daysInMonthKey(month))
-      .map(([month]) => month),
-  );
+function isFinishedCalendarMonth(month: string, currentMonth: string): boolean {
+  return month < currentMonth;
+}
+
+function isCompleteFinishedMonth(
+  month: string,
+  record: CachedSolarMonthlyYield,
+  currentMonth: string,
+): boolean {
+  return isFinishedCalendarMonth(month, currentMonth) && record.days >= daysInMonthKey(month);
+}
+
+function monthlyRecordsEqual(
+  a: CachedSolarMonthlyYield,
+  b: CachedSolarMonthlyYield,
+): boolean {
+  return a.average === b.average && a.total === b.total && a.days === b.days;
+}
+
+function immutableCachedMonths(cache: SolarMonthlyYieldCache, currentMonth: string): Set<string> {
+  return new Set(Object.keys(cache).filter((month) => isFinishedCalendarMonth(month, currentMonth)));
 }
 
 export async function solarMonthlyYieldRowsFromData(
@@ -175,13 +191,23 @@ export async function solarMonthlyYieldRowsFromData(
   await ensureSolarCacheLoaded();
   const currentMonth = currentMonthKey(now);
   const cache = readSolarMonthlyYieldCache();
-  const immutableCachedMonths = completedCachedMonths(cache, currentMonth);
-  const computed = monthlyYieldFromDaily(data, currentMonth, immutableCachedMonths);
+  const immutableMonths = immutableCachedMonths(cache, currentMonth);
+  const computed = monthlyYieldFromDaily(data, currentMonth, immutableMonths, now);
   let updated = false;
 
   for (const [month, record] of Object.entries(computed)) {
-    if (month >= currentMonth || cache[month]) continue;
-    if (record.days < daysInMonthKey(month)) continue;
+    if (record.days <= 0 || month > currentMonth) continue;
+
+    const existing = cache[month];
+
+    if (month === currentMonth) {
+      if (existing && monthlyRecordsEqual(existing, record)) continue;
+      cache[month] = record;
+      updated = true;
+      continue;
+    }
+
+    if (existing) continue;
     cache[month] = record;
     updated = true;
   }
@@ -200,7 +226,7 @@ export async function solarMonthlyYieldRowsFromData(
       total: record?.total ?? null,
       days: record?.days ?? 0,
       daysInMonth,
-      complete: month < currentMonth && (record?.days ?? 0) >= daysInMonth,
+      complete: record ? isCompleteFinishedMonth(month, record, currentMonth) : false,
       cached: Boolean(cached),
     };
   });

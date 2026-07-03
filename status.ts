@@ -474,7 +474,7 @@ async function loadSolarSnapshot(dayKey: string, now: Date): Promise<{
     const data = await fetchSolarData();
     return {
       ...solarSnapshotFromData(data, dayKey, now),
-      yieldAverages: yieldAveragesFromData(data),
+      yieldAverages: yieldAveragesFromData(data, now),
       monthlyYields: await solarMonthlyYieldRowsFromData(data, now),
     };
   } catch {
@@ -1395,9 +1395,9 @@ async function runLive(): Promise<void> {
   try {
     const data = await fetchSolarData();
     solarData = data;
-    yieldAverages = yieldAveragesFromData(data);
     const solarStartedAt = Date.now();
     const started = new Date(solarStartedAt);
+    yieldAverages = yieldAveragesFromData(data, started);
     monthlyYields = await solarMonthlyYieldRowsFromData(data, started);
     ({ yield: solarYield, powerNow, powerHourAvg } = solarSnapshotFromData(data, trackedDate, started));
     lastSolarYieldRefreshAt = solarStartedAt;
@@ -1477,7 +1477,7 @@ async function runLive(): Promise<void> {
           solarData = data;
           if (needYieldRefresh) {
             solarYield = todayYieldKwh(data, trackedDate);
-            yieldAverages = yieldAveragesFromData(data);
+            yieldAverages = yieldAveragesFromData(data, now);
             monthlyYields = await solarMonthlyYieldRowsFromData(data, now);
             lastSolarYieldRefreshAt = nowMs;
           }

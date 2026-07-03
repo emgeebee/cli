@@ -9,17 +9,25 @@ import {
 } from "./lib/cache";
 import {
   DAY_MS,
+  DAILY_TOTALS_BILLING_LOOKBACK_DAYS,
   OCTOPUS_BASE_URL,
   colorForRate,
+  dailyTotalsMapsFromCache,
   dayKeyUK,
+  dayKeysBackInclusive,
   deriveTariffs,
   fetchAllOctopusResults,
+  fetchElectricityRates,
+  fetchGasRates,
   fetchOctopusJson,
   formatRateLine,
+  isDailyTotalsCacheableDay,
   loadElectricityRatesForDays,
   loadGasRatesForDays,
   ratesUrlWithWindow,
+  readDailyTotalsCache,
   resolveOctoCredentials,
+  saveDailyTotalsCache,
   toIsoNoMs,
   ukTomorrowYmd,
   type FuelType,
@@ -365,10 +373,13 @@ function londonCalendarDayOfMonth(now: Date): number {
   return Number(dk.slice(8));
 }
 
-/** UK days 1–2 of the month: defer monthly tables (API still settling); also skip persisting the just-finished month. */
+/** UK days 1–2 of the month: skip persisting the just-finished month (API still settling). */
 function isDeferredMonthlyStatsWindowUk(now: Date): boolean {
   return londonCalendarDayOfMonth(now) <= 2;
 }
+
+/** Months shown in the table and eligible for Octopus backfill when not cached. */
+const MONTHLY_HISTORY_MONTHS = 18;
 
 /** Omit the most recent UK calendar days from monthly averages (incomplete consumption). */
 const MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS = 2;
@@ -406,13 +417,12 @@ function suppressCachingPendingPriorFinishedMonthUk(now: Date): boolean {
   return isDeferredMonthlyStatsWindowUk(now);
 }
 
-/** Drop prior UK month during grace so this run recomputes; returns true if an entry was removed. */
-function evictUnsettledPriorMonthFromCache(cache: MonthlyAverageCache, now: Date): boolean {
-  if (!suppressCachingPendingPriorFinishedMonthUk(now)) return false;
-  const prior = priorCalendarMonthKey(currentMonthKey(now));
-  if (!cache[prior]) return false;
-  delete cache[prior];
-  return true;
+/** During grace, keep cached prior-month totals for display; only skip persisting updates. */
+function evictUnsettledPriorMonthFromCache(
+  _cache: MonthlyAverageCache,
+  _now: Date,
+): boolean {
+  return false;
 }
 
 function isFinishedMonth(monthKey: string, now: Date): boolean {
@@ -434,7 +444,15 @@ function shouldPersistFinishedMonthTotals(monthKey: string, now: Date): boolean 
 function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCache): boolean {
   const rec = cache[monthKey];
   if (!rec) return false;
-  return rec.days >= daysInMonthKey(monthKey);
+  const minDays = Math.max(1, daysInMonthKey(monthKey) - MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS);
+  return rec.days >= minDays;
+}
+
+function monthNeedsMonthlyFetch(
+  monthKey: string,
+  cache: MonthlyAverageCache,
+): boolean {
+  return !cachedFinishedMonthIsComplete(monthKey, cache);
 }
 
 function readMonthlyAverageCache(): MonthlyAverageCache {
@@ -675,73 +693,136 @@ async function main(): Promise<void> {
     const todayYmd = dayKeyUK(from);
     const tomorrowYmd = ukTomorrowYmd(from);
     const historyFrom = new Date(from.getTime() - 35 * DAY_MS);
+    const billingDayKeys = dayKeysBackInclusive(from, DAILY_TOTALS_BILLING_LOOKBACK_DAYS);
+    const dailyTotalsCache = readDailyTotalsCache(from);
+    const cachedDailyMaps = dailyTotalsMapsFromCache(dailyTotalsCache);
+    let eDaily: DailyTotals = { ...cachedDailyMaps.eCost };
+    let gDaily: DailyTotals = { ...cachedDailyMaps.gCost };
+    let eDailyKwh: DailyTotals = { ...cachedDailyMaps.eKwh };
+    let gDailyKwh: DailyTotals = { ...cachedDailyMaps.gKwh };
+
+    const liveBillingDayKeys = billingDayKeys.filter(
+      (dayKey) => dayKey >= todayYmd || !dailyTotalsCache[dayKey],
+    );
+
     const [electricityResults, gasResults] = await Promise.all([
       loadElectricityRatesForDays([todayYmd, tomorrowYmd], from),
       loadGasRatesForDays([todayYmd, tomorrowYmd], from),
     ]);
-    const eHistoryUrl = ratesUrlWithWindow(
-      derived.etariffPrices,
-      historyFrom,
-      from,
-    );
-    const gHistoryUrl = ratesUrlWithWindow(
-      derived.gtariffPrices,
-      historyFrom,
-      from,
-    );
-    const eStandingUrl = ratesUrlWithWindow(
-      derived.etariffStanding,
-      historyFrom,
-      from,
-    );
-    const gStandingUrl = ratesUrlWithWindow(
-      derived.gtariffStanding,
-      historyFrom,
-      from,
-    );
-    const eConsumptionUrls = derived.electricityMeters.map(
-      (meter) =>
-        `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}` +
-        `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
-        `?period_from=${encodeURIComponent(toIsoNoMs(historyFrom))}` +
-        `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
-        `&order_by=period`,
-    );
-    const gConsumptionUrls = derived.gasMeters.map(
-      (meter) =>
-        `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}` +
-        `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
-        `?period_from=${encodeURIComponent(toIsoNoMs(historyFrom))}` +
-        `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
-        `&order_by=period`,
-    );
 
-    const [
-      eHistoryResults,
-      gHistoryResults,
-      eStandingResults,
-      gStandingResults,
-    ] = await Promise.all([
-      fetchAllOctopusResults<OctopusRate>(eHistoryUrl, token),
-      fetchAllOctopusResults<OctopusRate>(gHistoryUrl, token),
-      fetchAllOctopusResults<OctopusRate>(eStandingUrl, token),
-      fetchAllOctopusResults<OctopusRate>(gStandingUrl, token),
-    ]);
+    let eStandingResults: OctopusRate[] = [];
+    let gStandingResults: OctopusRate[] = [];
 
-    const [eConsumptionPages, gConsumptionPages] = await Promise.all([
-      Promise.all(
-        eConsumptionUrls.map((url) =>
-          fetchAllOctopusResults<OctopusConsumption>(url, token),
+    if (liveBillingDayKeys.length > 0) {
+      const liveFromKey = liveBillingDayKeys[0];
+      const liveFrom = new Date(`${liveFromKey}T00:00:00.000Z`);
+      const eStandingUrl = ratesUrlWithWindow(
+        derived.etariffStanding,
+        liveFrom,
+        from,
+      );
+      const gStandingUrl = ratesUrlWithWindow(
+        derived.gtariffStanding,
+        liveFrom,
+        from,
+      );
+      const eConsumptionUrls = derived.electricityMeters.map(
+        (meter) =>
+          `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}` +
+          `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+          `?period_from=${encodeURIComponent(toIsoNoMs(liveFrom))}` +
+          `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
+          `&order_by=period`,
+      );
+      const gConsumptionUrls = derived.gasMeters.map(
+        (meter) =>
+          `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}` +
+          `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+          `?period_from=${encodeURIComponent(toIsoNoMs(liveFrom))}` +
+          `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
+          `&order_by=period`,
+      );
+
+      const [
+        eHistoryResults,
+        gHistoryResults,
+        eStandingFetched,
+        gStandingFetched,
+        eConsumptionPages,
+        gConsumptionPages,
+      ] = await Promise.all([
+        fetchElectricityRates(liveFrom, from),
+        fetchGasRates(liveFrom, from),
+        fetchAllOctopusResults<OctopusRate>(eStandingUrl, token),
+        fetchAllOctopusResults<OctopusRate>(gStandingUrl, token),
+        Promise.all(
+          eConsumptionUrls.map((url) =>
+            fetchAllOctopusResults<OctopusConsumption>(url, token),
+          ),
         ),
-      ),
-      Promise.all(
-        gConsumptionUrls.map((url) =>
-          fetchAllOctopusResults<OctopusConsumption>(url, token),
+        Promise.all(
+          gConsumptionUrls.map((url) =>
+            fetchAllOctopusResults<OctopusConsumption>(url, token),
+          ),
         ),
-      ),
-    ]);
-    const eConsumptionResults = eConsumptionPages.flat();
-    const gConsumptionResults = gConsumptionPages.flat();
+      ]);
+      eStandingResults = eStandingFetched;
+      gStandingResults = gStandingFetched;
+
+      const eConsumptionResults = eConsumptionPages.flat();
+      const gConsumptionResults = gConsumptionPages.flat();
+      const eStandingPence = standingChargePerDayPence(eStandingResults);
+      const gStandingPence = standingChargePerDayPence(gStandingResults);
+
+      eDaily = mergeDailyTotals(
+        eDaily,
+        aggregateDailyBilledPence(eConsumptionResults, eHistoryResults, eStandingPence, 1),
+      );
+      gDaily = mergeDailyTotals(
+        gDaily,
+        aggregateDailyBilledPence(
+          gConsumptionResults,
+          gHistoryResults,
+          gStandingPence,
+          gasKwhPerUnit,
+        ),
+      );
+      eDailyKwh = mergeDailyTotals(
+        eDailyKwh,
+        aggregateDailyConsumedKwh(eConsumptionResults, 1),
+      );
+      gDailyKwh = mergeDailyTotals(
+        gDailyKwh,
+        aggregateDailyConsumedKwh(gConsumptionResults, gasKwhPerUnit),
+      );
+    }
+
+    const nextDailyTotalsCache = { ...dailyTotalsCache };
+    let dailyTotalsCacheDirty = false;
+    for (const dayKey of billingDayKeys) {
+      if (!isDailyTotalsCacheableDay(dayKey, from)) continue;
+      const record = {
+        eCost: eDaily[dayKey] || 0,
+        gCost: gDaily[dayKey] || 0,
+        eKwh: eDailyKwh[dayKey] || 0,
+        gKwh: gDailyKwh[dayKey] || 0,
+      };
+      if (!record.eCost && !record.gCost && !record.eKwh && !record.gKwh) continue;
+      const existing = nextDailyTotalsCache[dayKey];
+      if (
+        !existing ||
+        existing.eCost !== record.eCost ||
+        existing.gCost !== record.gCost ||
+        existing.eKwh !== record.eKwh ||
+        existing.gKwh !== record.gKwh
+      ) {
+        nextDailyTotalsCache[dayKey] = record;
+        dailyTotalsCacheDirty = true;
+      }
+    }
+    if (dailyTotalsCacheDirty) {
+      saveDailyTotalsCache(nextDailyTotalsCache);
+    }
 
     console.log(`Octopus account ${accountNumber}`);
     console.log(`Window: ${toIsoNoMs(from)} -> ${toIsoNoMs(to)}`);
@@ -756,203 +837,178 @@ async function main(): Promise<void> {
     );
     printRates("Gas rates (inc VAT)", gasResults, "gas");
 
-    const eDaily = aggregateDailyBilledPence(
-      eConsumptionResults,
-      eHistoryResults,
-      standingChargePerDayPence(eStandingResults),
-      1,
-    );
-    const gDaily = aggregateDailyBilledPence(
-      gConsumptionResults,
-      gHistoryResults,
-      standingChargePerDayPence(gStandingResults),
-      gasKwhPerUnit,
-    );
-    const eDailyKwh = aggregateDailyConsumedKwh(eConsumptionResults, 1);
-    const gDailyKwh = aggregateDailyConsumedKwh(
-      gConsumptionResults,
-      gasKwhPerUnit,
-    );
     printPast14DaysHorizontal(eDaily, gDaily, eDailyKwh, gDailyKwh, from);
 
-    if (isDeferredMonthlyStatsWindowUk(from)) {
-      console.log("");
-      console.log("Average daily totals by calendar month: not ready yet");
-      console.log("");
-      console.log("Monthly total cost summary: not ready yet");
-    } else {
-      const lastUkDayInAvg = latestUkDayKeyIncludedInMonthlyAverages(from);
+    const lastUkDayInAvg = latestUkDayKeyIncludedInMonthlyAverages(from);
 
-      const fetchWindowMonths = monthKeysBackInclusive(from, 3);
-      const monthlyCache = readMonthlyAverageCache();
-      const unsettledPriorEvicted = evictUnsettledPriorMonthFromCache(
-        monthlyCache,
-        from,
-      );
-      const monthlyForDisplay: MonthlyAverageCache = { ...monthlyCache };
-      const cachedMonths = sortMonthKeysAsc(Object.keys(monthlyCache));
-      const monthKeys = sortMonthKeysAsc(
-        Array.from(new Set([...cachedMonths, ...fetchWindowMonths])),
-      );
-      const priorFinishedMonth = previousMonthKey(from);
-      const missingMonths = fetchWindowMonths.filter((m) => {
-        if (!monthlyCache[m]) return true;
-        return (
-          m === priorFinishedMonth &&
-          shouldPersistFinishedMonthTotals(m, from) &&
-          !cachedFinishedMonthIsComplete(m, monthlyCache)
+    const historyMonths = monthKeysBackInclusive(from, MONTHLY_HISTORY_MONTHS);
+    const monthlyCache = readMonthlyAverageCache();
+    const unsettledPriorEvicted = evictUnsettledPriorMonthFromCache(
+      monthlyCache,
+      from,
+    );
+    const monthlyForDisplay: MonthlyAverageCache = { ...monthlyCache };
+    const cachedMonths = sortMonthKeysAsc(Object.keys(monthlyCache));
+    const monthKeys = sortMonthKeysAsc(
+      Array.from(new Set([...cachedMonths, ...historyMonths])),
+    );
+    const missingMonths = monthKeys.filter((m) =>
+      monthNeedsMonthlyFetch(m, monthlyCache),
+    );
+
+    let eMonthlyDaily = { ...eDaily };
+    let gMonthlyDaily = { ...gDaily };
+    let eMonthlyKwh = { ...eDailyKwh };
+    let gMonthlyKwh = { ...gDailyKwh };
+
+    if (missingMonths.length > 0) {
+      const oldestMissing = missingMonths[0];
+      const newestMissing = missingMonths[missingMonths.length - 1];
+      const monthlyFrom = startOfMonthUtc(oldestMissing);
+      const monthlyTo = startOfMonthUtc(nextMonthKey(newestMissing));
+
+      // Reuse already fetched 35-day dataset; only fetch the older missing gap.
+      const gapEnd = monthlyTo < historyFrom ? monthlyTo : historyFrom;
+      if (monthlyFrom < gapEnd) {
+        const eMonthlyHistoryUrl = ratesUrlWithWindow(
+          derived.etariffPrices,
+          monthlyFrom,
+          gapEnd,
         );
-      });
+        const gMonthlyHistoryUrl = ratesUrlWithWindow(
+          derived.gtariffPrices,
+          monthlyFrom,
+          gapEnd,
+        );
+        const eMonthlyStandingUrl = ratesUrlWithWindow(
+          derived.etariffStanding,
+          monthlyFrom,
+          gapEnd,
+        );
+        const gMonthlyStandingUrl = ratesUrlWithWindow(
+          derived.gtariffStanding,
+          monthlyFrom,
+          gapEnd,
+        );
+        const eMonthlyConsumptionUrls = derived.electricityMeters.map(
+          (meter) =>
+            `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}` +
+            `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+            `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
+            `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
+            `&order_by=period`,
+        );
+        const gMonthlyConsumptionUrls = derived.gasMeters.map(
+          (meter) =>
+            `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}` +
+            `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
+            `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
+            `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
+            `&order_by=period`,
+        );
 
-      let eMonthlyDaily = { ...eDaily };
-      let gMonthlyDaily = { ...gDaily };
-      let eMonthlyKwh = { ...eDailyKwh };
-      let gMonthlyKwh = { ...gDailyKwh };
+        const [
+          eGapRates,
+          gGapRates,
+          eGapStanding,
+          gGapStanding,
+          eGapConsumptionPages,
+          gGapConsumptionPages,
+        ] = await Promise.all([
+          fetchAllOctopusResults<OctopusRate>(eMonthlyHistoryUrl, token),
+          fetchAllOctopusResults<OctopusRate>(gMonthlyHistoryUrl, token),
+          fetchAllOctopusResults<OctopusRate>(eMonthlyStandingUrl, token),
+          fetchAllOctopusResults<OctopusRate>(gMonthlyStandingUrl, token),
+          Promise.all(
+            eMonthlyConsumptionUrls.map((url) =>
+              fetchAllOctopusResults<OctopusConsumption>(url, token),
+            ),
+          ),
+          Promise.all(
+            gMonthlyConsumptionUrls.map((url) =>
+              fetchAllOctopusResults<OctopusConsumption>(url, token),
+            ),
+          ),
+        ]);
 
-      if (missingMonths.length > 0) {
-        const oldestMissing = missingMonths[0];
-        const newestMissing = missingMonths[missingMonths.length - 1];
-        const monthlyFrom = startOfMonthUtc(oldestMissing);
-        const monthlyTo = startOfMonthUtc(nextMonthKey(newestMissing));
-
-        // Reuse already fetched 35-day dataset; only fetch the older missing gap.
-        const gapEnd = monthlyTo < historyFrom ? monthlyTo : historyFrom;
-        if (monthlyFrom < gapEnd) {
-          const eMonthlyHistoryUrl = ratesUrlWithWindow(
-            derived.etariffPrices,
-            monthlyFrom,
-            gapEnd,
-          );
-          const gMonthlyHistoryUrl = ratesUrlWithWindow(
-            derived.gtariffPrices,
-            monthlyFrom,
-            gapEnd,
-          );
-          const eMonthlyStandingUrl = ratesUrlWithWindow(
-            derived.etariffStanding,
-            monthlyFrom,
-            gapEnd,
-          );
-          const gMonthlyStandingUrl = ratesUrlWithWindow(
-            derived.gtariffStanding,
-            monthlyFrom,
-            gapEnd,
-          );
-          const eMonthlyConsumptionUrls = derived.electricityMeters.map(
-            (meter) =>
-              `${OCTOPUS_BASE_URL}/electricity-meter-points/${encodeURIComponent(meter.mpan)}` +
-              `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
-              `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
-              `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
-              `&order_by=period`,
-          );
-          const gMonthlyConsumptionUrls = derived.gasMeters.map(
-            (meter) =>
-              `${OCTOPUS_BASE_URL}/gas-meter-points/${encodeURIComponent(meter.mprn)}` +
-              `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
-              `?period_from=${encodeURIComponent(toIsoNoMs(monthlyFrom))}` +
-              `&period_to=${encodeURIComponent(toIsoNoMs(gapEnd))}` +
-              `&order_by=period`,
-          );
-
-          const [
+        const eGapConsumption = eGapConsumptionPages.flat();
+        const gGapConsumption = gGapConsumptionPages.flat();
+        eMonthlyDaily = mergeDailyTotals(
+          eMonthlyDaily,
+          aggregateDailyBilledPence(
+            eGapConsumption,
             eGapRates,
+            standingChargePerDayPence(eGapStanding),
+            1,
+          ),
+        );
+        gMonthlyDaily = mergeDailyTotals(
+          gMonthlyDaily,
+          aggregateDailyBilledPence(
+            gGapConsumption,
             gGapRates,
-            eGapStanding,
-            gGapStanding,
-            eGapConsumptionPages,
-            gGapConsumptionPages,
-          ] = await Promise.all([
-            fetchAllOctopusResults<OctopusRate>(eMonthlyHistoryUrl, token),
-            fetchAllOctopusResults<OctopusRate>(gMonthlyHistoryUrl, token),
-            fetchAllOctopusResults<OctopusRate>(eMonthlyStandingUrl, token),
-            fetchAllOctopusResults<OctopusRate>(gMonthlyStandingUrl, token),
-            Promise.all(
-              eMonthlyConsumptionUrls.map((url) =>
-                fetchAllOctopusResults<OctopusConsumption>(url, token),
-              ),
-            ),
-            Promise.all(
-              gMonthlyConsumptionUrls.map((url) =>
-                fetchAllOctopusResults<OctopusConsumption>(url, token),
-              ),
-            ),
-          ]);
-
-          const eGapConsumption = eGapConsumptionPages.flat();
-          const gGapConsumption = gGapConsumptionPages.flat();
-          eMonthlyDaily = mergeDailyTotals(
-            eMonthlyDaily,
-            aggregateDailyBilledPence(
-              eGapConsumption,
-              eGapRates,
-              standingChargePerDayPence(eGapStanding),
-              1,
-            ),
-          );
-          gMonthlyDaily = mergeDailyTotals(
-            gMonthlyDaily,
-            aggregateDailyBilledPence(
-              gGapConsumption,
-              gGapRates,
-              standingChargePerDayPence(gGapStanding),
-              gasKwhPerUnit,
-            ),
-          );
-          eMonthlyKwh = mergeDailyTotals(
-            eMonthlyKwh,
-            aggregateDailyConsumedKwh(eGapConsumption, 1),
-          );
-          gMonthlyKwh = mergeDailyTotals(
-            gMonthlyKwh,
-            aggregateDailyConsumedKwh(gGapConsumption, gasKwhPerUnit),
-          );
-        }
+            standingChargePerDayPence(gGapStanding),
+            gasKwhPerUnit,
+          ),
+        );
+        eMonthlyKwh = mergeDailyTotals(
+          eMonthlyKwh,
+          aggregateDailyConsumedKwh(eGapConsumption, 1),
+        );
+        gMonthlyKwh = mergeDailyTotals(
+          gMonthlyKwh,
+          aggregateDailyConsumedKwh(gGapConsumption, gasKwhPerUnit),
+        );
       }
-
-      eMonthlyDaily = filterDailyTotalsThroughDayInclusive(
-        eMonthlyDaily,
-        lastUkDayInAvg,
-      );
-      gMonthlyDaily = filterDailyTotalsThroughDayInclusive(
-        gMonthlyDaily,
-        lastUkDayInAvg,
-      );
-      eMonthlyKwh = filterDailyTotalsThroughDayInclusive(eMonthlyKwh, lastUkDayInAvg);
-      gMonthlyKwh = filterDailyTotalsThroughDayInclusive(gMonthlyKwh, lastUkDayInAvg);
-
-      const computedMonthly = monthlyAveragesFromDaily(
-        eMonthlyDaily,
-        gMonthlyDaily,
-        eMonthlyKwh,
-        gMonthlyKwh,
-      );
-      for (const mk of Object.keys(computedMonthly)) {
-        if (
-          monthlyCache[mk] &&
-          !missingMonths.includes(mk) &&
-          mk !== currentMonthKey(from)
-        ) {
-          continue;
-        }
-        monthlyForDisplay[mk] = computedMonthly[mk];
-      }
-
-      if (missingMonths.length > 0) {
-        for (const month of missingMonths) {
-          if (!computedMonthly[month]) continue;
-          if (shouldPersistFinishedMonthTotals(month, from)) {
-            monthlyCache[month] = computedMonthly[month];
-          }
-        }
-        saveMonthlyAverageCache(monthlyCache);
-      } else if (unsettledPriorEvicted) {
-        saveMonthlyAverageCache(monthlyCache);
-      }
-
-      printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
-      printFinalMonthTotals(monthlyForDisplay, from);
     }
+
+    eMonthlyDaily = filterDailyTotalsThroughDayInclusive(
+      eMonthlyDaily,
+      lastUkDayInAvg,
+    );
+    gMonthlyDaily = filterDailyTotalsThroughDayInclusive(
+      gMonthlyDaily,
+      lastUkDayInAvg,
+    );
+    eMonthlyKwh = filterDailyTotalsThroughDayInclusive(eMonthlyKwh, lastUkDayInAvg);
+    gMonthlyKwh = filterDailyTotalsThroughDayInclusive(gMonthlyKwh, lastUkDayInAvg);
+
+    const computedMonthly = monthlyAveragesFromDaily(
+      eMonthlyDaily,
+      gMonthlyDaily,
+      eMonthlyKwh,
+      gMonthlyKwh,
+    );
+    for (const mk of Object.keys(computedMonthly)) {
+      if (
+        monthlyCache[mk] &&
+        cachedFinishedMonthIsComplete(mk, monthlyCache) &&
+        mk !== currentMonthKey(from)
+      ) {
+        continue;
+      }
+      monthlyForDisplay[mk] = computedMonthly[mk];
+    }
+
+    let monthlyCacheDirty = unsettledPriorEvicted;
+    for (const [month, record] of Object.entries(computedMonthly)) {
+      if (!shouldPersistFinishedMonthTotals(month, from)) continue;
+      const existing = monthlyCache[month];
+      if (
+        !existing ||
+        !cachedFinishedMonthIsComplete(month, monthlyCache) ||
+        record.days > existing.days
+      ) {
+        monthlyCache[month] = record;
+        monthlyCacheDirty = true;
+      }
+    }
+    if (monthlyCacheDirty) {
+      saveMonthlyAverageCache(monthlyCache);
+    }
+
+    printAverageMonthlySummary(monthKeys, monthlyForDisplay, from);
+    printFinalMonthTotals(monthlyForDisplay, from);
 
     await flushServiceCache("octo");
   } catch (error: unknown) {
