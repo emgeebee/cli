@@ -15,22 +15,22 @@ export type BallCompetitionEntry = {
 };
 
 const BUILT_IN_COMPETITIONS: BallCompetitionEntry[] = [
-  { key: "fifaworldcup" },
-  { key: "worldcup" },
+  { key: "fifaworldcup", displayName: "WC" },
+  { key: "worldcup", displayName: "WC" },
   { key: "premierleague", displayName: "PL" },
   { key: "englishpremierleague", displayName: "PL" },
-  { key: "facup" },
-  { key: "leaguecup" },
-  { key: "eflcup" },
-  { key: "championsleague" },
-  { key: "uefachampionsleague" },
-  { key: "europaleague", displayName: "EL" },
-  { key: "uefaeuropaleague", displayName: "EL" },
-  { key: "championship" },
-  { key: "englishchampionship" },
-  { key: "leagueone" },
-  { key: "englishleagueone" },
-  { key: "scottishpremiership" },
+  { key: "facup", displayName: "FA C" },
+  { key: "leaguecup", displayName: "LC" },
+  { key: "eflcup", displayName: "LC" },
+  { key: "championsleague", displayName: "UCL" },
+  { key: "uefachampionsleague", displayName: "UCL" },
+  { key: "europaleague", displayName: "UEL" },
+  { key: "uefaeuropaleague", displayName: "UEL" },
+  { key: "championship", displayName: "Champ" },
+  { key: "englishchampionship", displayName: "Champ" },
+  { key: "leagueone", displayName: "EL1" },
+  { key: "englishleagueone", displayName: "EL1" },
+  { key: "scottishpremiership", displayName: "SPL" },
 ];
 
 export const COMPETITION_ORDER = [
