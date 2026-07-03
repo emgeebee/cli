@@ -1,5 +1,6 @@
 import stringWidth from "string-width";
 import stripAnsi from "strip-ansi";
+import type { MobileRotateScreen } from "./mobileStatusScreens";
 export const ANSI_ENTER_ALTERNATE_SCREEN = "\x1b[?1049h";
 export const ANSI_LEAVE_ALTERNATE_SCREEN = "\x1b[?1049l";
 export const ANSI_CLEAR_SCREEN = "\x1b[2J";
@@ -261,6 +262,12 @@ export function maxCalendarContentLines(
   return Math.max(0, terminalRows - statusBoxRows - shortcutBoxRows);
 }
 
+export function maxMobileScreenBodyLines(reserveShortcuts = false): number {
+  const terminalRows = process.stdout.rows ?? 24;
+  const shortcutBoxRows = reserveShortcuts ? 3 : 0;
+  return Math.max(1, terminalRows - 2 - shortcutBoxRows);
+}
+
 export function layoutWidth(
   outerWidths: number[],
   gap = WIDE_LAYOUT_GAP,
@@ -469,6 +476,8 @@ export type SportsRotatePanel = "cric" | "footy" | "plTable" | "villa";
 
 export type CompactRotatePanel = "weather" | "solar" | "cric" | "footy" | "plTable" | "villa" | "calendar";
 
+export type { MobileRotateScreen };
+
 const MIN_CALENDAR_STACK_LINES = 4;
 
 export function shouldStackCalendarUnderStatus(
@@ -588,6 +597,8 @@ export type FullscreenPanelLines = {
   layoutTier?: StatusLayoutTier;
   stackCalendar?: boolean;
   compactDisplay?: CompactRotatePanel;
+  mobileDisplay?: MobileRotateScreen;
+  mobileScreenLines?: string[] | null;
   pageOffsets?: FullscreenPanelPageOffsets;
 };
 
@@ -847,6 +858,10 @@ export function writeFullscreenLines(
 
   if (tier === "statusOnly") {
     const panelInner = panels.calendarInnerWidth ?? innerWidth;
+    if (panels.mobileDisplay && panels.mobileDisplay !== "status" && panels.mobileScreenLines?.length) {
+      writeFullscreenScreen(boxLines(panels.mobileScreenLines, panelInner));
+      return pagination;
+    }
     const leftStack: string[][] = [boxLines(statusLines, panelInner)];
     if (panels.shortcutLines && panels.shortcutLines.length > 0) {
       leftStack.push(boxLines(panels.shortcutLines, panelInner));

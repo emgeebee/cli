@@ -390,6 +390,19 @@ function buildSolarViewBody(
   return lines;
 }
 
+export function buildSolarPowerGraphPanelLines(
+  data: SolarResponse,
+  maxLineWidth?: number,
+): string[] {
+  const powerAvgReadings = normalizePowerAvgReadings(data);
+  return [
+    "=== Solar ===",
+    "",
+    `Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`,
+    ...renderPowerGraph(powerAvgReadings, maxLineWidth),
+  ];
+}
+
 export function buildSolarPanelLines(
   data: SolarResponse,
   countdown?: { seconds: number; next: "weather"; paused?: boolean },

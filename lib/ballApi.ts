@@ -502,6 +502,76 @@ export function fitFootballStatusLines(lines: string[], maxContentLines: number)
   return fitted.length > 0 ? fitted : lines.slice(0, maxContentLines);
 }
 
+function footballSectionLineCount(sections: string[][], low: number, high: number): number {
+  let size = 0;
+  for (let index = low; index <= high; index += 1) {
+    size += sections[index].length;
+    if (index > low) size += 1;
+  }
+  return size;
+}
+
+function flattenFootballSections(sections: string[][], low: number, high: number): string[] {
+  const fitted: string[] = [];
+  for (let index = low; index <= high; index += 1) {
+    if (fitted.length > 0) fitted.push("");
+    fitted.push(...sections[index]);
+  }
+  return fitted;
+}
+
+/** Fit football fixtures with today centred when possible (equal past/future days). */
+export function fitFootballStatusLinesCenteredOnToday(
+  lines: string[],
+  maxContentLines: number,
+): string[] {
+  if (maxContentLines <= 0) return [];
+  if (lines.length <= maxContentLines) return lines;
+
+  const sections = splitFootballDaySections(lines);
+  if (sections.length === 0) return lines.slice(0, maxContentLines);
+
+  let todayIndex = sections.findIndex((section) => section[0] === "== Today ==");
+  if (todayIndex === -1) {
+    return fitFootballStatusLines(lines, maxContentLines);
+  }
+
+  let low = todayIndex;
+  let high = todayIndex;
+  while (footballSectionLineCount(sections, low, high) <= maxContentLines) {
+    const canExpandLow = low > 0;
+    const canExpandHigh = high < sections.length - 1;
+    if (!canExpandLow && !canExpandHigh) break;
+
+    const lowCost = canExpandLow ? sections[low - 1].length + 1 : Number.POSITIVE_INFINITY;
+    const highCost = canExpandHigh ? sections[high + 1].length + 1 : Number.POSITIVE_INFINITY;
+    if (lowCost <= highCost && canExpandLow) {
+      low -= 1;
+    } else if (canExpandHigh) {
+      high += 1;
+    } else if (canExpandLow) {
+      low -= 1;
+    }
+  }
+
+  while (footballSectionLineCount(sections, low, high) > maxContentLines && low < high) {
+    const lowDistance = todayIndex - low;
+    const highDistance = high - todayIndex;
+    if (highDistance > lowDistance) {
+      high -= 1;
+    } else if (lowDistance > highDistance) {
+      low += 1;
+    } else if (high > todayIndex) {
+      high -= 1;
+    } else {
+      low += 1;
+    }
+  }
+
+  const fitted = flattenFootballSections(sections, low, high);
+  return fitted.length > maxContentLines ? fitted.slice(0, maxContentLines) : fitted;
+}
+
 function formatStatusDayHeading(relative: string, ymd: string): string {
   if (relative === "yesterday") return "== Yesterday ==";
   if (relative === "today") return "== Today ==";

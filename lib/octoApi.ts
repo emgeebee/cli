@@ -977,3 +977,117 @@ export function formatElectricityPeriodAvgTable(
   if (!hasValue) return [];
   return makeAsciiTable(ELECTRICITY_TABLE_HEADERS, rows);
 }
+
+type MonthlyAverageRecord = {
+  eCost: number;
+  gCost: number;
+  eKwh: number;
+  gKwh: number;
+  days: number;
+};
+
+type MonthlyAverageCache = Record<string, MonthlyAverageRecord>;
+
+function readMonthlyAverageCache(): MonthlyAverageCache {
+  const raw = readServiceCache("octo").monthlyAverages;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const cache: MonthlyAverageCache = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!/^\d{4}-\d{2}$/.test(key)) continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const rec = value as Record<string, unknown>;
+    const eCost = Number(rec.eCost);
+    const gCost = Number(rec.gCost);
+    const eKwh = Number(rec.eKwh);
+    const gKwh = Number(rec.gKwh);
+    const days = Number(rec.days);
+    if (
+      !Number.isFinite(eCost) ||
+      !Number.isFinite(gCost) ||
+      !Number.isFinite(eKwh) ||
+      !Number.isFinite(gKwh) ||
+      !Number.isFinite(days) ||
+      days <= 0
+    ) {
+      continue;
+    }
+    cache[key] = { eCost, gCost, eKwh, gKwh, days };
+  }
+  return cache;
+}
+
+function currentMonthKey(now: Date): string {
+  return now.toLocaleDateString("en-CA", { timeZone: UK_TZ }).slice(0, 7);
+}
+
+function priorCalendarMonthKey(monthKeyYm: string): string {
+  const [ys, ms] = monthKeyYm.split("-");
+  const y = Number(ys);
+  const m = Number(ms);
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function daysInMonthKey(monthKey: string): number {
+  const [yRaw, mRaw] = monthKey.split("-");
+  const y = Number(yRaw);
+  const m = Number(mRaw);
+  return new Date(y, m, 0).getDate();
+}
+
+function monthLabel(monthKey: string): string {
+  const [yRaw, mRaw] = monthKey.split("-");
+  const d = new Date(Date.UTC(Number(yRaw), Number(mRaw) - 1, 1));
+  return d.toLocaleDateString("en-GB", {
+    month: "short",
+    year: "2-digit",
+    timeZone: UK_TZ,
+  });
+}
+
+function formatPoundsFromPence(valuePence: number): string {
+  return `£${(valuePence / 100).toFixed(2)}`;
+}
+
+function formatAverageAndTotalCost(
+  averagePence: number,
+  totalPence: number,
+  projectedPence?: number,
+): string {
+  const average = Math.round(averagePence);
+  const totalPounds = Math.round(totalPence / 100);
+  if (projectedPence === undefined) {
+    return `${average}p (£${totalPounds})`;
+  }
+  const projectedPounds = Math.round(projectedPence / 100);
+  return `${average}p (£${totalPounds} // £${projectedPounds})`;
+}
+
+export function formatMonthlyTotalCostSummaryLines(now: Date = new Date()): string[] {
+  const cache = readMonthlyAverageCache();
+  const currentKey = currentMonthKey(now);
+  const prevKey = priorCalendarMonthKey(currentKey);
+  const rows = [currentKey, prevKey].map((key) => {
+    const rec = cache[key];
+    const label = monthLabel(key);
+    if (!rec) return [label, "-", "-", "-"];
+    const eTotal = rec.eCost * rec.days;
+    const gTotal = rec.gCost * rec.days;
+    const totalAverage = rec.eCost + rec.gCost;
+    const totalCost = eTotal + gTotal;
+    const projectedCost =
+      key === currentKey ? totalAverage * daysInMonthKey(key) : undefined;
+    return [
+      label,
+      formatPoundsFromPence(eTotal),
+      formatPoundsFromPence(gTotal),
+      formatAverageAndTotalCost(totalAverage, totalCost, projectedCost),
+    ];
+  });
+
+  return [
+    "Monthly total cost summary",
+    ...makeAsciiTable(["Month", "⚡ total", "Gas total", "Total"], rows),
+  ];
+}
