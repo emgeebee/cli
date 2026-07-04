@@ -9,13 +9,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 
-// Tier 1 is most important; tier 6 is least. Vivid → muted.
+// Tier 1 is most important; tier 6 is least. Hot → cool → muted.
 const TIER_COLORS: readonly string[] = [
-  "\x1b[1;97m", // 1: bold bright white
-  "\x1b[95m", // 2: bright magenta
-  "\x1b[38;5;208m", // 3: orange
-  "\x1b[94m", // 4: bright blue
-  "\x1b[96m", // 5: bright cyan
+  "\x1b[91m", // 1: bright red
+  "\x1b[38;5;208m", // 2: orange
+  "\x1b[33m", // 3: yellow
+  "\x1b[38;5;154m", // 4: chartreuse
+  "\x1b[32m", // 5: green
   "\x1b[90m", // 6: dim gray
 ];
 
