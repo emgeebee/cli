@@ -1,3 +1,5 @@
+import stringWidth from "string-width";
+import stripAnsi from "strip-ansi";
 import { z } from "zod";
 import { isNarrowStatusTerminal } from "./terminal";
 
@@ -5,18 +7,26 @@ export const DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UK_TZ = "Europe/London";
+const ANSI_RESET = "\x1b[0m";
+const ANSI_TIER_2 = "\x1b[94m";
+const ANSI_TIER_3 = "\x1b[38;5;208m";
 
 const BdayPersonSchema = z.object({
   bd: z.string().optional(),
   type: z.number().optional(),
+  tier: z.number().optional(),
 });
 
 const BdayConfigSchema = z.record(z.string(), BdayPersonSchema);
 
 export type BdayPersonConfig = {
   bd?: string;
-  type?: number;
+  tier?: number;
 };
+
+function personTier(person: z.infer<typeof BdayPersonSchema>): number {
+  return person.tier ?? person.type ?? 1;
+}
 
 export type BdayConfig = Record<string, BdayPersonConfig>;
 
@@ -46,9 +56,10 @@ function normalizeBdayConfig(raw: z.infer<typeof BdayConfigSchema>): BdayConfig 
   for (const [name, person] of Object.entries(raw)) {
     const bdYmd = normalizeBirthDateYmd(String(person?.bd || ""));
     if (!bdYmd) continue;
+    const tier = personTier(person);
     config[name] = {
       bd: bdYmd,
-      ...(person.type == null ? {} : { type: person.type }),
+      ...(tier === 1 ? {} : { tier }),
     };
   }
   return config;
@@ -216,8 +227,28 @@ function normalAgeText(years: number, months: number): string {
   return `${y}, ${m}`;
 }
 
+function visibleLength(value: string): number {
+  return stringWidth(stripAnsi(value));
+}
+
+function shouldStyleTier(): boolean {
+  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
+}
+
+function colorForTier(tier: number): string {
+  if (tier === 2) return ANSI_TIER_2;
+  if (tier >= 3) return ANSI_TIER_3;
+  return "";
+}
+
+function colorizeTierCell(value: string, tier: number): string {
+  const color = colorForTier(tier);
+  if (!shouldStyleTier() || !color) return value;
+  return `${color}${value}${ANSI_RESET}`;
+}
+
 function padCell(value: string, width: number): string {
-  return value + " ".repeat(Math.max(0, width - value.length));
+  return value + " ".repeat(Math.max(0, width - visibleLength(value)));
 }
 
 function makeAsciiTable(headers: string[], rows: string[][]): string[] {
@@ -253,9 +284,9 @@ export function buildBdayTableLines(
 ): string[] {
   const narrow = options?.narrow ?? isNarrowStatusTerminal();
   const withHeader = options?.header ?? true;
-  if (!config) return ["No birthdays configured."];
+  if (!config) return ["No dates configured."];
   const today = utcStartOfToday(now);
-  const rows: string[][] = [];
+  const rows: Array<{ sortKey: number; cells: string[] }> = [];
 
   for (const [name, person] of Object.entries(config)) {
     const bdRaw = String(person?.bd || "").trim();
@@ -263,28 +294,38 @@ export function buildBdayTableLines(
     const bd = parseIsoDate(bdRaw);
     const totalDays = daysSince(bd, today);
     if (totalDays < 0) continue;
+    const nextYmd = nextBirthdayYmd(bdRaw, now);
+    if (!nextYmd) continue;
+    const todayYmd = ukTodayYmd(now);
+    const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS);
+    const tier = person.tier ?? 1;
     const { years, months } = ymdDiff(bd, today);
     const totalMonths = years * 12 + months;
     const totalWeeks = (totalDays / 7).toFixed(1);
-    rows.push([
-      name,
-      bdRaw,
-      String(totalDays),
-      totalWeeks,
-      String(totalMonths),
-      normalAgeText(years, months),
-    ]);
+    rows.push({
+      sortKey: daysUntil,
+      cells: [
+        colorizeTierCell(name, tier),
+        bdRaw,
+        String(totalDays),
+        totalWeeks,
+        String(totalMonths),
+        normalAgeText(years, months),
+      ],
+    });
   }
 
-  if (rows.length === 0) return ["No valid birthdays found."];
-  rows.sort((a, b) => a[0].localeCompare(b[0]));
+  if (rows.length === 0) return ["No valid dates found."];
+  rows.sort((a, b) => a.sortKey - b.sortKey || stripAnsi(a.cells[0]).localeCompare(stripAnsi(b.cells[0])));
 
   const headers = narrow
     ? ["Name", "DOB", "Normal"]
     : ["Name", "DOB", "Days", "Weeks", "Months", "Normal"];
-  const tableRows = narrow ? rows.map(narrowBdayTableRow) : rows;
+  const tableRows = narrow
+    ? rows.map((row) => narrowBdayTableRow(row.cells))
+    : rows.map((row) => row.cells);
   const table = makeAsciiTable(headers, tableRows);
-  const prefix = withHeader ? ["=== Birthdays ===", ""] : [];
+  const prefix = withHeader ? ["=== Dates ===", ""] : [];
   const lines = [...prefix, ...table];
   if (maxContentLines == null || lines.length <= maxContentLines) {
     return lines;
