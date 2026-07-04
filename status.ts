@@ -89,6 +89,7 @@ import {
   MOBILE_ROTATE_SCREENS,
   type MobileRotateScreen,
 } from "./lib/mobileStatusScreens";
+import { readPackageVersion } from "./lib/version";
 import {
   enterFullscreen,
   isNarrowStatusTerminal,
@@ -118,6 +119,7 @@ import {
   type TerminalKey,
 } from "./lib/terminalInput";
 
+const PACKAGE_VERSION = readPackageVersion();
 const UK_TZ = "Europe/London";
 const TICK_MS = 1000;
 const PANEL_ALTERNATE_MS = 15_000;
@@ -182,7 +184,7 @@ function statusBoxTitle(now: Date): string {
   const date = formatStatusDate(now);
   const remaining = moneyRemaining(now);
   const money = remaining == null ? "-" : String(remaining);
-  return `=== Status (${date}) [${money}] ===`;
+  return `=== Status (${date}) [${money}] v${PACKAGE_VERSION} ===`;
 }
 
 function capitalizeHouseSection(label: string): string {

@@ -8,8 +8,16 @@ export const DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
-const ANSI_TIER_2 = "\x1b[94m";
-const ANSI_TIER_3 = "\x1b[38;5;208m";
+
+// Tier 1 is most important; tier 6 is least. Hot → cool → muted.
+const TIER_COLORS: readonly string[] = [
+  "\x1b[91m", // 1: bright red
+  "\x1b[38;5;208m", // 2: orange
+  "\x1b[33m", // 3: yellow
+  "\x1b[38;5;154m", // 4: chartreuse
+  "\x1b[32m", // 5: green
+  "\x1b[90m", // 6: dim gray
+];
 
 const BdayPersonSchema = z.object({
   bd: z.string().optional(),
@@ -24,14 +32,24 @@ export type BdayPersonConfig = {
   tier?: number;
 };
 
+function normalizeTier(tier: number | undefined): number {
+  if (tier == null || !Number.isFinite(tier)) return 1;
+  return Math.min(6, Math.max(1, Math.round(tier)));
+}
+
 function personTier(person: z.infer<typeof BdayPersonSchema>): number {
-  return person.tier ?? person.type ?? 1;
+  return normalizeTier(person.tier ?? person.type);
+}
+
+function configPersonTier(person: BdayPersonConfig): number {
+  return normalizeTier(person.tier);
 }
 
 export type BdayConfig = Record<string, BdayPersonConfig>;
 
 export type UpcomingBirthday = {
   name: string;
+  tier: number;
   bdYmd: string;
   nextYmd: string;
   daysUntil: number;
@@ -146,6 +164,7 @@ export function nextUpcomingBirthdays(
     const nextYear = Number(nextYmd.slice(0, 4));
     upcoming.push({
       name,
+      tier: configPersonTier(person),
       bdYmd,
       nextYmd,
       daysUntil,
@@ -173,11 +192,26 @@ function formatDaysUntil(daysUntil: number): string {
   return `in ${daysUntil} days`;
 }
 
+function formatNextBdayDaysCell(daysUntil: number): string {
+  if (daysUntil === 0) return "today";
+  return String(daysUntil);
+}
+
+export function formatBdayName(name: string): string {
+  const spaced = name.replace(/([a-z\d])([A-Z])/g, "$1 $2");
+  return spaced
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export function formatUpcomingBdayLine(entry: UpcomingBirthday): string {
+  const name = colorizeTierCell(formatBdayName(entry.name), entry.tier);
   if (entry.daysUntil === 0) {
-    return `${entry.name}: today (turns ${entry.age})`;
+    return `${name}: today (turns ${entry.age})`;
   }
-  return `${entry.name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
+  return `${name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
 }
 
 export function upcomingBdaySectionLines(
@@ -236,14 +270,12 @@ function shouldStyleTier(): boolean {
 }
 
 function colorForTier(tier: number): string {
-  if (tier === 2) return ANSI_TIER_2;
-  if (tier >= 3) return ANSI_TIER_3;
-  return "";
+  return TIER_COLORS[normalizeTier(tier) - 1];
 }
 
 function colorizeTierCell(value: string, tier: number): string {
   const color = colorForTier(tier);
-  if (!shouldStyleTier() || !color) return value;
+  if (!shouldStyleTier()) return value;
   return `${color}${value}${ANSI_RESET}`;
 }
 
@@ -261,9 +293,10 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
-const BDAY_DAYS_COL = 2;
-const BDAY_WEEKS_COL = 3;
-const BDAY_MONTHS_COL = 4;
+const BDAY_NEXT_COL = 2;
+const BDAY_DAYS_COL = 3;
+const BDAY_WEEKS_COL = 4;
+const BDAY_MONTHS_COL = 5;
 
 function narrowBdayTableRow<T>(values: T[]): T[] {
   return values.filter(
@@ -298,15 +331,16 @@ export function buildBdayTableLines(
     if (!nextYmd) continue;
     const todayYmd = ukTodayYmd(now);
     const daysUntil = Math.floor((ymdToUtcMs(nextYmd) - ymdToUtcMs(todayYmd)) / DAY_MS);
-    const tier = person.tier ?? 1;
+    const tier = configPersonTier(person);
     const { years, months } = ymdDiff(bd, today);
     const totalMonths = years * 12 + months;
     const totalWeeks = (totalDays / 7).toFixed(1);
     rows.push({
       sortKey: daysUntil,
       cells: [
-        colorizeTierCell(name, tier),
+        colorizeTierCell(formatBdayName(name), tier),
         bdRaw,
+        formatNextBdayDaysCell(daysUntil),
         String(totalDays),
         totalWeeks,
         String(totalMonths),
@@ -319,8 +353,8 @@ export function buildBdayTableLines(
   rows.sort((a, b) => a.sortKey - b.sortKey || stripAnsi(a.cells[0]).localeCompare(stripAnsi(b.cells[0])));
 
   const headers = narrow
-    ? ["Name", "DOB", "Normal"]
-    : ["Name", "DOB", "Days", "Weeks", "Months", "Normal"];
+    ? ["Name", "DOB", "Next", "Normal"]
+    : ["Name", "DOB", "Next", "Days", "Weeks", "Months", "Normal"];
   const tableRows = narrow
     ? rows.map((row) => narrowBdayTableRow(row.cells))
     : rows.map((row) => row.cells);
