@@ -308,7 +308,7 @@ const COMPACT_PANEL_LABELS: Record<CompactRotatePanel, string> = {
   footy: "Football",
   plTable: "PL Table",
   villa: "Villa",
-  calendar: "Dates",
+  calendar: "Calendar",
 };
 
 function buildSportsRotationPool(
@@ -631,12 +631,15 @@ async function printOnce(): Promise<void> {
   await flushAllServiceCaches();
 }
 
-function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "shortcuts-menu" | "cmd-menu" | null {
+function handleStatusKey(key: TerminalKey): StatusShortcut | "quit" | "flip-next" | "toggle-pause" | "shortcuts-menu" | "cmd-menu" | "go-home" | null {
   if (key.type === "ctrl-c") {
     return "quit";
   }
   if (key.type !== "char") {
     return null;
+  }
+  if (key.char === "h") {
+    return "go-home";
   }
   if (key.char === "q") {
     return "quit";
@@ -764,6 +767,7 @@ async function runLive(): Promise<void> {
   let cmdMenuState: CmdMenuState = { active: false };
   let shortcutsMenuOpen = false;
   let runningCommand = false;
+  let rotationHomePending = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let disableRawInput: (() => void) | undefined;
   let panelPageOffsets: Record<string, number> = {};
@@ -914,6 +918,24 @@ async function runLive(): Promise<void> {
       hasPlTable,
       hasVilla,
     );
+    if (rotationHomePending) {
+      mobileRotatePhase = "status";
+      if (compactPool.length > 0) {
+        compactRotatePhase = compactPool[0];
+      }
+      const homeSportsPool = buildSportsRotationPool(hasCric, hasFooty, hasPlTable, hasVilla);
+      if (homeSportsPool.length > 0) {
+        sportsRotatePhase = homeSportsPool[0];
+      }
+      middleAlternatePhase = "weather";
+      panelPageOffsets = {};
+      const resetAt = Date.now();
+      lastMobileRotateAt = resetAt;
+      lastCompactRotateAt = resetAt;
+      lastSportsAlternateAt = resetAt;
+      lastMiddleAlternateAt = resetAt;
+      rotationHomePending = false;
+    }
     let compactDisplay: CompactRotatePanel | undefined;
     let compactSwitchCountdown:
       | { seconds: number; next: CompactRotatePanel; paused?: boolean }
@@ -1362,6 +1384,13 @@ async function runLive(): Promise<void> {
     });
   };
 
+  const goHome = (): void => {
+    shortcutsMenuOpen = false;
+    cmdMenuState = { active: false };
+    rotationHomePending = true;
+    render();
+  };
+
   const toggleRotationPause = (): void => {
     if (rotationPaused) {
       const pausedDuration = Date.now() - rotationPausedAt;
@@ -1456,10 +1485,18 @@ async function runLive(): Promise<void> {
     if (runningCommand) return;
     for (const key of keys) {
       if (shortcutsMenuOpen) {
+        if (key.type === "char" && key.char === "h") {
+          goHome();
+          return;
+        }
         handleShortcutsMenuKey(key);
         return;
       }
       if (cmdMenuState.active) {
+        if (key.type === "char" && key.char === "h") {
+          goHome();
+          return;
+        }
         handleCmdMenuKey(key);
         return;
       }
@@ -1481,6 +1518,10 @@ async function runLive(): Promise<void> {
       }
       if (action === "toggle-pause") {
         toggleRotationPause();
+        return;
+      }
+      if (action === "go-home") {
+        goHome();
         return;
       }
       if (action === "shortcuts-menu") {

@@ -38,7 +38,7 @@ export type MobileRotateScreen =
   | "weatherHourly"
   | "cric"
   | "calendar"
-  | "birthdays";
+  | "dates";
 
 export const MOBILE_ROTATE_SCREENS: MobileRotateScreen[] = [
   "status",
@@ -50,7 +50,7 @@ export const MOBILE_ROTATE_SCREENS: MobileRotateScreen[] = [
   "weatherHourly",
   "cric",
   "calendar",
-  "birthdays",
+  "dates",
 ];
 
 export const MOBILE_SCREEN_LABELS: Record<MobileRotateScreen, string> = {
@@ -62,8 +62,8 @@ export const MOBILE_SCREEN_LABELS: Record<MobileRotateScreen, string> = {
   weatherDaily: "Weather",
   weatherHourly: "Weather hourly",
   cric: "Cricket",
-  calendar: "Dates",
-  birthdays: "Birthdays",
+  calendar: "Calendar",
+  dates: "Dates",
 };
 
 export type MobileScreenCountdown = {
@@ -198,7 +198,7 @@ function buildCalendarScreenLines(ctx: MobileScreenContext): string[] {
   );
 }
 
-function buildBirthdaysScreenLines(ctx: MobileScreenContext): string[] {
+function buildDatesScreenLines(ctx: MobileScreenContext): string[] {
   return buildBdayTableLines(ctx.bdayConfig, ctx.now, ctx.maxBodyLines, {
     narrow: ctx.narrowOcto,
   });
@@ -237,8 +237,8 @@ export function buildMobileScreenLines(
     case "calendar":
       lines = buildCalendarScreenLines(ctx);
       break;
-    case "birthdays":
-      lines = buildBirthdaysScreenLines(ctx);
+    case "dates":
+      lines = buildDatesScreenLines(ctx);
       break;
     default:
       return null;
