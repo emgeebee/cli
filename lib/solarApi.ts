@@ -18,6 +18,7 @@ const numericField = z.preprocess((value) => {
 
 const SolarResponseSchema = z.object({
   yield: z.record(z.string(), numericField).default({}),
+  solarYieldTotal: numericField.optional(),
   powerNow: z
     .object({
       value: numericField,
@@ -42,6 +43,11 @@ export async function fetchSolarData(): Promise<SolarResponse> {
 
 export function todayYieldKwh(data: SolarResponse, dayKey: string): number | null {
   const value = data.yield[dayKey];
+  return value != null && Number.isFinite(value) ? value : null;
+}
+
+export function solarYieldTotalKwh(data: SolarResponse): number | null {
+  const value = data.solarYieldTotal;
   return value != null && Number.isFinite(value) ? value : null;
 }
 
