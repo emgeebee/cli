@@ -7,6 +7,7 @@ import {
   formatKwh,
   formatUkHourLabel,
   latestUkDayKeyForSolarAverages,
+  solarYieldTotalKwh,
   ukDayKeyMinusCalendarDays,
   ukHourStartMs,
   ukWallTimeToDate,
@@ -259,13 +260,20 @@ function buildAverageRows(yields: DailyYield[]): string[][] {
   ]);
 }
 
-function buildMonthlyYieldRows(monthlyYields: SolarMonthlyYieldRow[]): string[][] {
-  return monthlyYields.map((row) => [
+function buildMonthlyYieldRows(
+  monthlyYields: SolarMonthlyYieldRow[],
+  solarYieldTotal: number | null = null,
+): string[][] {
+  const rows = monthlyYields.map((row) => [
     formatSolarMonthLabel(row.month),
     row.average == null ? "-" : formatColoredKwh(row.average),
     row.total == null ? "-" : formatKwh(row.total),
     row.days > 0 ? `${row.days}/${row.daysInMonth}` : "-",
   ]);
+  if (solarYieldTotal != null) {
+    rows.push(["Total", "-", formatKwh(solarYieldTotal), "-"]);
+  }
+  return rows;
 }
 
 function buildHourlyPowerSeries(readings: PowerReading[]): {
@@ -380,7 +388,7 @@ function buildSolarViewBody(
     lines.push(
       ...makeAsciiTable(
         ["Month", "Avg Yield", "Total Yield", "Days"],
-        buildMonthlyYieldRows(monthlyYields),
+        buildMonthlyYieldRows(monthlyYields, solarYieldTotalKwh(data)),
       ),
     );
     lines.push("");
