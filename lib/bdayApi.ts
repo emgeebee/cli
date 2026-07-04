@@ -173,11 +173,21 @@ function formatDaysUntil(daysUntil: number): string {
   return `in ${daysUntil} days`;
 }
 
+export function formatBdayName(name: string): string {
+  const spaced = name.replace(/([a-z\d])([A-Z])/g, "$1 $2");
+  return spaced
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
 export function formatUpcomingBdayLine(entry: UpcomingBirthday): string {
+  const name = formatBdayName(entry.name);
   if (entry.daysUntil === 0) {
-    return `${entry.name}: today (turns ${entry.age})`;
+    return `${name}: today (turns ${entry.age})`;
   }
-  return `${entry.name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
+  return `${name}: ${formatBdayDate(entry.nextYmd)} (${formatDaysUntil(entry.daysUntil)}, turns ${entry.age})`;
 }
 
 export function upcomingBdaySectionLines(
@@ -305,7 +315,7 @@ export function buildBdayTableLines(
     rows.push({
       sortKey: daysUntil,
       cells: [
-        colorizeTierCell(name, tier),
+        colorizeTierCell(formatBdayName(name), tier),
         bdRaw,
         String(totalDays),
         totalWeeks,
