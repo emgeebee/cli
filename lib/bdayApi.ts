@@ -173,6 +173,11 @@ function formatDaysUntil(daysUntil: number): string {
   return `in ${daysUntil} days`;
 }
 
+function formatNextBdayDaysCell(daysUntil: number): string {
+  if (daysUntil === 0) return "today";
+  return String(daysUntil);
+}
+
 export function formatBdayName(name: string): string {
   const spaced = name.replace(/([a-z\d])([A-Z])/g, "$1 $2");
   return spaced
@@ -271,9 +276,10 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   return [border, headerLine, border, ...body, border];
 }
 
-const BDAY_DAYS_COL = 2;
-const BDAY_WEEKS_COL = 3;
-const BDAY_MONTHS_COL = 4;
+const BDAY_NEXT_COL = 2;
+const BDAY_DAYS_COL = 3;
+const BDAY_WEEKS_COL = 4;
+const BDAY_MONTHS_COL = 5;
 
 function narrowBdayTableRow<T>(values: T[]): T[] {
   return values.filter(
@@ -317,6 +323,7 @@ export function buildBdayTableLines(
       cells: [
         colorizeTierCell(formatBdayName(name), tier),
         bdRaw,
+        formatNextBdayDaysCell(daysUntil),
         String(totalDays),
         totalWeeks,
         String(totalMonths),
@@ -329,8 +336,8 @@ export function buildBdayTableLines(
   rows.sort((a, b) => a.sortKey - b.sortKey || stripAnsi(a.cells[0]).localeCompare(stripAnsi(b.cells[0])));
 
   const headers = narrow
-    ? ["Name", "DOB", "Normal"]
-    : ["Name", "DOB", "Days", "Weeks", "Months", "Normal"];
+    ? ["Name", "DOB", "Next", "Normal"]
+    : ["Name", "DOB", "Next", "Days", "Weeks", "Months", "Normal"];
   const tableRows = narrow
     ? rows.map((row) => narrowBdayTableRow(row.cells))
     : rows.map((row) => row.cells);
