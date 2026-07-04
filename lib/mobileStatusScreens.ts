@@ -200,7 +200,7 @@ function buildCalendarScreenLines(ctx: MobileScreenContext): string[] {
 
 function buildDatesScreenLines(ctx: MobileScreenContext): string[] {
   return buildBdayTableLines(ctx.bdayConfig, ctx.now, ctx.maxBodyLines, {
-    narrow: ctx.narrowOcto,
+    panelWidth: ctx.panelWidth,
   });
 }
 

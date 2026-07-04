@@ -3,6 +3,9 @@ import stripAnsi from "strip-ansi";
 import { z } from "zod";
 import { isNarrowStatusTerminal } from "./terminal";
 
+/** Seven-column table needs roughly this many inner columns; status panels cap at ~75. */
+const BDAY_FULL_TABLE_MIN_INNER_WIDTH = 88;
+
 export const DATES_API_URL = "http://api.emgeebee.buzz:1880/api/dates";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -307,7 +310,16 @@ function narrowBdayTableRow<T>(values: T[]): T[] {
 export type BuildBdayTableOptions = {
   narrow?: boolean;
   header?: boolean;
+  panelWidth?: number;
 };
+
+function shouldUseNarrowBdayTable(options?: BuildBdayTableOptions): boolean {
+  if (options?.narrow != null) return options.narrow;
+  if (options?.panelWidth != null) {
+    return options.panelWidth < BDAY_FULL_TABLE_MIN_INNER_WIDTH;
+  }
+  return isNarrowStatusTerminal();
+}
 
 export function buildBdayTableLines(
   config: BdayConfig | null,
@@ -315,7 +327,7 @@ export function buildBdayTableLines(
   maxContentLines?: number,
   options?: BuildBdayTableOptions,
 ): string[] {
-  const narrow = options?.narrow ?? isNarrowStatusTerminal();
+  const narrow = shouldUseNarrowBdayTable(options);
   const withHeader = options?.header ?? true;
   if (!config) return ["No dates configured."];
   const today = utcStartOfToday(now);
