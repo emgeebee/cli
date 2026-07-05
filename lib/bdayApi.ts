@@ -1,7 +1,7 @@
 import stringWidth from "string-width";
 import stripAnsi from "strip-ansi";
 import { z } from "zod";
-import { isNarrowStatusTerminal } from "./terminal";
+import { statusLayoutInnerWidth } from "./terminal";
 
 /** Seven-column table needs roughly this many inner columns; status panels cap at ~75. */
 const BDAY_FULL_TABLE_MIN_INNER_WIDTH = 88;
@@ -288,7 +288,7 @@ function padCell(value: string, width: number): string {
 
 function makeAsciiTable(headers: string[], rows: string[][]): string[] {
   const widths = headers.map((header, idx) =>
-    Math.max(header.length, ...rows.map((row) => (row[idx] || "").length)),
+    Math.max(visibleLength(header), ...rows.map((row) => visibleLength(row[idx] || ""))),
   );
   const border = `+-${widths.map((w) => "-".repeat(w)).join("-+-")}-+`;
   const headerLine = `| ${headers.map((h, i) => padCell(h, widths[i])).join(" | ")} |`;
@@ -315,10 +315,8 @@ export type BuildBdayTableOptions = {
 
 function shouldUseNarrowBdayTable(options?: BuildBdayTableOptions): boolean {
   if (options?.narrow != null) return options.narrow;
-  if (options?.panelWidth != null) {
-    return options.panelWidth < BDAY_FULL_TABLE_MIN_INNER_WIDTH;
-  }
-  return isNarrowStatusTerminal();
+  const panelWidth = options?.panelWidth ?? statusLayoutInnerWidth();
+  return panelWidth < BDAY_FULL_TABLE_MIN_INNER_WIDTH;
 }
 
 export function buildBdayTableLines(
