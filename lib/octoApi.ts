@@ -88,6 +88,8 @@ export const DAILY_PRICE_CACHE_HISTORY_DAYS = 14;
 /** Finished daily cost/kWh rows for the octo billing lookback window. */
 export const DAILY_TOTALS_BILLING_LOOKBACK_DAYS = 35;
 export const DAILY_TOTALS_CACHE_MAX_AGE_DAYS = 34;
+/** Billed daily totals are not treated as final until this many UK days after the day. */
+export const DAILY_TOTALS_SETTLE_DAYS = 3;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -807,7 +809,8 @@ function normalizeDailyDayTotals(value: unknown): DailyDayTotals | null {
 }
 
 export function isDailyTotalsCacheableDay(dayKey: string, now: Date = new Date()): boolean {
-  return dayKey < dayKeyUK(now);
+  const ageDays = cacheEntryAgeDays(dayKey, now);
+  return ageDays != null && ageDays >= DAILY_TOTALS_SETTLE_DAYS;
 }
 
 function pruneDailyTotalsCache(
@@ -817,6 +820,10 @@ function pruneDailyTotalsCache(
   let pruned = false;
   const next: DailyTotalsCache = {};
   for (const [dayKey, value] of Object.entries(cache)) {
+    if (!isDailyTotalsCacheableDay(dayKey, now)) {
+      pruned = true;
+      continue;
+    }
     const ageDays = cacheEntryAgeDays(dayKey, now);
     if (ageDays != null && ageDays > DAILY_TOTALS_CACHE_MAX_AGE_DAYS) {
       pruned = true;
@@ -1033,6 +1040,8 @@ function monthlyAveragesFromDailyTotals(now: Date = new Date()): MonthlyAverageC
     { eCost: number; gCost: number; eKwh: number; gKwh: number; days: number }
   > = {};
   for (const dayKey of dayKeys) {
+    const ageDays = cacheEntryAgeDays(dayKey, now);
+    if (ageDays == null || ageDays < DAILY_TOTALS_SETTLE_DAYS) continue;
     const month = monthKeyFromDayKey(dayKey);
     sums[month] ||= { eCost: 0, gCost: 0, eKwh: 0, gKwh: 0, days: 0 };
     sums[month].eCost += eCost[dayKey] || 0;

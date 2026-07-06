@@ -10,6 +10,7 @@ import {
 import {
   DAY_MS,
   DAILY_TOTALS_BILLING_LOOKBACK_DAYS,
+  DAILY_TOTALS_SETTLE_DAYS,
   OCTOPUS_BASE_URL,
   colorForRate,
   dailyTotalsMapsFromCache,
@@ -381,9 +382,6 @@ function isDeferredMonthlyStatsWindowUk(now: Date): boolean {
 /** Months shown in the table and eligible for Octopus backfill when not cached. */
 const MONTHLY_HISTORY_MONTHS = 18;
 
-/** Omit the most recent UK calendar days from monthly averages (incomplete consumption). */
-const MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS = 2;
-
 /** UK `YYYY-MM-DD` minus whole calendar days (Europe/London anchor from `dayKeyUK`). */
 function ukDayKeyMinusCalendarDays(dayKey: string, subtractDays: number): string {
   const [yRaw, mRaw, dRaw] = dayKey.split("-").map(Number);
@@ -395,12 +393,9 @@ function ukDayKeyMinusCalendarDays(dayKey: string, subtractDays: number): string
   return `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-/** Latest UK day key included in averages (e.g. on the 9th, that is the 7th — today and yesterday omitted). */
+/** Latest UK day key included in averages (e.g. on the 9th, that is the 6th — last 3 UK days omitted). */
 function latestUkDayKeyIncludedInMonthlyAverages(now: Date): string {
-  return ukDayKeyMinusCalendarDays(
-    dayKeyUK(now),
-    MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS,
-  );
+  return ukDayKeyMinusCalendarDays(dayKeyUK(now), DAILY_TOTALS_SETTLE_DAYS);
 }
 
 function filterDailyTotalsThroughDayInclusive(totals: DailyTotals, lastDayInclusive: string): DailyTotals {
@@ -444,7 +439,7 @@ function shouldPersistFinishedMonthTotals(monthKey: string, now: Date): boolean 
 function cachedFinishedMonthIsComplete(monthKey: string, cache: MonthlyAverageCache): boolean {
   const rec = cache[monthKey];
   if (!rec) return false;
-  const minDays = Math.max(1, daysInMonthKey(monthKey) - MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS);
+  const minDays = Math.max(1, daysInMonthKey(monthKey) - DAILY_TOTALS_SETTLE_DAYS);
   return rec.days >= minDays;
 }
 
@@ -624,7 +619,7 @@ function previousMonthKey(now: Date): string {
 function printFinalMonthTotals(cache: MonthlyAverageCache, now: Date): void {
   const currentKey = currentMonthKey(now);
   const prevKey = previousMonthKey(now);
-  const skipped = MONTHLY_AVG_EXCLUDED_TRAILING_UK_DAYS;
+  const skipped = DAILY_TOTALS_SETTLE_DAYS;
 
   const rows = [
     {
@@ -702,7 +697,7 @@ async function main(): Promise<void> {
     let gDailyKwh: DailyTotals = { ...cachedDailyMaps.gKwh };
 
     const liveBillingDayKeys = billingDayKeys.filter(
-      (dayKey) => dayKey >= todayYmd || !dailyTotalsCache[dayKey],
+      (dayKey) => !isDailyTotalsCacheableDay(dayKey, from) || !dailyTotalsCache[dayKey],
     );
 
     const [electricityResults, gasResults] = await Promise.all([

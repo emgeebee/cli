@@ -83,7 +83,7 @@ curl -X PUT 'https://1q1v3hm1n2.execute-api.us-west-2.amazonaws.com/prod/docs/ph
 |-------------|---------|---------------|
 | `phone-cli-octo` | Octopus (`octo`, `status` gas/electricity) | `gasPrices`, `electricityPrices`, `dailyTotals`, `monthlyAverages` |
 
-`gasPrices` keeps the last 14 UK calendar days of unit rates (today/tomorrow for display). `electricityPrices` only caches today and tomorrow half-hour slots (~36h) for the period table in `octo` / `status`. `dailyTotals` caches finished days' billed cost and kWh (⚡ + gas) for the 35-day billing window — once a UK day is complete it is not refetched. `monthlyAverages` keeps finished months indefinitely once cached.
+`gasPrices` keeps the last 14 UK calendar days of unit rates (today/tomorrow for display). `electricityPrices` only caches today and tomorrow half-hour slots (~36h) for the period table in `octo` / `status`. `dailyTotals` caches settled days' billed cost and kWh (⚡ + gas) for the 35-day billing window — a UK day is only cached once it is at least 3 UK days old (consumption still settling before then). `monthlyAverages` keeps finished months indefinitely once cached.
 | `phone-cli-solar` | Solar monthly yield (`solar`, `status`) | `monthlyYield` |
 
 On first run with a token configured, any existing local cache files under the legacy cache directory are merged into the remote document and uploaded if the remote copy is missing data.
