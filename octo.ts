@@ -10,6 +10,7 @@ import {
 import {
   DAY_MS,
   DAILY_TOTALS_BILLING_LOOKBACK_DAYS,
+  DAILY_TOTALS_DISPLAY_DAYS,
   DAILY_TOTALS_SETTLE_DAYS,
   OCTOPUS_BASE_URL,
   colorForRate,
@@ -25,12 +26,15 @@ import {
   isDailyTotalsCacheableDay,
   loadElectricityRatesForDays,
   loadGasRatesForDays,
+  preferMoreCompleteDayTotals,
   ratesUrlWithWindow,
   readDailyTotalsCache,
   resolveOctoCredentials,
   saveDailyTotalsCache,
   toIsoNoMs,
+  ukDayStartFromKey,
   ukTomorrowYmd,
+  type DailyDayTotals,
   type FuelType,
   type OctopusAccountResponse,
   type OctopusRate,
@@ -535,6 +539,65 @@ function mergeDailyTotals(base: DailyTotals, extra: DailyTotals): DailyTotals {
   return merged;
 }
 
+function withoutDayKeys(totals: DailyTotals, dayKeys: string[]): DailyTotals {
+  const next = { ...totals };
+  for (const dayKey of dayKeys) {
+    delete next[dayKey];
+  }
+  return next;
+}
+
+function dayTotalsRecord(
+  dayKey: string,
+  eDailyCost: DailyTotals,
+  gDailyCost: DailyTotals,
+  eDailyKwh: DailyTotals,
+  gDailyKwh: DailyTotals,
+): DailyDayTotals {
+  return {
+    eCost: eDailyCost[dayKey] || 0,
+    gCost: gDailyCost[dayKey] || 0,
+    eKwh: eDailyKwh[dayKey] || 0,
+    gKwh: gDailyKwh[dayKey] || 0,
+  };
+}
+
+function applyDayTotalsRecord(
+  dayKey: string,
+  record: DailyDayTotals,
+  eDailyCost: DailyTotals,
+  gDailyCost: DailyTotals,
+  eDailyKwh: DailyTotals,
+  gDailyKwh: DailyTotals,
+): void {
+  eDailyCost[dayKey] = record.eCost;
+  gDailyCost[dayKey] = record.gCost;
+  eDailyKwh[dayKey] = record.eKwh;
+  gDailyKwh[dayKey] = record.gKwh;
+}
+
+function applyRefreshedDailyTotals(
+  dayKeys: string[],
+  eDailyCost: DailyTotals,
+  gDailyCost: DailyTotals,
+  eDailyKwh: DailyTotals,
+  gDailyKwh: DailyTotals,
+  freshECost: DailyTotals,
+  freshGCost: DailyTotals,
+  freshEKwh: DailyTotals,
+  freshGKwh: DailyTotals,
+  dailyTotalsCache: Record<string, DailyDayTotals>,
+  now: Date,
+): void {
+  for (const dayKey of dayKeys) {
+    const fresh = dayTotalsRecord(dayKey, freshECost, freshGCost, freshEKwh, freshGKwh);
+    const chosen = isDailyTotalsCacheableDay(dayKey, now)
+      ? fresh
+      : preferMoreCompleteDayTotals(dailyTotalsCache[dayKey], fresh);
+    applyDayTotalsRecord(dayKey, chosen, eDailyCost, gDailyCost, eDailyKwh, gDailyKwh);
+  }
+}
+
 function printPast14DaysHorizontal(
   eDailyCost: DailyTotals,
   gDailyCost: DailyTotals,
@@ -542,7 +605,7 @@ function printPast14DaysHorizontal(
   gDailyKwh: DailyTotals,
   now: Date,
 ): void {
-  const dayKeys = lastNDaysKeysInclusive(now, 14);
+  const dayKeys = lastNDaysKeysInclusive(now, DAILY_TOTALS_DISPLAY_DAYS);
   const eColorByDay = rankedColorByDay(dayKeys, eDailyCost, "electricity");
   const gColorByDay = rankedColorByDay(dayKeys, gDailyCost, "gas");
 
@@ -689,6 +752,7 @@ async function main(): Promise<void> {
     const tomorrowYmd = ukTomorrowYmd(from);
     const historyFrom = new Date(from.getTime() - 35 * DAY_MS);
     const billingDayKeys = dayKeysBackInclusive(from, DAILY_TOTALS_BILLING_LOOKBACK_DAYS);
+    const displayDayKeys = dayKeysBackInclusive(from, DAILY_TOTALS_DISPLAY_DAYS);
     const dailyTotalsCache = readDailyTotalsCache(from);
     const cachedDailyMaps = dailyTotalsMapsFromCache(dailyTotalsCache);
     let eDaily: DailyTotals = { ...cachedDailyMaps.eCost };
@@ -697,7 +761,10 @@ async function main(): Promise<void> {
     let gDailyKwh: DailyTotals = { ...cachedDailyMaps.gKwh };
 
     const liveBillingDayKeys = billingDayKeys.filter(
-      (dayKey) => !isDailyTotalsCacheableDay(dayKey, from) || !dailyTotalsCache[dayKey],
+      (dayKey) =>
+        displayDayKeys.includes(dayKey) ||
+        !isDailyTotalsCacheableDay(dayKey, from) ||
+        !dailyTotalsCache[dayKey],
     );
 
     const [electricityResults, gasResults] = await Promise.all([
@@ -710,7 +777,7 @@ async function main(): Promise<void> {
 
     if (liveBillingDayKeys.length > 0) {
       const liveFromKey = liveBillingDayKeys[0];
-      const liveFrom = new Date(`${liveFromKey}T00:00:00.000Z`);
+      const liveFrom = ukDayStartFromKey(liveFromKey);
       const eStandingUrl = ratesUrlWithWindow(
         derived.etariffStanding,
         liveFrom,
@@ -727,6 +794,7 @@ async function main(): Promise<void> {
           `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
           `?period_from=${encodeURIComponent(toIsoNoMs(liveFrom))}` +
           `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
+          `&page_size=25000` +
           `&order_by=period`,
       );
       const gConsumptionUrls = derived.gasMeters.map(
@@ -735,6 +803,7 @@ async function main(): Promise<void> {
           `/meters/${encodeURIComponent(meter.serial)}/consumption/` +
           `?period_from=${encodeURIComponent(toIsoNoMs(liveFrom))}` +
           `&period_to=${encodeURIComponent(toIsoNoMs(from))}` +
+          `&page_size=25000` +
           `&order_by=period`,
       );
 
@@ -769,33 +838,43 @@ async function main(): Promise<void> {
       const eStandingPence = standingChargePerDayPence(eStandingResults);
       const gStandingPence = standingChargePerDayPence(gStandingResults);
 
-      eDaily = mergeDailyTotals(
+      const freshECost = aggregateDailyBilledPence(
+        eConsumptionResults,
+        eHistoryResults,
+        eStandingPence,
+        1,
+      );
+      const freshGCost = aggregateDailyBilledPence(
+        gConsumptionResults,
+        gHistoryResults,
+        gStandingPence,
+        gasKwhPerUnit,
+      );
+      const freshEKwh = aggregateDailyConsumedKwh(eConsumptionResults, 1);
+      const freshGKwh = aggregateDailyConsumedKwh(gConsumptionResults, gasKwhPerUnit);
+
+      eDaily = withoutDayKeys(eDaily, liveBillingDayKeys);
+      gDaily = withoutDayKeys(gDaily, liveBillingDayKeys);
+      eDailyKwh = withoutDayKeys(eDailyKwh, liveBillingDayKeys);
+      gDailyKwh = withoutDayKeys(gDailyKwh, liveBillingDayKeys);
+      applyRefreshedDailyTotals(
+        liveBillingDayKeys,
         eDaily,
-        aggregateDailyBilledPence(eConsumptionResults, eHistoryResults, eStandingPence, 1),
-      );
-      gDaily = mergeDailyTotals(
         gDaily,
-        aggregateDailyBilledPence(
-          gConsumptionResults,
-          gHistoryResults,
-          gStandingPence,
-          gasKwhPerUnit,
-        ),
-      );
-      eDailyKwh = mergeDailyTotals(
         eDailyKwh,
-        aggregateDailyConsumedKwh(eConsumptionResults, 1),
-      );
-      gDailyKwh = mergeDailyTotals(
         gDailyKwh,
-        aggregateDailyConsumedKwh(gConsumptionResults, gasKwhPerUnit),
+        freshECost,
+        freshGCost,
+        freshEKwh,
+        freshGKwh,
+        dailyTotalsCache,
+        from,
       );
     }
 
     const nextDailyTotalsCache = { ...dailyTotalsCache };
     let dailyTotalsCacheDirty = false;
     for (const dayKey of billingDayKeys) {
-      if (!isDailyTotalsCacheableDay(dayKey, from)) continue;
       const record = {
         eCost: eDaily[dayKey] || 0,
         gCost: gDaily[dayKey] || 0,
@@ -804,14 +883,17 @@ async function main(): Promise<void> {
       };
       if (!record.eCost && !record.gCost && !record.eKwh && !record.gKwh) continue;
       const existing = nextDailyTotalsCache[dayKey];
+      const toSave = isDailyTotalsCacheableDay(dayKey, from)
+        ? record
+        : preferMoreCompleteDayTotals(existing, record);
       if (
         !existing ||
-        existing.eCost !== record.eCost ||
-        existing.gCost !== record.gCost ||
-        existing.eKwh !== record.eKwh ||
-        existing.gKwh !== record.gKwh
+        existing.eCost !== toSave.eCost ||
+        existing.gCost !== toSave.gCost ||
+        existing.eKwh !== toSave.eKwh ||
+        existing.gKwh !== toSave.gKwh
       ) {
-        nextDailyTotalsCache[dayKey] = record;
+        nextDailyTotalsCache[dayKey] = toSave;
         dailyTotalsCacheDirty = true;
       }
     }

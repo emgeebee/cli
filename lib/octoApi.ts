@@ -90,6 +90,8 @@ export const DAILY_TOTALS_BILLING_LOOKBACK_DAYS = 35;
 export const DAILY_TOTALS_CACHE_MAX_AGE_DAYS = 34;
 /** Billed daily totals are not treated as final until this many UK days after the day. */
 export const DAILY_TOTALS_SETTLE_DAYS = 3;
+/** Past-N-day table in `octo` always refetches this window from the API. */
+export const DAILY_TOTALS_DISPLAY_DAYS = 14;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -813,6 +815,43 @@ export function isDailyTotalsCacheableDay(dayKey: string, now: Date = new Date()
   return ageDays != null && ageDays >= DAILY_TOTALS_SETTLE_DAYS;
 }
 
+/** UK local midnight for a `YYYY-MM-DD` key (Europe/London). */
+export function ukDayStartFromKey(dayKey: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (!match) {
+    throw new Error(`Invalid UK day key: ${dayKey}`);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const rough = Date.UTC(year, month - 1, day, 0, 0, 0);
+  for (let offsetHours = -2; offsetHours <= 2; offsetHours += 1) {
+    const candidate = new Date(rough + offsetHours * 3_600_000);
+    if (dayKeyUK(candidate) !== dayKey) continue;
+    const hour = Number(
+      candidate.toLocaleTimeString("en-GB", {
+        hour: "numeric",
+        hour12: false,
+        timeZone: UK_TZ,
+      }),
+    );
+    if (hour === 0) return candidate;
+  }
+  return new Date(`${dayKey}T00:00:00.000Z`);
+}
+
+/** While consumption is still settling, keep the more complete daily snapshot. */
+export function preferMoreCompleteDayTotals(
+  cached: DailyDayTotals | undefined,
+  fresh: DailyDayTotals,
+): DailyDayTotals {
+  if (!cached) return fresh;
+  const cachedKwh = cached.eKwh + cached.gKwh;
+  const freshKwh = fresh.eKwh + fresh.gKwh;
+  if (freshKwh >= cachedKwh) return fresh;
+  return cached;
+}
+
 function pruneDailyTotalsCache(
   cache: DailyTotalsCache,
   now: Date = new Date(),
@@ -820,10 +859,6 @@ function pruneDailyTotalsCache(
   let pruned = false;
   const next: DailyTotalsCache = {};
   for (const [dayKey, value] of Object.entries(cache)) {
-    if (!isDailyTotalsCacheableDay(dayKey, now)) {
-      pruned = true;
-      continue;
-    }
     const ageDays = cacheEntryAgeDays(dayKey, now);
     if (ageDays != null && ageDays > DAILY_TOTALS_CACHE_MAX_AGE_DAYS) {
       pruned = true;
