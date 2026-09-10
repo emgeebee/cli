@@ -152,8 +152,10 @@ type NormalizedEvent = ApiEvent & {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MONTH_MS = 30 * DAY_MS;
 const TEAM_QUERY_ALIASES: Record<string, string> = {
   avfc: "aston-villa",
+  villa: "aston-villa",
 };
 
 const BBC_BASE_URL =
@@ -745,6 +747,7 @@ function flattenEventsFromContainer(root: unknown): NormalizedEvent[] {
 
 async function fetchMatchData(url: string, dayYmd?: string): Promise<NormalizedEvent[]> {
   const refDate = dayYmd || toYmd(new Date());
+
   const data = await fetchBbcJson<ApiResponse>(url, refDate, "football");
   const batchShape = data?.payload?.[0]?.body?.matchData;
   if (batchShape) return flattenEvents(batchShape);
@@ -1013,19 +1016,26 @@ async function fixturesForDay(
 async function futureFixturesForTeam(teamQuery: string, teamInput: string, teamUrn: string): Promise<void> {
   const now = new Date();
   const seasonStart = startOfMostRecentAugust(now);
-  const start = toYmd(seasonStart);
-  const end = toYmd(new Date(now.getTime() + 59 * DAY_MS));
-  const url = urlForTeamGames(start, end, start, teamUrn);
-  const events = (await fetchMatchData(url, start)).filter((event) => {
-    const dt = new Date(event.startTime || event.startDateTime);
-    return dt.getTime() >= seasonStart.getTime();
-  });
+  const events: NormalizedEvent[] = [];
+  for (let i = 7; i < 18; i++) {
+    // get the start and end of the month
+    const startOfMonth = new Date(now.getFullYear() , i, 1, 6);
+    const endOfMonth = new Date(now.getFullYear() , i, [31, 30, 31, 30, 31, 31, 28, 31, 30, 31, 30, 31][i - 7], 22);
 
+    const start = toYmd(startOfMonth);
+    const end = toYmd(endOfMonth);
+
+    const url = urlForTeamGames(toYmd(now), end, start, teamUrn);
+     events.push(...(await fetchMatchData(url, start)).filter((event) => {
+      const dt = new Date(event.startTime || event.startDateTime);
+      return dt.getTime() >= seasonStart.getTime() && !event.tournament?.name.toLowerCase().includes("friend");
+    }));
+  }
   printFlatFixtures(events, `Future fixtures for ${teamInput || teamQuery} (at ${formatPrintedAtTimestamp()})`, {
     includeDate: true,
     showCompetitionTag: true,
     teamUrn,
-    emptyMessage: `No fixtures since ${formatYmdLondonShort(start)} or in the next 30 days.`,
+    emptyMessage: `No fixtures scheduled.`,
   });
 }
 
@@ -1051,6 +1061,7 @@ async function main(): Promise<void> {
       return;
     }
     if ("teamQuery" in parsed) {
+      console.log('debug', parsed.teamQuery, parsed.teamInput, parsed.teamUrn);
       await futureFixturesForTeam(parsed.teamQuery, parsed.teamInput, parsed.teamUrn);
       return;
     }
