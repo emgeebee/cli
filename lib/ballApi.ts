@@ -161,7 +161,7 @@ function shouldUseColor(): boolean {
 
 function isAstonVillaName(name: string): boolean {
   const n = normalizeText(name);
-  return n === "astonvilla" || n === "avfc" || n === "avl";
+  return ["astonvilla", "avfc", "avl", 'a villa', 'villa', 'aston villa', 'aston v'].includes(n.toLowerCase());
 }
 
 function highlightAstonVilla(name: string): string {
