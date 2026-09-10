@@ -19,6 +19,7 @@ import {
   formatSolarMonthLabel,
   type SolarMonthlyYieldRow,
 } from "./solarMonthlyYield";
+import { readPackageVersion } from "./version";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -474,6 +475,8 @@ export function buildSolarCliLines(
   data: SolarResponse,
   monthlyYields: SolarMonthlyYieldRow[] = [],
 ): string[] {
+
+  console.log('debug', process.stdout.columns, readPackageVersion());
   return [
     "Solar",
     `Source: ${SOLAR_API_URL}`,
