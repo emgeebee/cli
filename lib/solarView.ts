@@ -478,7 +478,7 @@ export function buildSolarCliLines(
     "Solar",
     `Source: ${SOLAR_API_URL}`,
     "",
-    ...buildSolarViewBody(data, undefined, monthlyYields).map((line) => {
+    ...buildSolarViewBody(data, process.stdout.columns, monthlyYields).map((line) => {
       if (line === "Daily Yield (Last 4 Weeks)") return "Daily yield (last 4 weeks)";
       if (line === `Monthly Yield (Last ${monthlyYields.length} Months)`) {
         return `Monthly yield (last ${monthlyYields.length} months)`;
