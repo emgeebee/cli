@@ -67,6 +67,7 @@ export type OctopusRate = {
   valid_to?: string;
   value_inc_vat?: number;
   value_exc_vat?: number;
+  payment_method?: string | null;
 };
 
 export type TariffDerivation = {
@@ -384,9 +385,15 @@ export function ukTomorrowYmd(now: Date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Rates overlapping the UK day — gas rates often span months with `valid_to: null`. */
 export function gasRatesForDay(rates: OctopusRate[], dayYmd: string): OctopusRate[] {
   return rates
-    .filter((rate) => rate.valid_from && dayKeyUK(new Date(rate.valid_from)) === dayYmd)
+    .filter((rate) => {
+      if (!rate.valid_from) return false;
+      if (dayKeyUK(new Date(rate.valid_from)) > dayYmd) return false;
+      if (!rate.valid_to) return true;
+      return dayKeyUK(new Date(new Date(rate.valid_to).getTime() - 1)) >= dayYmd;
+    })
     .sort((a, b) => new Date(a.valid_from || "").getTime() - new Date(b.valid_from || "").getTime());
 }
 
@@ -466,7 +473,8 @@ function fetchWindowForDayKeys(dayKeys: string[], now: Date): { from: Date; to: 
     if (ms < minMs) minMs = ms;
     if (ms > maxMs) maxMs = ms;
   }
-  const from = new Date(minMs);
+  // UK midnight is 23:00 UTC the previous day during BST.
+  const from = new Date(minMs - 60 * 60 * 1000);
   const to = new Date(Math.max(maxMs + DAY_MS, now.getTime() + 2 * DAY_MS));
   return { from, to };
 }
@@ -534,10 +542,13 @@ export async function loadGasRatesForDays(
 ): Promise<OctopusRate[]> {
   const cache = await ensureGasPricesCached(dayKeys, now);
   const rates: OctopusRate[] = [];
+  const seen = new Set<string>();
   for (const dayKey of dayKeys) {
-    const dayRates = cache[dayKey];
-    if (dayRates?.length) {
-      rates.push(...dayRates);
+    for (const rate of cache[dayKey] ?? []) {
+      const id = `${rate.valid_from}|${rate.valid_to}|${rate.value_inc_vat}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      rates.push(rate);
     }
   }
   return rates;
@@ -549,7 +560,9 @@ export async function fetchGasRates(from: Date, to: Date): Promise<OctopusRate[]
   const account = await fetchOctopusJson<OctopusAccountResponse>(accountUrl, token);
   const derived = deriveTariffs(account);
   const url = ratesUrlWithWindow(derived.gtariffPrices, from, to);
-  return fetchAllOctopusResults<OctopusRate>(url, token);
+  const rates = await fetchAllOctopusResults<OctopusRate>(url, token);
+  const directDebit = rates.filter((rate) => rate.payment_method === "DIRECT_DEBIT");
+  return directDebit.length > 0 ? directDebit : rates;
 }
 
 export async function loadTodayTomorrowGasRates(now: Date = new Date()): Promise<{
@@ -653,10 +666,9 @@ function ukHourNow(now: Date): number {
   );
 }
 
-/** Tomorrow's unit rates are not published until ~4pm UK — use cache before then. */
-function shouldUseElectricityCacheOnly(now: Date, cache: ElectricityPriceCache): boolean {
-  if (hasCachedElectricityDay(cache, ukTomorrowYmd(now))) return true;
-  return ukHourNow(now) < 15;
+/** Tomorrow's unit rates are not published until ~4pm UK — don't fetch them before then. */
+function isElectricityDayFetchable(dayKey: string, now: Date): boolean {
+  return dayKey !== ukTomorrowYmd(now) || ukHourNow(now) >= 15;
 }
 
 /** Half-hour slots are only cached for today and tomorrow (~36h ahead). */
@@ -721,8 +733,7 @@ async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Prom
     return cache;
   }
 
-  const cacheOnly = shouldUseElectricityCacheOnly(now, cache);
-  const toFetch = cacheOnly ? [] : missing;
+  const toFetch = missing.filter((dayKey) => isElectricityDayFetchable(dayKey, now));
   if (toFetch.length === 0) {
     return cache;
   }
