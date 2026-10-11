@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
 import { buildBdayTableLines, DATES_API_URL, fetchBdayConfig, type BdayConfig } from "./lib/bdayApi";
-import { statusLayoutInnerWidth } from "./lib/terminal";
-
 function usage(): void {
   console.log("Usage:");
   console.log("  bday");
@@ -21,7 +19,7 @@ async function loadBdayConfig(): Promise<BdayConfig> {
 function printBdayTable(config: BdayConfig): void {
   for (const line of buildBdayTableLines(config, new Date(), undefined, {
     header: false,
-    panelWidth: statusLayoutInnerWidth(),
+    panelWidth: process.stdout.columns ?? 80,
   })) {
     console.log(line);
   }
