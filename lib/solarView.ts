@@ -242,7 +242,7 @@ function yieldAveragesFromYields(yields: DailyYield[], now: Date = new Date()): 
     const values: number[] = [];
     for (let back = 0; back < days; back += 1) {
       const value = byDate.get(ukDayKeyMinusCalendarDays(latestKey, back));
-      if (value != null) values.push(value);
+      if (value != null && value > 0) values.push(value);
     }
     const average =
       values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
