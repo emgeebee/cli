@@ -16,6 +16,38 @@ const numericField = z.preprocess((value) => {
   return value;
 }, z.number());
 
+const EnergyDailySchema = z.object({
+  gridBought: numericField.optional(),
+  gridPeak: numericField.optional(),
+  gridOffpeak: numericField.optional(),
+  home: numericField.optional(),
+  gridSold: numericField.optional(),
+  batteryCharged: numericField.optional(),
+  batteryDischarged: numericField.optional(),
+  homeFromBattery: numericField.optional(),
+  homeFromGrid: numericField.optional(),
+  homeFromSolar: numericField.optional(),
+});
+
+const StatusEnergySchema = z.object({
+  today: numericField.optional(),
+  month: numericField.optional(),
+  year: numericField.optional(),
+  lifetime: numericField.optional(),
+});
+
+const StatusSchema = z.object({
+  state: z.string().optional(),
+  updated: numericField.optional(),
+  temperature: numericField.optional(),
+  temperatureUnit: z.string().optional(),
+  gridFrequency: numericField.optional(),
+  powerFactor: numericField.optional(),
+  efficiency: numericField.optional(),
+  fullHours: numericField.optional(),
+  energy: StatusEnergySchema.optional(),
+});
+
 const SolarResponseSchema = z.object({
   yield: z.record(z.string(), numericField).default({}),
   solarYieldTotal: numericField.optional(),
@@ -25,6 +57,8 @@ const SolarResponseSchema = z.object({
     })
     .optional(),
   powerAvg: z.record(z.string(), numericField).default({}),
+  energyDaily: z.record(z.string(), EnergyDailySchema).optional(),
+  status: StatusSchema.optional(),
 });
 
 export type SolarResponse = z.infer<typeof SolarResponseSchema>;
@@ -214,4 +248,9 @@ export function currentHourPowerAvgWatts(data: SolarResponse, now: Date = new Da
     }
   }
   return null;
+}
+
+/** Get today's energy data for a given day key */
+export function getTodayEnergyData(data: SolarResponse, dayKey: string) {
+  return data.energyDaily?.[dayKey];
 }

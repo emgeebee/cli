@@ -13,6 +13,7 @@ import {
   ukWallTimeToDate,
   parsePowerDateTimeKey,
   SOLAR_API_URL,
+  getTodayEnergyData,
   type SolarResponse,
 } from "./solarApi";
 import {
@@ -261,6 +262,100 @@ function buildAverageRows(yields: DailyYield[]): string[][] {
   ]);
 }
 
+function buildEnergyStatsRows(data: SolarResponse): string[][] {
+  const today = dayKeyUK();
+  const energyData = getTodayEnergyData(data, today);
+  
+  if (!energyData) return [];
+  
+  const rows: string[][] = [];
+  
+  if (energyData.home != null) {
+    rows.push(["House Usage", formatKwh(energyData.home)]);
+  }
+  
+  if (energyData.homeFromSolar != null) {
+    rows.push(["From Solar", formatKwh(energyData.homeFromSolar)]);
+  }
+  
+  if (energyData.homeFromBattery != null) {
+    rows.push(["From Battery", formatKwh(energyData.homeFromBattery)]);
+  }
+  
+  if (energyData.homeFromGrid != null) {
+    rows.push(["From Grid", formatKwh(energyData.homeFromGrid)]);
+  }
+  
+  return rows;
+}
+
+function buildBatteryStatsRows(data: SolarResponse): string[][] {
+  const today = dayKeyUK();
+  const energyData = getTodayEnergyData(data, today);
+  
+  if (!energyData) return [];
+  
+  const rows: string[][] = [];
+  
+  if (energyData.batteryCharged != null) {
+    rows.push(["Charged", formatColoredKwh(energyData.batteryCharged)]);
+  }
+  
+  if (energyData.batteryDischarged != null) {
+    rows.push(["Discharged", formatColoredKwh(energyData.batteryDischarged)]);
+  }
+  
+  if (energyData.batteryCharged != null && energyData.batteryDischarged != null) {
+    const net = energyData.batteryCharged - energyData.batteryDischarged;
+    const sign = net >= 0 ? "+" : "";
+    rows.push(["Net", `${sign}${formatKwh(net)}`]);
+  }
+  
+  return rows;
+}
+
+function buildGridStatsRows(data: SolarResponse): string[][] {
+  const today = dayKeyUK();
+  const energyData = getTodayEnergyData(data, today);
+  
+  if (!energyData) return [];
+  
+  const rows: string[][] = [];
+  
+  if (energyData.gridSold != null) {
+    rows.push(["Sold to Grid", formatColoredKwh(energyData.gridSold)]);
+  }
+  
+  if (energyData.gridBought != null) {
+    rows.push(["Bought from Grid", formatKwh(energyData.gridBought)]);
+  }
+  
+  return rows;
+}
+
+function buildSystemStatsRows(data: SolarResponse): string[][] {
+  const status = data.status;
+  
+  if (!status) return [];
+  
+  const rows: string[][] = [];
+  
+  if (status.temperature != null) {
+    const unit = status.temperatureUnit || "°C";
+    rows.push(["Temperature", `${status.temperature}${unit}`]);
+  }
+  
+  if (status.efficiency != null) {
+    rows.push(["Efficiency", `${status.efficiency}%`]);
+  }
+  
+  if (status.gridFrequency != null) {
+    rows.push(["Grid Freq", `${status.gridFrequency.toFixed(2)} Hz`]);
+  }
+  
+  return rows;
+}
+
 function buildMonthlyYieldRows(
   monthlyYields: SolarMonthlyYieldRow[],
   solarYieldTotal: number | null = null,
@@ -384,6 +479,51 @@ function buildSolarViewBody(
     ),
   );
   lines.push("");
+  
+  const energyStatsRows = buildEnergyStatsRows(data);
+  const batteryStatsRows = buildBatteryStatsRows(data);
+  const gridStatsRows = buildGridStatsRows(data);
+  const systemStatsRows = buildSystemStatsRows(data);
+  
+  if (energyStatsRows.length > 0 || batteryStatsRows.length > 0) {
+    lines.push("Today's Energy");
+    const energyTables: string[][] = [];
+    
+    if (energyStatsRows.length > 0) {
+      energyTables.push(makeAsciiTable(["House", "kWh"], energyStatsRows));
+    }
+    
+    if (batteryStatsRows.length > 0) {
+      energyTables.push(makeAsciiTable(["Battery", "kWh"], batteryStatsRows));
+    }
+    
+    if (energyTables.length === 2) {
+      lines.push(...joinAsciiTables(energyTables[0], energyTables[1]));
+    } else if (energyTables.length === 1) {
+      lines.push(...energyTables[0]);
+    }
+    lines.push("");
+  }
+  
+  if (gridStatsRows.length > 0 || systemStatsRows.length > 0) {
+    const gridSystemTables: string[][] = [];
+    
+    if (gridStatsRows.length > 0) {
+      gridSystemTables.push(makeAsciiTable(["Grid", "kWh"], gridStatsRows));
+    }
+    
+    if (systemStatsRows.length > 0) {
+      gridSystemTables.push(makeAsciiTable(["System", ""], systemStatsRows));
+    }
+    
+    if (gridSystemTables.length === 2) {
+      lines.push(...joinAsciiTables(gridSystemTables[0], gridSystemTables[1]));
+    } else if (gridSystemTables.length === 1) {
+      lines.push(...gridSystemTables[0]);
+    }
+    lines.push("");
+  }
+  
   if (monthlyYields.length > 0) {
     lines.push(`Monthly Yield (Last ${monthlyYields.length} Months)`);
     lines.push(
