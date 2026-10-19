@@ -9,48 +9,51 @@ const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_RED = "\x1b[31m";
 
 const numericField = z.preprocess((value) => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
   if (typeof value === "string") {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : value;
   }
   return value;
-}, z.number());
+}, z.number().optional());
 
 const EnergyDailySchema = z.object({
-  gridBought: numericField.optional(),
-  gridPeak: numericField.optional(),
-  gridOffpeak: numericField.optional(),
-  home: numericField.optional(),
-  gridSold: numericField.optional(),
-  batteryCharged: numericField.optional(),
-  batteryDischarged: numericField.optional(),
-  homeFromBattery: numericField.optional(),
-  homeFromGrid: numericField.optional(),
-  homeFromSolar: numericField.optional(),
+  gridBought: numericField,
+  gridPeak: numericField,
+  gridOffpeak: numericField,
+  home: numericField,
+  gridSold: numericField,
+  batteryCharged: numericField,
+  batteryDischarged: numericField,
+  homeFromBattery: numericField,
+  homeFromGrid: numericField,
+  homeFromSolar: numericField,
 });
 
 const StatusEnergySchema = z.object({
-  today: numericField.optional(),
-  month: numericField.optional(),
-  year: numericField.optional(),
-  lifetime: numericField.optional(),
+  today: numericField,
+  month: numericField,
+  year: numericField,
+  lifetime: numericField,
 });
 
 const StatusSchema = z.object({
   state: z.string().optional(),
-  updated: numericField.optional(),
-  temperature: numericField.optional(),
+  updated: numericField,
+  temperature: numericField,
   temperatureUnit: z.string().optional(),
-  gridFrequency: numericField.optional(),
-  powerFactor: numericField.optional(),
-  efficiency: numericField.optional(),
-  fullHours: numericField.optional(),
+  gridFrequency: numericField,
+  powerFactor: numericField,
+  efficiency: numericField,
+  fullHours: numericField,
   energy: StatusEnergySchema.optional(),
 });
 
 const SolarResponseSchema = z.object({
   yield: z.record(z.string(), numericField).default({}),
-  solarYieldTotal: numericField.optional(),
+  solarYieldTotal: numericField,
   powerNow: z
     .object({
       value: numericField,
