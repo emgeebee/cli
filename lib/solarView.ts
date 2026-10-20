@@ -619,8 +619,6 @@ export function buildSolarCliLines(
   data: SolarResponse,
   monthlyYields: SolarMonthlyYieldRow[] = [],
 ): string[] {
-
-  console.log('debug', process.stdout.columns, readPackageVersion());
   return [
     "Solar",
     `Source: ${SOLAR_API_URL}`,
