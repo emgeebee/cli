@@ -68,6 +68,7 @@ const SolarResponseSchema = z.object({
     })
     .optional(),
   powerAvg: z.record(z.string(), numericField).default({}),
+  socAvg: z.record(z.string(), numericField).default({}),
   energyDaily: z.record(z.string(), EnergyDailySchema).optional(),
   status: StatusSchema.optional(),
 });

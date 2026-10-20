@@ -79,6 +79,108 @@ function startOfUtcDay(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
+type HourlyData = {
+  time: number;
+  power: number | null;
+  soc: number | null;
+};
+
+function normalizeSOCAvgReadings(data: SolarResponse): Map<number, number> {
+  const socByHour = new Map<number, number>();
+  
+  for (const [key, value] of Object.entries(data.socAvg)) {
+    const parsed = parsePowerDateTimeKey(key);
+    if (parsed && Number.isFinite(value)) {
+      const hourStart = startOfUkHour(parsed.getTime());
+      socByHour.set(hourStart, value);
+    }
+  }
+  
+  return socByHour;
+}
+
+function buildHourlyDataSeries(
+  powerReadings: PowerReading[],
+  socByHour: Map<number, number>,
+): HourlyData[] {
+  const latestHour = startOfUkHour(Date.now());
+  const firstHour = latestHour - (POWER_HISTORY_HOURS - 1) * HOUR_MS;
+  
+  const powerBuckets = Array.from({ length: POWER_HISTORY_HOURS }, () => [] as number[]);
+  
+  for (const reading of powerReadings) {
+    const hour = startOfUkHour(reading.time);
+    const index = Math.floor((hour - firstHour) / HOUR_MS);
+    if (index >= 0 && index < powerBuckets.length) {
+      powerBuckets[index].push(reading.value);
+    }
+  }
+  
+  const hourlyData: HourlyData[] = [];
+  for (let i = 0; i < POWER_HISTORY_HOURS; i += 1) {
+    const time = firstHour + i * HOUR_MS;
+    const powerBucket = powerBuckets[i];
+    const power =
+      powerBucket.length > 0
+        ? powerBucket.reduce((sum, v) => sum + v, 0) / powerBucket.length
+        : null;
+    const soc = socByHour.get(time) ?? null;
+    hourlyData.push({ time, power, soc });
+  }
+  
+  return hourlyData;
+}
+
+function colorForSOCChange(change: number): string {
+  if (change > 5) return ANSI_GREEN;
+  if (change > 0) return ANSI_YELLOW;
+  if (change > -5) return ANSI_ORANGE;
+  return ANSI_RED;
+}
+
+function formatSOCWithChange(soc: number, prevSOC: number | null): string {
+  if (prevSOC == null) return `${soc}%`;
+  const change = soc - prevSOC;
+  const sign = change >= 0 ? "+" : "";
+  const changeStr = `${sign}${change}`;
+  return colorize(`${soc}% (${changeStr})`, colorForSOCChange(change));
+}
+
+function renderHourlyTable(
+  powerReadings: PowerReading[],
+  socByHour: Map<number, number>,
+  maxLineWidth?: number,
+): string[] {
+  const hourlyData = buildHourlyDataSeries(powerReadings, socByHour);
+  
+  const dataWithValues = hourlyData.filter((h) => h.power != null || h.soc != null);
+  if (dataWithValues.length === 0) {
+    return [`No hourly data available for the last ${POWER_HISTORY_HOURS} hours.`];
+  }
+  
+  const rows: string[][] = [];
+  let prevSOC: number | null = null;
+  
+  for (const hour of hourlyData) {
+    if (hour.power == null && hour.soc == null) continue;
+    
+    const timeStr = formatHourLabel(hour.time);
+    const powerStr = hour.power == null ? "-" : formatColoredWattsPrecise(hour.power);
+    const socStr =
+      hour.soc == null
+        ? "-"
+        : formatSOCWithChange(hour.soc, prevSOC);
+    
+    rows.push([timeStr, powerStr, socStr]);
+    
+    if (hour.soc != null) {
+      prevSOC = hour.soc;
+    }
+  }
+  
+  return makeAsciiTable(["Time", "Solar Avg", "Battery SOC"], rows);
+}
+
 function startOfUkHour(ms: number): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: UK_TZ,
@@ -538,8 +640,10 @@ function buildSolarViewBody(
     );
     lines.push("");
   }
-  lines.push(`Power Graph (Last ${POWER_HISTORY_HOURS} Hourly Averages)`);
-  lines.push(...renderPowerGraph(powerAvgReadings, maxLineWidth));
+  
+  const socByHour = normalizeSOCAvgReadings(data);
+  lines.push(`Hourly Data (Last ${POWER_HISTORY_HOURS} Hours)`);
+  lines.push(...renderHourlyTable(powerAvgReadings, socByHour, maxLineWidth));
   return lines;
 }
 
@@ -628,8 +732,8 @@ export function buildSolarCliLines(
       if (line === `Monthly Yield (Last ${monthlyYields.length} Months)`) {
         return `Monthly yield (last ${monthlyYields.length} months)`;
       }
-      if (line.startsWith("Power Graph")) {
-        return `Power graph (last ${POWER_HISTORY_HOURS} hourly averages)`;
+      if (line.startsWith("Hourly Data")) {
+        return `Hourly data (last ${POWER_HISTORY_HOURS} hours)`;
       }
       return line;
     }),
