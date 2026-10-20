@@ -340,6 +340,10 @@ function buildSystemStatsRows(data: SolarResponse): string[][] {
   
   const rows: string[][] = [];
   
+  if (status.batterySOC != null) {
+    rows.push(["Battery SOC", `${status.batterySOC}%`]);
+  }
+  
   if (status.temperature != null) {
     const unit = status.temperatureUnit || "°C";
     rows.push(["Temperature", `${status.temperature}${unit}`]);
