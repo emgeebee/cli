@@ -184,12 +184,17 @@ function colorForSOCChange(change: number): string {
   return ANSI_RED;
 }
 
+function formatSOCChangeArrow(change: number): string {
+  if (change < 0) return "↓";
+  if (change > 0) return "↑";
+  return "→";
+}
+
 function formatSOCWithChange(soc: number, prevSOC: number | null): string {
   if (prevSOC == null) return `${soc}%`;
   const change = soc - prevSOC;
-  const sign = change >= 0 ? "+" : "";
-  const changeStr = `${sign}${change.toFixed(1)}`;
-  return colorize(`${soc}% (${changeStr})`, colorForSOCChange(change));
+  const changeStr = `${formatSOCChangeArrow(change)}${Math.abs(change).toFixed(1)}`;
+  return colorize(`${soc}% ${changeStr}`, colorForSOCChange(change));
 }
 
 function renderHourlyTable(powerReadings: PowerReading[], socByHour: Map<number, number>): string[] {
@@ -231,7 +236,7 @@ function renderHourlyTable(powerReadings: PowerReading[], socByHour: Map<number,
   }
 
   return makeAsciiTable(
-    ["Time", "Solar", "Solar 30d", "Solar 90d", "SOC", "SOC 30d", "SOC 90d"],
+    ["Time", "☀", "☀ 30d", "☀ 90d", "🔋", "🔋 30d", "🔋 90d"],
     rows,
   );
 }
