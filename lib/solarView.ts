@@ -20,13 +20,14 @@ import {
   formatSolarMonthLabel,
   type SolarMonthlyYieldRow,
 } from "./solarMonthlyYield";
-import { readPackageVersion } from "./version";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 const DAILY_YIELD_DAYS = 28;
 const AVERAGE_WINDOWS = [7, 14, 31] as const;
-const POWER_HISTORY_HOURS = 34;
+const POWER_HISTORY_HOURS = 48;
+const HOURLY_SOLAR_LOOKBACK_30D = 30;
+const HOURLY_SOLAR_LOOKBACK_90D = 90;
 const POWER_CHART_MIN_W = 0;
 const POWER_CHART_MAX_W = 800;
 const POWER_CHART_STEP_W = 50;
@@ -87,7 +88,7 @@ type HourlyData = {
 
 function normalizeSOCAvgReadings(data: SolarResponse): Map<number, number> {
   const socByHour = new Map<number, number>();
-  
+
   for (const [key, value] of Object.entries(data.socAvg)) {
     const parsed = parsePowerDateTimeKey(key);
     if (parsed && Number.isFinite(value)) {
@@ -95,8 +96,53 @@ function normalizeSOCAvgReadings(data: SolarResponse): Map<number, number> {
       socByHour.set(hourStart, value);
     }
   }
-  
+
   return socByHour;
+}
+
+function socReadingsFromMap(socByHour: Map<number, number>): PowerReading[] {
+  return [...socByHour.entries()]
+    .map(([time, value]) => ({ time, value }))
+    .sort((a, b) => a.time - b.time);
+}
+
+type HourSlotStats = Map<number, { sum: number; count: number }>;
+
+function ukHourOfDayFromMs(ms: number): number {
+  return Number(
+    new Date(ms).toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: UK_TZ,
+    }),
+  );
+}
+
+function isDayKeyWithinLookback(dayKey: string, todayKey: string, lookbackDays: number): boolean {
+  const cutoff = ukDayKeyMinusCalendarDays(todayKey, lookbackDays - 1);
+  return dayKey >= cutoff && dayKey <= todayKey;
+}
+
+function buildHourSlotStats(readings: PowerReading[], lookbackDays: number, todayKey: string): HourSlotStats {
+  const stats: HourSlotStats = new Map();
+  for (const reading of readings) {
+    const dayKey = dayKeyUK(new Date(reading.time));
+    if (!isDayKeyWithinLookback(dayKey, todayKey, lookbackDays)) continue;
+    const hour = ukHourOfDayFromMs(reading.time);
+    const prev = stats.get(hour) ?? { sum: 0, count: 0 };
+    stats.set(hour, { sum: prev.sum + reading.value, count: prev.count + 1 });
+  }
+  return stats;
+}
+
+function averageForHourSlot(stats: HourSlotStats, hourOfDay: number): number | null {
+  const bucket = stats.get(hourOfDay);
+  if (!bucket || bucket.count === 0) return null;
+  return bucket.sum / bucket.count;
+}
+
+function formatSocAvgPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
 }
 
 function buildHourlyDataSeries(
@@ -146,39 +192,48 @@ function formatSOCWithChange(soc: number, prevSOC: number | null): string {
   return colorize(`${soc}% (${changeStr})`, colorForSOCChange(change));
 }
 
-function renderHourlyTable(
-  powerReadings: PowerReading[],
-  socByHour: Map<number, number>,
-  maxLineWidth?: number,
-): string[] {
+function renderHourlyTable(powerReadings: PowerReading[], socByHour: Map<number, number>): string[] {
   const hourlyData = buildHourlyDataSeries(powerReadings, socByHour);
-  
-  const dataWithValues = hourlyData.filter((h) => h.power != null || h.soc != null);
-  if (dataWithValues.length === 0) {
+  const todayKey = dayKeyUK();
+  const solarStats30 = buildHourSlotStats(powerReadings, HOURLY_SOLAR_LOOKBACK_30D, todayKey);
+  const solarStats90 = buildHourSlotStats(powerReadings, HOURLY_SOLAR_LOOKBACK_90D, todayKey);
+  const socReadings = socReadingsFromMap(socByHour);
+  const socStats30 = buildHourSlotStats(socReadings, HOURLY_SOLAR_LOOKBACK_30D, todayKey);
+  const socStats90 = buildHourSlotStats(socReadings, HOURLY_SOLAR_LOOKBACK_90D, todayKey);
+
+  if (hourlyData.length === 0) {
     return [`No hourly data available for the last ${POWER_HISTORY_HOURS} hours.`];
   }
-  
+
   const rows: string[][] = [];
   let prevSOC: number | null = null;
-  
+
   for (const hour of hourlyData) {
-    if (hour.power == null && hour.soc == null) continue;
-    
+    const hourOfDay = ukHourOfDayFromMs(hour.time);
+    const solar30 = averageForHourSlot(solarStats30, hourOfDay);
+    const solar90 = averageForHourSlot(solarStats90, hourOfDay);
+    const soc30 = averageForHourSlot(socStats30, hourOfDay);
+    const soc90 = averageForHourSlot(socStats90, hourOfDay);
+
     const timeStr = formatHourLabel(hour.time);
     const powerStr = hour.power == null ? "-" : formatColoredWattsPrecise(hour.power);
-    const socStr =
-      hour.soc == null
-        ? "-"
-        : formatSOCWithChange(hour.soc, prevSOC);
-    
-    rows.push([timeStr, powerStr, socStr]);
-    
+    const solar30Str = solar30 == null ? "-" : formatColoredWattsPrecise(solar30);
+    const solar90Str = solar90 == null ? "-" : formatColoredWattsPrecise(solar90);
+    const socStr = hour.soc == null ? "-" : formatSOCWithChange(hour.soc, prevSOC);
+    const soc30Str = soc30 == null ? "-" : formatSocAvgPercent(soc30);
+    const soc90Str = soc90 == null ? "-" : formatSocAvgPercent(soc90);
+
+    rows.push([timeStr, powerStr, solar30Str, solar90Str, socStr, soc30Str, soc90Str]);
+
     if (hour.soc != null) {
       prevSOC = hour.soc;
     }
   }
-  
-  return makeAsciiTable(["Time", "Solar Avg", "Battery SOC"], rows);
+
+  return makeAsciiTable(
+    ["Time", "Solar", "Solar 30d", "Solar 90d", "SOC", "SOC 30d", "SOC 90d"],
+    rows,
+  );
 }
 
 function startOfUkHour(ms: number): number {
@@ -643,7 +698,7 @@ function buildSolarViewBody(
   
   const socByHour = normalizeSOCAvgReadings(data);
   lines.push(`Hourly Data (Last ${POWER_HISTORY_HOURS} Hours)`);
-  lines.push(...renderHourlyTable(powerAvgReadings, socByHour, maxLineWidth));
+  lines.push(...renderHourlyTable(powerAvgReadings, socByHour));
   return lines;
 }
 
