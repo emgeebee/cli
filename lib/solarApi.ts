@@ -39,6 +39,13 @@ const StatusEnergySchema = z.object({
   lifetime: numericField,
 });
 
+const BatterySchema = z.object({
+  soc: numericField,
+  power: numericField,
+  chargedToday: numericField,
+  dischargedToday: numericField,
+});
+
 const StatusSchema = z.object({
   state: z.string().optional(),
   updated: numericField,
@@ -49,7 +56,7 @@ const StatusSchema = z.object({
   efficiency: numericField,
   fullHours: numericField,
   energy: StatusEnergySchema.optional(),
-  batterySOC: numericField,
+  battery: BatterySchema.optional(),
 });
 
 const SolarResponseSchema = z.object({
