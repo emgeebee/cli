@@ -142,7 +142,7 @@ function formatSOCWithChange(soc: number, prevSOC: number | null): string {
   if (prevSOC == null) return `${soc}%`;
   const change = soc - prevSOC;
   const sign = change >= 0 ? "+" : "";
-  const changeStr = `${sign}${change}`;
+  const changeStr = `${sign}${change.toFixed(1)}`;
   return colorize(`${soc}% (${changeStr})`, colorForSOCChange(change));
 }
 
