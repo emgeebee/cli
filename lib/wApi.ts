@@ -1,7 +1,6 @@
 import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
-import { readPhoneCliConfig } from "../config";
 import { isNarrowStatusTerminal } from "./terminal";
 import { formatTemperatureText } from "./temperatureColours";
 
@@ -42,16 +41,17 @@ export type WeatherResponse = {
   lastUpdated?: string;
 };
 
-type MoonApiResponse = {
-  status?: string;
+type CycleCalcsMoonResponse = {
   data?: {
-    phase?: string;
-    phaseEmoji?: string;
+    phase?: {
+      name?: string;
+      emoji?: string;
+    };
   };
 };
 
-const MOON_API_URL = "https://moon-phases-api-apiverve.p.rapidapi.com/v1/";
-const MOON_API_HOST = "moon-phases-api-apiverve.p.rapidapi.com";
+/** Free, no-key moon phase API (https://www.cyclecalcs.com/api.html). */
+const MOON_API_URL = "https://www.cyclecalcs.com/v2/moon";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -62,6 +62,15 @@ const HEAVY_RAIN_WORDING =
   /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 const LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
 
+type MoonPhaseInfo = {
+  emoji: string;
+  name: string;
+};
+
+/** Shared cache so sync daily panels can reuse phases fetched by the full weather build. */
+const moonPhaseCache = new Map<string, MoonPhaseInfo>();
+const moonPhaseInflight = new Map<string, Promise<MoonPhaseInfo | null>>();
+
 function visibleLength(value: string): number {
   return stringWidth(stripAnsi(value));
 }
@@ -71,56 +80,73 @@ function emojiTerminalDisplayWidth(value: string): number {
   return visibleLength(stripAnsi(value).replace(/\uFE0F/g, ""));
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function isYmdDate(localDate?: string): localDate is string {
+  return Boolean(localDate && /^\d{4}-\d{2}-\d{2}$/.test(localDate));
 }
 
-function resolveMoonRapidApiKey(): string {
-  const config = readPhoneCliConfig();
-  const ballConfig = asRecord(config.ball);
-  return String(ballConfig?.rapidApiKey || "").trim();
+function formatMoonLabel(info: MoonPhaseInfo | null, style: "full" | "emoji" = "full"): string {
+  if (!info) return "-";
+  if (style === "emoji") return info.emoji || info.name || "-";
+  if (info.emoji && info.name) return `${info.emoji} ${info.name}`;
+  return info.emoji || info.name || "-";
 }
 
-function toMoonDate(localDate?: string): string {
-  if (!localDate) return "";
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
-  if (!m) return "";
-  return `${m[3]}-${m[2]}-${m[1]}`;
+async function fetchMoonPhaseInfo(localDate?: string): Promise<MoonPhaseInfo | null> {
+  if (!isYmdDate(localDate)) return null;
+
+  const cached = moonPhaseCache.get(localDate);
+  if (cached) return cached;
+
+  const existing = moonPhaseInflight.get(localDate);
+  if (existing) return existing;
+
+  const request = (async (): Promise<MoonPhaseInfo | null> => {
+    try {
+      const response = await fetch(`${MOON_API_URL}?date=${encodeURIComponent(localDate)}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return null;
+
+      const payload = (await response.json()) as CycleCalcsMoonResponse;
+      const name = payload.data?.phase?.name ? String(payload.data.phase.name).trim() : "";
+      const emoji = payload.data?.phase?.emoji ? String(payload.data.phase.emoji).trim() : "";
+      if (!name && !emoji) return null;
+      const info = { emoji, name };
+      moonPhaseCache.set(localDate, info);
+      return info;
+    } catch {
+      return null;
+    } finally {
+      moonPhaseInflight.delete(localDate);
+    }
+  })();
+
+  moonPhaseInflight.set(localDate, request);
+  return request;
 }
 
-async function fetchMoonPhase(localDate?: string): Promise<string> {
-  const apiKey = resolveMoonRapidApiKey();
-  if (!apiKey) {
-    return "moon api key not set";
+async function fetchMoonPhasesByDate(
+  localDates: Array<string | undefined>,
+): Promise<Map<string, MoonPhaseInfo>> {
+  const unique = [...new Set(localDates.filter(isYmdDate))];
+  await Promise.all(unique.map((date) => fetchMoonPhaseInfo(date)));
+  const map = new Map<string, MoonPhaseInfo>();
+  for (const date of unique) {
+    const info = moonPhaseCache.get(date);
+    if (info) map.set(date, info);
   }
-  const moonDate = toMoonDate(localDate);
-  if (!moonDate) {
-    return "-";
-  }
+  return map;
+}
 
-  const response = await fetch(`${MOON_API_URL}?date=${encodeURIComponent(moonDate)}`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      "x-rapidapi-host": MOON_API_HOST,
-      "x-rapidapi-key": apiKey,
-    },
-  });
-
-  if (!response.ok) {
-    return "no api calls for moon data left";
+function moonPhasesFromCache(localDates: Array<string | undefined>): Map<string, MoonPhaseInfo> {
+  const map = new Map<string, MoonPhaseInfo>();
+  for (const date of localDates) {
+    if (!isYmdDate(date)) continue;
+    const info = moonPhaseCache.get(date);
+    if (info) map.set(date, info);
   }
-
-  const payload = (await response.json()) as MoonApiResponse;
-  const phase = payload.data?.phase ? String(payload.data.phase).trim() : "";
-  const emoji = payload.data?.phaseEmoji ? String(payload.data.phaseEmoji).trim() : "";
-  if (!phase && !emoji) {
-    return "-";
-  }
-  return `${emoji} ${phase}`.trim();
+  return map;
 }
 
 type WeatherDisplay = { icon: string; description: string };
@@ -211,7 +237,10 @@ function formatDisplayDate(localDate?: string): string {
   return `${weekday} ${day}/${month}`;
 }
 
-function formatDayCells(report: DailyReport): string[] {
+function formatDayCells(
+  report: DailyReport,
+  moonByDate: Map<string, MoonPhaseInfo> = new Map(),
+): string[] {
   const date = formatDisplayDate(report.localDate);
   const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
   const hi = formatMaxTemp(report.maxTempC);
@@ -219,7 +248,11 @@ function formatDayCells(report: DailyReport): string[] {
   const rain = formatRain(report.precipitationProbabilityInPercent);
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
-  return [date, wx.icon, wx.description, lo, hi, rain, `${windSpeed} ${windDir}`];
+  const moon = formatMoonLabel(
+    report.localDate ? moonByDate.get(report.localDate) ?? null : null,
+    "emoji",
+  );
+  return [date, wx.icon, wx.description, lo, hi, rain, `${windSpeed} ${windDir}`, moon];
 }
 
 function formatHourlyTemp(value?: number | null): string {
@@ -391,11 +424,15 @@ export async function buildFullWeatherLines(
     return lines;
   }
 
-  const forecastColWidthFns: ColWidthFns = { 1: emojiTerminalDisplayWidth };
+  const forecastColWidthFns: ColWidthFns = {
+    1: emojiTerminalDisplayWidth,
+    7: emojiTerminalDisplayWidth,
+  };
   const todayExtrasColWidthFns: ColWidthFns = { 4: emojiTerminalDisplayWidth };
 
-  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
-  const dayRows = reports.map((report) => formatDayCells(report));
+  const moonByDate = await fetchMoonPhasesByDate(reports.map((report) => report.localDate));
+  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind", "Moon"];
+  const dayRows = reports.map((report) => formatDayCells(report, moonByDate));
 
   const hourlyReports = (data.forecasts || [])
     .flatMap((f) => f.detailed?.reports || [])
@@ -455,6 +492,10 @@ export async function buildFullWeatherLines(
       ...dayRows.map((r) => visibleLength(r[6] || "")),
       ...allHourlyRows.map((r) => visibleLength(r[5] || "")),
     ),
+    moon: Math.max(
+      emojiTerminalDisplayWidth("Moon"),
+      ...dayRows.map((r) => emojiTerminalDisplayWidth(r[7] || "")),
+    ),
   };
 
   const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
@@ -478,14 +519,13 @@ export async function buildFullWeatherLines(
   appendHourlySection(todayDate, todayHourlyRows);
 
   if (todayDate) {
-    const moon = await fetchMoonPhase(todayDate);
     const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
     const extrasRows = [[
       formatPollen(todayReport),
       todayReport?.sunrise || "-",
       todayReport?.sunset || "-",
       formatDayLength(todayReport?.sunrise, todayReport?.sunset),
-      moon,
+      formatMoonLabel(moonByDate.get(todayDate) ?? null, "full"),
     ]];
     lines.push(`Today extras (${formatDisplayDate(todayDate)})`);
     lines.push(
@@ -508,6 +548,7 @@ export async function buildFullWeatherLines(
     tempWidth,
     sharedWidths.rain,
     sharedWidths.wind,
+    sharedWidths.moon,
   ];
   lines.push(...forecastTableForTerminal(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
   return lines;
@@ -519,9 +560,19 @@ function dailyForecastTableLines(data: WeatherResponse): string[] {
     .filter((r): r is DailyReport => Boolean(r));
   if (reports.length === 0) return ["No daily forecast data available."];
 
-  const forecastColWidthFns: ColWidthFns = { 1: emojiTerminalDisplayWidth };
-  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind"];
-  const dayRows = reports.map((report) => formatDayCells(report));
+  // Prefer cache filled by buildFullWeatherLines; kick off a background fetch if empty.
+  const dates = reports.map((report) => report.localDate);
+  let moonByDate = moonPhasesFromCache(dates);
+  if (moonByDate.size === 0) {
+    void fetchMoonPhasesByDate(dates);
+  }
+
+  const forecastColWidthFns: ColWidthFns = {
+    1: emojiTerminalDisplayWidth,
+    7: emojiTerminalDisplayWidth,
+  };
+  const dayHeaders = ["Date", "Ic", "Weather", "Min", "Max", "Rain", "Wind", "Moon"];
+  const dayRows = reports.map((report) => formatDayCells(report, moonByDate));
   const minTempColWidth = Math.max(
     visibleLength("Min"),
     ...dayRows.map((r) => visibleLength(r[3] || "")),
@@ -552,6 +603,10 @@ function dailyForecastTableLines(data: WeatherResponse): string[] {
       visibleLength("Wind"),
       ...dayRows.map((r) => visibleLength(r[6] || "")),
     ),
+    moon: Math.max(
+      emojiTerminalDisplayWidth("Moon"),
+      ...dayRows.map((r) => emojiTerminalDisplayWidth(r[7] || "")),
+    ),
   };
   const dayWidths = [
     sharedWidths.dateOrTime,
@@ -561,6 +616,7 @@ function dailyForecastTableLines(data: WeatherResponse): string[] {
     tempWidth,
     sharedWidths.rain,
     sharedWidths.wind,
+    sharedWidths.moon,
   ];
   return forecastTableForTerminal(dayHeaders, dayRows, dayWidths, forecastColWidthFns);
 }

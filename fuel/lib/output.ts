@@ -16,9 +16,14 @@ import { projectOutputValue } from "./projection";
 
 import type { ErrorEnvelope, OutputMode, OutputOptions, SuccessEnvelope } from "./types";
 
+/** Narrow enough to stay on one line in Telegram mobile `<pre>` blocks. */
+export const WEB_OUTPUT_WIDTH = 36;
+
 export type TextFormatterContext = {
   colorEnabled: boolean;
   terminalWidth: number;
+  /** Compact fixed-width layout for HTML/Telegram sinks. */
+  web: boolean;
   text: {
     joinAligned: typeof joinAligned;
     padVisibleEnd: typeof padVisibleEnd;
@@ -79,7 +84,8 @@ export const runCommand = async <TData>(
       !process.env["NO_COLOR"];
     const textContext: TextFormatterContext = {
       colorEnabled,
-      terminalWidth: getTerminalWidth(),
+      terminalWidth: options.web ? WEB_OUTPUT_WIDTH : getTerminalWidth(),
+      web: Boolean(options.web),
       text: {
         joinAligned,
         padVisibleEnd,

@@ -1,10 +1,36 @@
-import { wrapFreshnessScaleColour } from "./colours";
+import { stripAnsi, visibleWidth, wrapFreshnessScaleColour } from "./colours";
 import { FRESHNESS_AGING_MAX_MINUTES, FRESHNESS_FRESH_MAX_MINUTES } from "./constants";
 import { hasStationQualityFlag } from "./dataQuality";
 import { computeFreshness } from "./freshness";
 
 import type { FreshnessBand, NearCommandData, StationCommandData, StationListCommandData } from "./types";
 import type { TextFormatterContext } from "./output";
+
+/** Compact Telegram/`--web` column widths (fits ~36 char lines). */
+const WEB_STATION_NAME_WIDTH = 22;
+const WEB_PRICE_WIDTH = 6;
+const WEB_AGE_WIDTH = 5;
+
+const truncateToWidth = (value: string, maxWidth: number): string => {
+  const chars = Array.from(stripAnsi(value));
+  if (visibleWidth(chars.join("")) <= maxWidth) {
+    return chars.join("");
+  }
+  if (maxWidth <= 1) {
+    return "…";
+  }
+  return `${chars.slice(0, maxWidth - 1).join("")}…`;
+};
+
+const formatWebAge = (
+  freshnessBand: FreshnessBand,
+  freshnessMinutes: number | null,
+): string => {
+  if (freshnessBand === "unknown" || freshnessMinutes === null) {
+    return "?";
+  }
+  return formatAgeMinutes(freshnessMinutes);
+};
 
 const formatDistance = (distanceMiles: number): string => `${distanceMiles.toFixed(distanceMiles >= 10 ? 1 : 2)}mi`;
 
@@ -217,6 +243,32 @@ export const formatNearText = (data: NearCommandData, context: TextFormatterCont
   const header = style.header(
     `Fuel near ${data.resolvedLocation.displayValue} (${data.input.fuelType}, ${data.input.radiusMiles}mi)`
   );
+
+  if (context.web) {
+    const { padVisibleEnd, padVisibleStart } = context.text;
+    const rows = data.stations.map((station) => {
+      const name = padVisibleEnd(
+        truncateToWidth(station.tradingName, WEB_STATION_NAME_WIDTH),
+        WEB_STATION_NAME_WIDTH,
+      );
+      const price = padVisibleStart(
+        `${station.selectedPricePencePerLitre.toFixed(1)}p`,
+        WEB_PRICE_WIDTH,
+      );
+      const age = padVisibleStart(
+        formatWebAge(station.freshnessBand, station.freshnessMinutes),
+        WEB_AGE_WIDTH,
+      );
+      return `${name} ${price} ${age}`;
+    });
+
+    return [
+      header,
+      `${padVisibleEnd("Station", WEB_STATION_NAME_WIDTH)} ${padVisibleStart("Price", WEB_PRICE_WIDTH)} ${padVisibleStart("Age", WEB_AGE_WIDTH)}`,
+      ...rows,
+    ].join("\n");
+  }
+
   const bestNamePlain = formatStationTradingDisplay(bestStation.tradingName, bestStation.brandName);
   const bestOverallLine = `Best overall: ${bestNamePlain} (${bestStation.postcode}) - ${formatListPriceForDisplay(
     bestStation.selectedPricePencePerLitre,
@@ -333,9 +385,38 @@ export const formatStationListText = (data: StationListCommandData, context: Tex
     return "No stations found.";
   }
 
-  const priceScoreByNodeId = listPriceRankScoreByNodeId(data.stations);
-
   const header = style.header(`Fuel list ${data.input.list} (${data.input.fuelType})`);
+
+  if (context.web) {
+    const { padVisibleEnd, padVisibleStart } = context.text;
+    const rows = data.stations.map((station) => {
+      const stationNamePlain = station.display ?? station.tradingName;
+      const name = padVisibleEnd(
+        truncateToWidth(stationNamePlain, WEB_STATION_NAME_WIDTH),
+        WEB_STATION_NAME_WIDTH,
+      );
+      const price =
+        station.selectedPricePencePerLitre === null
+          ? padVisibleStart("-", WEB_PRICE_WIDTH)
+          : padVisibleStart(
+              `${station.selectedPricePencePerLitre.toFixed(1)}p`,
+              WEB_PRICE_WIDTH,
+            );
+      const age = padVisibleStart(
+        formatWebAge(station.freshnessBand, station.freshnessMinutes),
+        WEB_AGE_WIDTH,
+      );
+      return `${name} ${price} ${age}`;
+    });
+
+    return [
+      header,
+      `${padVisibleEnd("Station", WEB_STATION_NAME_WIDTH)} ${padVisibleStart("Price", WEB_PRICE_WIDTH)} ${padVisibleStart("Age", WEB_AGE_WIDTH)}`,
+      ...rows,
+    ].join("\n");
+  }
+
+  const priceScoreByNodeId = listPriceRankScoreByNodeId(data.stations);
   const rows = data.stations.map((station) => {
     const stationNamePlain =
       station.display ?? formatStationTradingDisplay(station.tradingName, station.brandName);
