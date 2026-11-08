@@ -5,6 +5,16 @@ import { handleCliRuntimeError } from "./fuel/lib/cliRuntime";
 import { createAppError } from "./fuel/lib/errors";
 import { loadStationListsConfig, STATIONS_API_URL } from "./fuel/lib/listConfig";
 
+/** Global flags that do not take a value (used when deciding the default list command). */
+const GLOBAL_FLAGS_WITHOUT_VALUE = new Set([
+  "--web",
+  "--no-color",
+  "--help",
+  "-h",
+  "--version",
+  "-V",
+]);
+
 const normalizeLegacyListOption = (argv: string[]): string[] => {
   const normalizedArgv = argv[0] === "--" ? argv.slice(1) : argv;
   const listOptionIndex = normalizedArgv.findIndex((argument) => argument === "--list");
@@ -30,11 +40,27 @@ const normalizeLegacyListOption = (argv: string[]): string[] => {
   return ["list", listName];
 };
 
+const partitionGlobalFlags = (
+  argv: string[],
+): { globals: string[]; rest: string[] } => {
+  const globals: string[] = [];
+  const rest: string[] = [];
+  for (const argument of argv) {
+    if (GLOBAL_FLAGS_WITHOUT_VALUE.has(argument)) {
+      globals.push(argument);
+    } else {
+      rest.push(argument);
+    }
+  }
+  return { globals, rest };
+};
+
 void (async () => {
   let cliArguments = normalizeLegacyListOption(process.argv.slice(2));
 
   try {
-    if (cliArguments.length === 0) {
+    const { globals, rest } = partitionGlobalFlags(cliArguments);
+    if (rest.length === 0) {
       const lists = await loadStationListsConfig();
       const listNames = Object.keys(lists);
       if (listNames.length === 0) {
@@ -43,7 +69,9 @@ void (async () => {
           `No station lists returned from ${STATIONS_API_URL}.`
         );
       }
-      cliArguments = ["list", listNames[0]!];
+      cliArguments = [...globals, "list", listNames[0]!];
+    } else {
+      cliArguments = [...globals, ...rest];
     }
 
     await buildCli().parseAsync([process.argv[0] ?? "node", process.argv[1] ?? "fuel", ...cliArguments]);

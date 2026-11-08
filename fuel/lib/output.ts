@@ -39,16 +39,25 @@ export const getOutputMode = (options: OutputOptions): OutputMode => {
     throw createAppError("INVALID_INPUT", "Choose either --json or --text, not both.");
   }
 
+  if (options.json && options.web) {
+    throw createAppError("INVALID_INPUT", "Choose either --json or --web, not both.");
+  }
+
   if (options.json) {
     return "json";
   }
 
-  if (options.text) {
+  if (options.text || options.web) {
     return "text";
   }
 
   return process.stdout.isTTY ? "text" : "json";
 };
+
+const escapeHtml = (value: string): string =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+const wrapWebPre = (value: string): string => `<pre>${escapeHtml(stripAnsi(value))}</pre>`;
 
 export const runCommand = async <TData>(
   commandName: string,
@@ -64,6 +73,7 @@ export const runCommand = async <TData>(
     outputMode = getOutputMode(options);
     const colorEnabled =
       outputMode === "text" &&
+      !options.web &&
       process.stdout.isTTY === true &&
       options.color !== false &&
       !process.env["NO_COLOR"];
@@ -97,7 +107,8 @@ export const runCommand = async <TData>(
       return;
     }
 
-    process.stdout.write(`${options.output ? formatProjectedText(outputData) : formatText(data, textContext)}\n`);
+    const body = options.output ? formatProjectedText(outputData) : formatText(data, textContext);
+    process.stdout.write(`${options.web ? wrapWebPre(body) : body}\n`);
   } catch (error) {
     const appError = toAppError(error);
     const envelope: ErrorEnvelope = {
@@ -129,22 +140,27 @@ export const withGlobalOutputOptions = <TOptions extends OutputOptions>(
   options: TOptions
 ): TOptions & OutputOptions => {
   const globalOptions = command.optsWithGlobals();
-  const color =
+  const merged: TOptions & OutputOptions = { ...options };
+
+  if (
     typeof globalOptions === "object" &&
     globalOptions !== null &&
     "color" in globalOptions &&
     typeof globalOptions["color"] === "boolean"
-      ? globalOptions["color"]
-      : undefined;
-
-  if (color === undefined) {
-    return options;
+  ) {
+    merged.color = globalOptions["color"];
   }
 
-  return {
-    ...options,
-    color
-  };
+  if (
+    typeof globalOptions === "object" &&
+    globalOptions !== null &&
+    "web" in globalOptions &&
+    globalOptions["web"] === true
+  ) {
+    merged.web = true;
+  }
+
+  return merged;
 };
 
 const formatProjectedText = (value: unknown): string => {

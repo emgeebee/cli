@@ -37,6 +37,8 @@ const packageVersion = readPackageVersion();
 const TOP_LEVEL_HELP_EXAMPLES = [
   "fuel --list commute",
   "fuel list commute",
+  "fuel --web",
+  "fuel list commute --web",
   'fuel near "SE1 9SG" --fuel E10',
   'fuel near "51.501,-0.141" --fuel B7_STANDARD --radius 8mi',
   'fuel station "tesco watford"',
@@ -57,6 +59,7 @@ export const buildCli = (dependencies?: Partial<CliDependencies>): Command => {
     .name("fuel")
     .description("UK fuel prices in your terminal. Built for AI agents, still useful for humans.")
     .option("--no-color", "Disable ANSI colours in text output")
+    .option("--web", "Plain text in <pre> tags (for HTML/Telegram)")
     .showHelpAfterError()
     .showSuggestionAfterError()
     .version(packageVersion);
@@ -67,7 +70,7 @@ export const buildCli = (dependencies?: Partial<CliDependencies>): Command => {
 
   program.addHelpText(
     "after",
-    `\nOutput defaults to text in a TTY and JSON when piped. Use --json or --text to override.\n\nExamples:\n  ${TOP_LEVEL_HELP_EXAMPLES}`
+    `\nOutput defaults to text in a TTY and JSON when piped. Use --json, --text, or --web to override.\n--web wraps the text table in <pre> for HTML sinks such as Telegram via Node-RED.\n\nExamples:\n  ${TOP_LEVEL_HELP_EXAMPLES}`
   );
 
   return program;

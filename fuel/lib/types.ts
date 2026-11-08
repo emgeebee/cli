@@ -5,6 +5,8 @@ export interface OutputOptions {
   json?: boolean;
   output?: string;
   text?: boolean;
+  /** Plain text wrapped in `<pre>` for HTML sinks (e.g. Telegram via Node-RED). */
+  web?: boolean;
 }
 
 export interface SuccessEnvelope<TData> {

@@ -4,4 +4,5 @@ export const addOutputOptions = (command: Command): Command =>
   command
     .option("--json", "Return structured JSON output")
     .option("--text", "Force human-readable text output")
+    .option("--web", "Plain text in <pre> tags (for HTML/Telegram)")
     .option("--output <path>", "Project a specific field from the command data");
