@@ -11,7 +11,8 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const SOLAR_MONTHLY_YIELD_MONTHS = 6;
+/** Align with energy monthly history so `power` can show a combined table. */
+export const SOLAR_MONTHLY_YIELD_MONTHS = 18;
 
 type DailyYield = {
   date: string;

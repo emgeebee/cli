@@ -36,10 +36,15 @@ import {
   type TemperatureResponse,
 } from "./lib/tempApi";
 import {
+  formatContractEndLabel,
+  formatStandingChargePence,
+  formatTodayTomorrowElectricityLine,
   formatTodayTomorrowGasLine,
-  formatElectricityPeriodAvgTable,
-  loadTodayTomorrowElectricityRates,
+  fetchActiveStandingChargePence,
+  loadDualSupplierTariffs,
+  loadTodayTomorrowElectricityDualRates,
   loadTodayTomorrowGasRates,
+  type ElectricityDualRates,
   type OctopusRate,
 } from "./lib/octoApi";
 import { formatTemperatureText } from "./lib/temperatureColours";
@@ -193,6 +198,8 @@ function capitalizeHouseSection(label: string): string {
 
 function capitalizeGasLine(line: string): string {
   return line
+    .replace(/^today gas unit:/i, "Today Gas Unit:")
+    .replace(/, tomorrow gas unit:/i, ", Tomorrow Gas Unit:")
     .replace(/^today gas:/i, "Today Gas:")
     .replace(/, tomorrow gas:/i, ", Tomorrow Gas:");
 }
@@ -204,14 +211,16 @@ function capitalizeBdayLine(line: string): string {
     .replace(/, turns /i, ", Turns ");
 }
 
-function capitalizeElectricityLines(lines: string[]): string[] {
-  return lines.map((line) =>
-    line
-      .replace("| day ", "| Day ")
-      .replace("| today ", "| Today ")
-      .replace("| tomo ", "| Tomo ")
-      .replace("| tomorrow ", "| Tomorrow "),
-  );
+function capitalizeElectricityLine(line: string): string {
+  return line
+    .replace(/^today elec unit:/i, "Today Elec Unit:")
+    .replace(/, tomorrow elec unit:/i, ", Tomorrow Elec Unit:")
+    .replace(/^today elec:/i, "Today Elec:")
+    .replace(/, tomorrow elec:/i, ", Tomorrow Elec:");
+}
+
+function emptyElectricityDual(): ElectricityDualRates {
+  return { peak: [], offPeak: [] };
 }
 
 function sectionDivider(name: string): string {
@@ -234,9 +243,14 @@ type GasSnapshot = {
 
 type HouseOctoSnapshot = {
   gas: GasSnapshot;
+  electricityLine: string;
+  electricityStandingLine: string;
+  gasStandingLine: string;
+  electricityContractLine: string;
+  gasContractLine: string;
   electricityRates: {
-    today: OctopusRate[];
-    tomorrow: OctopusRate[];
+    today: ElectricityDualRates;
+    tomorrow: ElectricityDualRates;
   };
 };
 
@@ -277,14 +291,12 @@ function buildStatusLines(state: StatusDisplayState): string[] {
     ),
     ...sectionBreak(capitalizeHouseSection(houseSectionLabel(now, state.wfh))),
     formatHouseTempsLine(state.downstairsTemp, state.shedTemp),
+    capitalizeElectricityLine(state.houseOcto.electricityLine),
+    state.houseOcto.electricityStandingLine,
+    state.houseOcto.electricityContractLine,
     capitalizeGasLine(state.houseOcto.gas.line),
-    ...capitalizeElectricityLines(
-      formatElectricityPeriodAvgTable(
-        state.houseOcto.electricityRates.today,
-        state.houseOcto.electricityRates.tomorrow,
-        { narrow: isNarrowStatusTerminal() },
-      ),
-    ),
+    state.houseOcto.gasStandingLine,
+    state.houseOcto.gasContractLine,
   ];
 }
 
@@ -552,26 +564,75 @@ function gasSnapshotFromRates(rates: {
 function emptyHouseOctoSnapshot(): HouseOctoSnapshot {
   return {
     gas: emptyGasSnapshot(),
-    electricityRates: { today: [], tomorrow: [] },
+    electricityLine: "today elec unit: -, tomorrow elec unit: -",
+    electricityStandingLine: "Elec standing: -",
+    gasStandingLine: "Gas standing: -",
+    electricityContractLine: "Elec contract ends: -",
+    gasContractLine: "Gas contract ends: -",
+    electricityRates: {
+      today: emptyElectricityDual(),
+      tomorrow: emptyElectricityDual(),
+    },
   };
 }
 
 async function loadHouseOctoPrices(now: Date = new Date()): Promise<HouseOctoSnapshot> {
-  try {
-    const [gasRates, electricityRates] = await Promise.all([
-      loadTodayTomorrowGasRates(now),
-      loadTodayTomorrowElectricityRates(now),
+  const empty = emptyHouseOctoSnapshot();
+  const [gasResult, electricityResult, tariffsResult] = await Promise.allSettled([
+    loadTodayTomorrowGasRates(now),
+    loadTodayTomorrowElectricityDualRates(now),
+    loadDualSupplierTariffs(),
+  ]);
+  const gas =
+    gasResult.status === "fulfilled"
+      ? gasSnapshotFromRates(gasResult.value)
+      : empty.gas;
+  const electricityRates =
+    electricityResult.status === "fulfilled"
+      ? electricityResult.value
+      : empty.electricityRates;
+
+  let electricityStandingLine = empty.electricityStandingLine;
+  let gasStandingLine = empty.gasStandingLine;
+  let electricityContractLine = empty.electricityContractLine;
+  let gasContractLine = empty.gasContractLine;
+
+  if (tariffsResult.status === "fulfilled") {
+    const derived = tariffsResult.value;
+    electricityContractLine = `Elec contract ends: ${formatContractEndLabel(derived.etariff.valid_to)}`;
+    gasContractLine = `Gas contract ends: ${formatContractEndLabel(derived.gtariff.valid_to)}`;
+    const [eStanding, gStanding] = await Promise.allSettled([
+      fetchActiveStandingChargePence(
+        derived.etariffStanding,
+        derived.electricityToken,
+        now,
+      ),
+      fetchActiveStandingChargePence(derived.gtariffStanding, derived.gasToken, now),
     ]);
-    return {
-      gas: gasSnapshotFromRates(gasRates),
-      electricityRates: {
-        today: electricityRates.today,
-        tomorrow: electricityRates.tomorrow,
-      },
-    };
-  } catch {
-    return emptyHouseOctoSnapshot();
+    if (eStanding.status === "fulfilled") {
+      electricityStandingLine = `Elec standing: ${formatStandingChargePence(eStanding.value)}`;
+    }
+    if (gStanding.status === "fulfilled") {
+      gasStandingLine = `Gas standing: ${formatStandingChargePence(gStanding.value)}`;
+    }
   }
+
+  return {
+    gas,
+    electricityLine: formatTodayTomorrowElectricityLine(
+      electricityRates.today,
+      electricityRates.tomorrow,
+      { narrow: isNarrowStatusTerminal() },
+    ),
+    electricityStandingLine,
+    gasStandingLine,
+    electricityContractLine,
+    gasContractLine,
+    electricityRates: {
+      today: electricityRates.today,
+      tomorrow: electricityRates.tomorrow,
+    },
+  };
 }
 
 async function loadSportsLines(ymd: string): Promise<{ cricLines: string[]; footyLines: string[] }> {
@@ -1117,6 +1178,10 @@ async function runLive(): Promise<void> {
             gasLine: houseOcto.gas.line,
             todayElectricity: houseOcto.electricityRates.today,
             tomorrowElectricity: houseOcto.electricityRates.tomorrow,
+            electricityStandingLine: houseOcto.electricityStandingLine,
+            gasStandingLine: houseOcto.gasStandingLine,
+            electricityContractLine: houseOcto.electricityContractLine,
+            gasContractLine: houseOcto.gasContractLine,
             solarData,
             solarRotateSummary,
             weatherData,

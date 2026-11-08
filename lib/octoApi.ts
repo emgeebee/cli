@@ -3,19 +3,29 @@ import {
   readServiceCache,
   updateServiceCache,
 } from "./cache";
-import { getConfigPath, readPhoneCliConfig } from "../config";
+import {
+  getConfigPath,
+  readPhoneCliConfig,
+  writePhoneCliConfig,
+} from "../config";
 
 /** Cached gas prices — YYYY-MM-DD to unit rate slot(s) for that UK day. */
 export type GasPriceCache = Record<string, OctopusRate[]>;
 
-/** Cached electricity prices — YYYY-MM-DD to half-hourly rate slots. */
+/** Peak (day) / off-peak (night) unit rates for an Economy 7 style tariff. */
+export type ElectricityDualRates = {
+  peak: OctopusRate[];
+  offPeak: OctopusRate[];
+};
+
+export type ElectricityPriceCache = Record<string, ElectricityDualRates>;
+
+/** @deprecated Prefer ElectricityDualRates; kept for one-time cache migration. */
 export type CachedElectricityRate = {
   valid_from: string;
   valid_to: string;
   value_inc_vat: number;
 };
-
-export type ElectricityPriceCache = Record<string, CachedElectricityRate[]>;
 
 /** Cached billed daily totals for a UK calendar day (inc VAT pence + kWh). */
 export type DailyDayTotals = {
@@ -26,16 +36,6 @@ export type DailyDayTotals = {
 };
 
 export type DailyTotalsCache = Record<string, DailyDayTotals>;
-
-export const ELECTRICITY_PERIOD_LABELS = ["< 6", "6-9", "9-4", "4-7", "> 7"] as const;
-
-const ELECTRICITY_PERIODS: Array<{ label: (typeof ELECTRICITY_PERIOD_LABELS)[number]; minHour: number; maxHour: number }> = [
-  { label: "< 6", minHour: 0, maxHour: 6 },
-  { label: "6-9", minHour: 6, maxHour: 9 },
-  { label: "9-4", minHour: 9, maxHour: 16 },
-  { label: "4-7", minHour: 16, maxHour: 19 },
-  { label: "> 7", minHour: 19, maxHour: 24 },
-];
 
 export type OctopusAgreement = {
   tariff_code?: string;
@@ -70,29 +70,59 @@ export type OctopusRate = {
   payment_method?: string | null;
 };
 
-export type TariffDerivation = {
+/** How peak/off-peak unit rates are applied to consumption intervals. */
+export type ElectricityRateMode =
+  /** Eco7-style: separate day/night collections; pick by UK hour. */
+  | "eco7"
+  /** Timed windows in standard-unit-rates (e.g. EDF GoElectric); match by valid_from/to. */
+  | "windowed";
+
+export type ElectricityTariffDerivation = {
   electricityMeters: Array<{ mpan: string; serial: string }>;
-  gasMeters: Array<{ mprn: string; serial: string }>;
   etariff: OctopusAgreement;
-  gtariff: OctopusAgreement;
-  etariffPrices: string;
-  gtariffPrices: string;
+  /** Primary unit-rate collection URL (day rates or standard-unit-rates). */
+  etariffDayPrices: string;
+  /** Night/off-peak unit-rate collection URL (Eco7 only). */
+  etariffNightPrices: string | null;
   etariffStanding: string;
-  gtariffStanding: string;
+  isEco7: boolean;
+  rateMode: ElectricityRateMode;
+  offPeakStartHour: number;
+  offPeakEndHour: number;
+  electricityBaseUrl: string;
+  electricityToken: string;
 };
 
+export type GasTariffDerivation = {
+  gasMeters: Array<{ mprn: string; serial: string }>;
+  gtariff: OctopusAgreement;
+  gtariffPrices: string;
+  gtariffStanding: string;
+  gasBaseUrl: string;
+  gasToken: string;
+};
+
+/** Combined derivation used by the energy dashboard (elec from EDF, gas from Octopus). */
+export type TariffDerivation = ElectricityTariffDerivation & GasTariffDerivation;
+
 export const OCTOPUS_BASE_URL = "https://api.octopus.energy/v1";
+export const EDF_BASE_URL = "https://api.edfgb-kraken.energy/v1";
 export const DAY_MS = 24 * 60 * 60 * 1000;
 /** Keep the last 14 UK calendar days (today + 13 prior); drop older day keys. */
 export const DAILY_PRICE_CACHE_MAX_AGE_DAYS = 13;
 export const DAILY_PRICE_CACHE_HISTORY_DAYS = 14;
-/** Finished daily cost/kWh rows for the octo billing lookback window. */
-export const DAILY_TOTALS_BILLING_LOOKBACK_DAYS = 35;
-export const DAILY_TOTALS_CACHE_MAX_AGE_DAYS = 34;
+/** Finished daily cost/kWh rows for the energy billing lookback window. */
+export const DAILY_TOTALS_BILLING_LOOKBACK_DAYS = 40;
+export const DAILY_TOTALS_CACHE_MAX_AGE_DAYS = 39;
 /** Billed daily totals are not treated as final until this many UK days after the day. */
 export const DAILY_TOTALS_SETTLE_DAYS = 3;
-/** Past-N-day table in `octo` always refetches this window from the API. */
-export const DAILY_TOTALS_DISPLAY_DAYS = 14;
+/** Past-N-day energy columns in `power` (matches solar 4-week table). */
+export const DAILY_TOTALS_DISPLAY_DAYS = 28;
+/** Monthly energy history shown alongside solar monthly yield. */
+export const ENERGY_MONTHLY_HISTORY_MONTHS = 24;
+/** Default Economy 7 off-peak window in UK local hours: [start, end). */
+export const DEFAULT_ECO7_OFF_PEAK_START_HOUR = 0;
+export const DEFAULT_ECO7_OFF_PEAK_END_HOUR = 7;
 const UK_TZ = "Europe/London";
 const ANSI_RESET = "\x1b[0m";
 const ANSI_GREEN = "\x1b[32m";
@@ -103,20 +133,29 @@ const ANSI_REGEX = /\x1b\[[0-9;]*m/g;
 
 export type FuelType = "electricity" | "gas";
 
+function parsePositiveNumber(value: string | undefined, label: string): number | null {
+  if (!value) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`${label} must be a positive number.`);
+  }
+  return n;
+}
+
+function parseHour(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0 || n > 24) {
+    throw new Error(`Off-peak hour must be between 0 and 24 (got ${value}).`);
+  }
+  return n;
+}
+
 export function resolveOctoCredentials(): {
   token: string;
   accountNumber: string;
   gasKwhPerUnit: number;
 } {
-  const parseGasFactor = (value: string | undefined): number | null => {
-    if (!value) return null;
-    const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) {
-      throw new Error("OCTOPUS_GAS_KWH_PER_UNIT must be a positive number.");
-    }
-    return n;
-  };
-
   const config = readPhoneCliConfig();
   const octo = config.octo || {};
   const token = String(octo.basicAuthToken || octo.token || "").trim();
@@ -124,9 +163,9 @@ export function resolveOctoCredentials(): {
   const envGasFactor = String(
     octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "",
   ).trim();
-  const configuredGasFactor = parseGasFactor(
-    String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() ||
-      undefined,
+  const configuredGasFactor = parsePositiveNumber(
+    String(octo.gasKwhPerUnit || octo.gas_kwh_per_unit || "").trim() || undefined,
+    "OCTOPUS_GAS_KWH_PER_UNIT",
   );
   if (!token || !accountNumber) {
     throw new Error(
@@ -140,8 +179,225 @@ export function resolveOctoCredentials(): {
   return {
     token,
     accountNumber,
-    gasKwhPerUnit: parseGasFactor(envGasFactor) ?? configuredGasFactor ?? 11.2,
+    gasKwhPerUnit:
+      parsePositiveNumber(envGasFactor, "OCTOPUS_GAS_KWH_PER_UNIT") ??
+      configuredGasFactor ??
+      11.2,
   };
+}
+
+export type EdfCredentialConfig = {
+  accountNumber: string;
+  /** Short-lived access token, if already known. */
+  token: string | null;
+  refreshToken: string | null;
+  email: string | null;
+  password: string | null;
+  offPeakStartHour: number;
+  offPeakEndHour: number;
+};
+
+type CachedEdfAccessToken = {
+  token: string;
+  expiresAtMs: number;
+};
+
+let edfAccessTokenCache: CachedEdfAccessToken | null = null;
+let edfAccessTokenInFlight: Promise<string> | null = null;
+
+export function resolveEdfCredentialConfig(): EdfCredentialConfig {
+  const config = readPhoneCliConfig();
+  const edf = config.edf || {};
+  const octo = config.octo || {};
+  const token = String(
+    edf.token || edf.basicAuthToken || octo.edfToken || octo.edfBasicAuthToken || "",
+  ).trim();
+  const refreshToken = String(edf.refreshToken || octo.edfRefreshToken || "").trim();
+  const email = String(edf.email || "").trim();
+  const password = String(edf.password || "").trim();
+  const accountNumber = String(
+    edf.accountNumber || octo.edfAccountNumber || "",
+  ).trim();
+  if (!accountNumber) {
+    throw new Error(
+      [
+        "Missing EDF account number.",
+        `Configure ${getConfigPath()} with:`,
+        `{ "edf": { "accountNumber": "A-...", "refreshToken": "..." } }`,
+      ].join(" "),
+    );
+  }
+  if (!token && !refreshToken && !(email && password)) {
+    throw new Error(
+      [
+        "Missing EDF credentials.",
+        `Configure ${getConfigPath()} with one of:`,
+        `{ "edf": { "accountNumber": "A-...", "refreshToken": "..." } }`,
+        `or { "edf": { "accountNumber": "A-...", "email": "...", "password": "..." } }`,
+      ].join(" "),
+    );
+  }
+  return {
+    accountNumber,
+    token: token || null,
+    refreshToken: refreshToken || null,
+    email: email || null,
+    password: password || null,
+    offPeakStartHour: parseHour(
+      String(edf.offPeakStartHour ?? octo.edfOffPeakStartHour ?? "").trim() || undefined,
+      DEFAULT_ECO7_OFF_PEAK_START_HOUR,
+    ),
+    offPeakEndHour: parseHour(
+      String(edf.offPeakEndHour ?? octo.edfOffPeakEndHour ?? "").trim() || undefined,
+      DEFAULT_ECO7_OFF_PEAK_END_HOUR,
+    ),
+  };
+}
+
+/** @deprecated Prefer resolveEdfCredentialConfig + resolveEdfAccessToken. */
+export function resolveEdfCredentials(): {
+  token: string;
+  accountNumber: string;
+  offPeakStartHour: number;
+  offPeakEndHour: number;
+} {
+  const cfg = resolveEdfCredentialConfig();
+  if (!cfg.token) {
+    throw new Error(
+      "EDF access token is not available synchronously; use resolveEdfAccessToken().",
+    );
+  }
+  return {
+    token: cfg.token,
+    accountNumber: cfg.accountNumber,
+    offPeakStartHour: cfg.offPeakStartHour,
+    offPeakEndHour: cfg.offPeakEndHour,
+  };
+}
+
+function jwtExpiryMs(token: string): number | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
+    ) as { exp?: unknown };
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return null;
+    return payload.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
+function persistEdfRefreshToken(refreshToken: string): void {
+  const config = readPhoneCliConfig();
+  const edf = { ...(config.edf || {}) };
+  if (String(edf.refreshToken || "") === refreshToken) return;
+  edf.refreshToken = refreshToken;
+  writePhoneCliConfig({ ...config, edf });
+}
+
+type ObtainKrakenTokenResult = {
+  token?: string | null;
+  refreshToken?: string | null;
+  refreshExpiresIn?: number | null;
+};
+
+async function obtainKrakenToken(input: Record<string, string>): Promise<ObtainKrakenTokenResult> {
+  const response = await fetch(`${EDF_BASE_URL}/graphql/`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query: `
+        mutation obtainKrakenToken($input: ObtainJSONWebTokenInput!) {
+          obtainKrakenToken(input: $input) {
+            token
+            refreshToken
+            refreshExpiresIn
+          }
+        }
+      `,
+      variables: { input },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`EDF token request failed (${response.status}).`);
+  }
+  const body = (await response.json()) as {
+    data?: { obtainKrakenToken?: ObtainKrakenTokenResult | null };
+    errors?: Array<{ message?: string }>;
+  };
+  if (body.errors?.length) {
+    throw new Error(
+      `EDF token request failed: ${body.errors.map((e) => e.message || "unknown").join("; ")}`,
+    );
+  }
+  const result = body.data?.obtainKrakenToken;
+  if (!result?.token) {
+    throw new Error("EDF token request returned no access token.");
+  }
+  return result;
+}
+
+/**
+ * Resolve a usable EDF access token, refreshing via refreshToken (or email/password) as needed.
+ */
+export async function resolveEdfAccessToken(now: Date = new Date()): Promise<string> {
+  const skewMs = 60_000;
+  if (
+    edfAccessTokenCache &&
+    edfAccessTokenCache.expiresAtMs - skewMs > now.getTime()
+  ) {
+    return edfAccessTokenCache.token;
+  }
+  if (edfAccessTokenInFlight) return edfAccessTokenInFlight;
+
+  edfAccessTokenInFlight = (async () => {
+    const cfg = resolveEdfCredentialConfig();
+    if (cfg.token) {
+      const expiresAtMs = jwtExpiryMs(cfg.token) ?? now.getTime() + 55 * 60_000;
+      if (expiresAtMs - skewMs > now.getTime()) {
+        edfAccessTokenCache = { token: cfg.token, expiresAtMs };
+        return cfg.token;
+      }
+    }
+
+    let obtained: ObtainKrakenTokenResult;
+    if (cfg.refreshToken) {
+      obtained = await obtainKrakenToken({ refreshToken: cfg.refreshToken });
+    } else if (cfg.email && cfg.password) {
+      obtained = await obtainKrakenToken({ email: cfg.email, password: cfg.password });
+    } else if (cfg.token) {
+      // Configured static token is expired and no refresh path exists.
+      throw new Error(
+        "EDF access token expired. Add edf.refreshToken (or email/password) to renew it.",
+      );
+    } else {
+      throw new Error("Missing EDF credentials for token refresh.");
+    }
+
+    const token = String(obtained.token || "").trim();
+    if (!token) {
+      throw new Error("EDF token refresh returned an empty access token.");
+    }
+    const expiresAtMs = jwtExpiryMs(token) ?? now.getTime() + 55 * 60_000;
+    edfAccessTokenCache = { token, expiresAtMs };
+
+    const nextRefresh = String(obtained.refreshToken || "").trim();
+    if (nextRefresh) {
+      persistEdfRefreshToken(nextRefresh);
+    }
+    return token;
+  })();
+
+  try {
+    return await edfAccessTokenInFlight;
+  } finally {
+    edfAccessTokenInFlight = null;
+  }
 }
 
 function latestAgreement(
@@ -168,94 +424,219 @@ function productFromTariffCode(tariffCode: string): string {
   return parts.join("-");
 }
 
-export function deriveTariffs(account: OctopusAccountResponse): TariffDerivation {
+function isEco7TariffCode(tariffCode: string): boolean {
+  return /^E-2R-/i.test(tariffCode) || /ECO.?7|ECONOMY.?7/i.test(tariffCode);
+}
+
+function meterRefs(
+  points: OctopusMeterPoint[] | undefined,
+  key: "mpan" | "mprn",
+): Array<{ mpxn: string; serial: string }> {
+  const refs: Array<{ mpxn: string; serial: string }> = [];
+  for (const point of points || []) {
+    const mpxn = String(point[key] || "").trim();
+    if (!mpxn) continue;
+    for (const meter of point.meters || []) {
+      const serial = String(meter.serial_number || "").trim();
+      if (!serial) continue;
+      refs.push({ mpxn, serial });
+    }
+  }
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const id = `${ref.mpxn}::${ref.serial}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+export function deriveElectricityTariffs(
+  account: OctopusAccountResponse,
+  options: {
+    baseUrl: string;
+    token: string;
+    offPeakStartHour?: number;
+    offPeakEndHour?: number;
+  },
+): ElectricityTariffDerivation {
   const property = account.properties?.[0];
   if (!property) {
-    throw new Error("No property found on account.");
+    throw new Error("No property found on electricity account.");
   }
-
   const ePoints = property.electricity_meter_points || [];
-  const gPoints = property.gas_meter_points || [];
   const emPoint = ePoints[0];
-  const gmPoint = gPoints[0];
-  if (!emPoint || !gmPoint) {
-    throw new Error("Electricity and gas meter points are required.");
+  if (!emPoint) {
+    throw new Error("Electricity meter point is required on EDF account.");
   }
-  const meterRefs = (
-    points: OctopusMeterPoint[] | undefined,
-    key: "mpan" | "mprn",
-  ): Array<{ mpxn: string; serial: string }> => {
-    const refs: Array<{ mpxn: string; serial: string }> = [];
-    for (const point of points || []) {
-      const mpxn = String(point[key] || "").trim();
-      if (!mpxn) continue;
-      for (const meter of point.meters || []) {
-        const serial = String(meter.serial_number || "").trim();
-        if (!serial) continue;
-        refs.push({ mpxn, serial });
-      }
-    }
-    const seen = new Set<string>();
-    return refs.filter((ref) => {
-      const id = `${ref.mpxn}::${ref.serial}`;
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  };
-
   const electricityMeters = meterRefs(ePoints, "mpan").map((m) => ({
     mpan: m.mpxn,
     serial: m.serial,
   }));
+  if (electricityMeters.length === 0) {
+    throw new Error("Missing electricity meter serials on EDF account.");
+  }
+  const etariff = latestAgreement(emPoint.agreements);
+  if (!etariff.tariff_code) {
+    throw new Error("Missing electricity tariff_code on agreement.");
+  }
+  const eProduct = productFromTariffCode(etariff.tariff_code);
+  const isEco7 = isEco7TariffCode(etariff.tariff_code);
+  const rateMode: ElectricityRateMode = isEco7 ? "eco7" : "windowed";
+  const base = options.baseUrl.replace(/\/$/, "");
+  const dayPrices = isEco7
+    ? `${base}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/day-unit-rates/`
+    : `${base}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standard-unit-rates/`;
+  const nightPrices = isEco7
+    ? `${base}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/night-unit-rates/`
+    : null;
+  return {
+    electricityMeters,
+    etariff,
+    etariffDayPrices: dayPrices,
+    etariffNightPrices: nightPrices,
+    etariffStanding: `${base}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standing-charges/`,
+    isEco7,
+    rateMode,
+    offPeakStartHour: options.offPeakStartHour ?? DEFAULT_ECO7_OFF_PEAK_START_HOUR,
+    offPeakEndHour: options.offPeakEndHour ?? DEFAULT_ECO7_OFF_PEAK_END_HOUR,
+    electricityBaseUrl: base,
+    electricityToken: options.token,
+  };
+}
+
+/**
+ * Split timed unit-rate windows into peak (highest pence) and off-peak (lowest pence)
+ * for gas-style daily summaries. Mid-tiers are omitted from the labels but remain in
+ * neither list — callers that need full billing should keep the unsplit list.
+ */
+export function splitPeakOffPeakFromRates(rates: OctopusRate[]): ElectricityDualRates {
+  const priced = rates.filter(
+    (rate) => rate.value_inc_vat != null && Number.isFinite(rate.value_inc_vat),
+  );
+  if (priced.length === 0) return { peak: [], offPeak: [] };
+  const values = [...new Set(priced.map((rate) => rate.value_inc_vat as number))].sort(
+    (a, b) => a - b,
+  );
+  if (values.length === 1) {
+    return { peak: priced, offPeak: [] };
+  }
+  const min = values[0];
+  const max = values[values.length - 1];
+  return {
+    peak: priced.filter((rate) => rate.value_inc_vat === max),
+    offPeak: priced.filter((rate) => rate.value_inc_vat === min),
+  };
+}
+
+export function deriveGasTariffs(
+  account: OctopusAccountResponse,
+  options: { baseUrl: string; token: string },
+): GasTariffDerivation {
+  const property = account.properties?.[0];
+  if (!property) {
+    throw new Error("No property found on gas account.");
+  }
+  const gPoints = property.gas_meter_points || [];
+  const gmPoint = gPoints[0];
+  if (!gmPoint) {
+    throw new Error("Gas meter point is required on Octopus account.");
+  }
   const gasMeters = meterRefs(gPoints, "mprn").map((m) => ({
     mprn: m.mpxn,
     serial: m.serial,
   }));
-  if (electricityMeters.length === 0 || gasMeters.length === 0) {
-    throw new Error("Missing electricity or gas meter serials on account.");
+  if (gasMeters.length === 0) {
+    throw new Error("Missing gas meter serials on Octopus account.");
   }
-
-  const etariff = latestAgreement(emPoint.agreements);
   const gtariff = latestAgreement(gmPoint.agreements);
-  if (!etariff.tariff_code || !gtariff.tariff_code) {
-    throw new Error("Missing tariff_code on one or more agreements.");
+  if (!gtariff.tariff_code) {
+    throw new Error("Missing gas tariff_code on agreement.");
   }
-
-  const eProduct = productFromTariffCode(etariff.tariff_code);
   const gProduct = productFromTariffCode(gtariff.tariff_code);
-
+  const base = options.baseUrl.replace(/\/$/, "");
   return {
-    electricityMeters,
     gasMeters,
-    etariff,
     gtariff,
-    etariffPrices: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standard-unit-rates/`,
-    gtariffPrices: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standard-unit-rates/`,
-    etariffStanding: `${OCTOPUS_BASE_URL}/products/${eProduct}/electricity-tariffs/${etariff.tariff_code}/standing-charges/`,
-    gtariffStanding: `${OCTOPUS_BASE_URL}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standing-charges/`,
+    gtariffPrices: `${base}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standard-unit-rates/`,
+    gtariffStanding: `${base}/products/${gProduct}/gas-tariffs/${gtariff.tariff_code}/standing-charges/`,
+    gasBaseUrl: base,
+    gasToken: options.token,
   };
 }
 
-export async function fetchOctopusJson<T>(url: string, token: string): Promise<T> {
-  const raw = token.trim();
+/** @deprecated Prefer deriveElectricityTariffs + deriveGasTariffs for dual-supplier setups. */
+export function deriveTariffs(
+  account: OctopusAccountResponse,
+  options?: { baseUrl?: string; token?: string },
+): TariffDerivation {
+  const baseUrl = options?.baseUrl ?? OCTOPUS_BASE_URL;
+  const token = options?.token ?? "";
+  return {
+    ...deriveElectricityTariffs(account, { baseUrl, token }),
+    ...deriveGasTariffs(account, { baseUrl, token }),
+  };
+}
 
+export async function loadDualSupplierTariffs(): Promise<TariffDerivation> {
+  const octo = resolveOctoCredentials();
+  const edf = resolveEdfCredentialConfig();
+  const edfToken = await resolveEdfAccessToken();
+  const [edfAccount, octoAccount] = await Promise.all([
+    fetchKrakenJson<OctopusAccountResponse>(
+      `${EDF_BASE_URL}/accounts/${edf.accountNumber}/`,
+      edfToken,
+    ),
+    fetchKrakenJson<OctopusAccountResponse>(
+      `${OCTOPUS_BASE_URL}/accounts/${octo.accountNumber}/`,
+      octo.token,
+    ),
+  ]);
+  return {
+    ...deriveElectricityTariffs(edfAccount, {
+      baseUrl: EDF_BASE_URL,
+      token: edfToken,
+      offPeakStartHour: edf.offPeakStartHour,
+      offPeakEndHour: edf.offPeakEndHour,
+    }),
+    ...deriveGasTariffs(octoAccount, {
+      baseUrl: OCTOPUS_BASE_URL,
+      token: octo.token,
+    }),
+  };
+}
+
+function authorizationHeaders(token: string): Record<string, string> {
+  const raw = token.trim();
+  if (/^Basic\s+/i.test(raw) || /^Bearer\s+/i.test(raw) || /^JWT\s+/i.test(raw) || /^Token\s+/i.test(raw)) {
+    return { Authorization: raw };
+  }
+  // Kraken JWTs / opaque session tokens are passed through as Authorization.
+  if (raw.startsWith("eyJ")) {
+    return { Authorization: raw };
+  }
+  // Match existing Octopus behaviour: Basic auth of the raw API key string.
+  return {
+    Authorization: `Basic ${Buffer.from(`${raw}`).toString("base64")}`,
+  };
+}
+
+export async function fetchKrakenJson<T>(url: string, token: string): Promise<T> {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json",
-      Authorization: `Basic ${Buffer.from(`${raw}`).toString("base64")}`,
+      ...authorizationHeaders(token),
     },
   });
   if (response.ok) {
     return (await response.json()) as T;
   }
-  if (response.status !== 401) {
-    throw new Error(
-      `Octopus API request failed (${response.status}) for ${url}`,
-    );
-  }
+  throw new Error(`Energy API request failed (${response.status}) for ${url}`);
+}
 
-  throw new Error(`Octopus API request failed (${response.status}) for ${url}`);
+/** @deprecated Use fetchKrakenJson. */
+export async function fetchOctopusJson<T>(url: string, token: string): Promise<T> {
+  return fetchKrakenJson<T>(url, token);
 }
 
 type PagedResults<T> = {
@@ -274,9 +655,9 @@ export async function fetchAllOctopusResults<T>(
   while (nextUrl) {
     pageGuard += 1;
     if (pageGuard > 500) {
-      throw new Error("Too many Octopus API pages while fetching results.");
+      throw new Error("Too many energy API pages while fetching results.");
     }
-    const page = await fetchOctopusJson<PagedResults<T>>(nextUrl, token);
+    const page = await fetchKrakenJson<PagedResults<T>>(nextUrl, token);
     all.push(...(page.results || []));
     nextUrl = page.next || null;
   }
@@ -557,8 +938,8 @@ export async function loadGasRatesForDays(
 export async function fetchGasRates(from: Date, to: Date): Promise<OctopusRate[]> {
   const { token, accountNumber } = resolveOctoCredentials();
   const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
-  const account = await fetchOctopusJson<OctopusAccountResponse>(accountUrl, token);
-  const derived = deriveTariffs(account);
+  const account = await fetchKrakenJson<OctopusAccountResponse>(accountUrl, token);
+  const derived = deriveGasTariffs(account, { baseUrl: OCTOPUS_BASE_URL, token });
   const url = ratesUrlWithWindow(derived.gtariffPrices, from, to);
   const rates = await fetchAllOctopusResults<OctopusRate>(url, token);
   const directDebit = rates.filter((rate) => rate.payment_method === "DIRECT_DEBIT");
@@ -591,35 +972,89 @@ function formatGasPrices(rates: OctopusRate[]): string {
 }
 
 export function formatDayGasLine(label: string, rates: OctopusRate[]): string {
-  return `${label} gas: ${formatGasPrices(rates)}`;
+  return `${label} gas unit: ${formatGasPrices(rates)}`;
 }
 
 export function formatTodayTomorrowGasLine(
   today: OctopusRate[],
   tomorrow: OctopusRate[],
 ): string {
-  return `today gas: ${formatGasPrices(today)}, tomorrow gas: ${formatGasPrices(tomorrow)}`;
+  return `today gas unit: ${formatGasPrices(today)}, tomorrow gas unit: ${formatGasPrices(tomorrow)}`;
 }
 
-function normalizeCachedElectricityDay(value: unknown): CachedElectricityRate[] | null {
-  if (!Array.isArray(value)) return null;
-  const rates: CachedElectricityRate[] = [];
+export function formatStandingChargePence(pence: number | null | undefined): string {
+  if (pence == null || !Number.isFinite(pence)) return "-";
+  return `${pence.toFixed(2)}p/day`;
+}
+
+export function formatContractEndLabel(validTo: string | null | undefined): string {
+  if (!validTo) return "rolling (no fixed end)";
+  const date = new Date(validTo);
+  if (Number.isNaN(date.getTime())) return "rolling (no fixed end)";
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: UK_TZ,
+  });
+}
+
+export async function fetchActiveStandingChargePence(
+  standingUrl: string,
+  token: string,
+  now: Date = new Date(),
+): Promise<number | null> {
+  const from = new Date(now.getTime() - DAY_MS);
+  const to = new Date(now.getTime() + 2 * DAY_MS);
+  const url = ratesUrlWithWindow(standingUrl, from, to);
+  const rates = await fetchAllOctopusResults<OctopusRate>(url, token);
+  const directDebit = rates.filter((rate) => rate.payment_method === "DIRECT_DEBIT");
+  const preferred = directDebit.length > 0 ? directDebit : rates;
+  const active = preferred.find((rate) => {
+    if (rate.value_inc_vat == null) return false;
+    const start = rate.valid_from ? new Date(rate.valid_from).getTime() : Number.NaN;
+    const end = rate.valid_to ? new Date(rate.valid_to).getTime() : Number.POSITIVE_INFINITY;
+    if (Number.isNaN(start)) return false;
+    const ts = now.getTime();
+    return ts >= start && ts < end;
+  });
+  if (active?.value_inc_vat != null) return active.value_inc_vat;
+  const latest = [...preferred]
+    .filter((rate) => rate.value_inc_vat != null)
+    .sort(
+      (a, b) =>
+        new Date(b.valid_from || "").getTime() - new Date(a.valid_from || "").getTime(),
+    )[0];
+  return latest?.value_inc_vat ?? null;
+}
+
+function normalizeCachedRateList(value: unknown): OctopusRate[] {
+  if (!Array.isArray(value)) return [];
+  const rates: OctopusRate[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object") continue;
     const record = entry as Record<string, unknown>;
-    const validFrom = String(record.valid_from || "").trim();
-    const validTo = String(record.valid_to || "").trim();
     const price = record.value_inc_vat;
-    if (!validFrom || !validTo || typeof price !== "number" || !Number.isFinite(price)) {
-      continue;
-    }
+    if (typeof price !== "number" || !Number.isFinite(price)) continue;
     rates.push({
-      valid_from: validFrom,
-      valid_to: validTo,
+      valid_from: record.valid_from ? String(record.valid_from) : undefined,
+      valid_to: record.valid_to ? String(record.valid_to) : undefined,
       value_inc_vat: price,
     });
   }
-  return rates.length > 0 ? rates : null;
+  return rates;
+}
+
+function normalizeCachedElectricityDay(value: unknown): ElectricityDualRates | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    // Legacy half-hourly arrays are dropped — Eco7 uses peak/off-peak summaries.
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const peak = normalizeCachedRateList(record.peak);
+  const offPeak = normalizeCachedRateList(record.offPeak);
+  if (peak.length === 0 && offPeak.length === 0) return null;
+  return { peak, offPeak };
 }
 
 function loadElectricityPriceCacheRaw(now: Date = new Date()): ElectricityPriceCache {
@@ -653,22 +1088,22 @@ export function saveElectricityPriceCache(cache: ElectricityPriceCache, now: Dat
 
 function hasCachedElectricityDay(cache: ElectricityPriceCache, dayYmd: string): boolean {
   const rates = cache[dayYmd];
-  return Array.isArray(rates) && rates.length > 0;
+  return Boolean(rates && (rates.peak.length > 0 || rates.offPeak.length > 0));
 }
 
-function ukHourNow(now: Date): number {
-  return Number(
-    now.toLocaleTimeString("en-GB", {
-      hour: "numeric",
-      hour12: false,
-      timeZone: UK_TZ,
-    }),
-  );
+export function isOffPeakUkHour(
+  hour: number,
+  startHour: number = DEFAULT_ECO7_OFF_PEAK_START_HOUR,
+  endHour: number = DEFAULT_ECO7_OFF_PEAK_END_HOUR,
+): boolean {
+  if (startHour === endHour) return false;
+  if (startHour < endHour) return hour >= startHour && hour < endHour;
+  return hour >= startHour || hour < endHour;
 }
 
-/** Tomorrow's unit rates are not published until ~4pm UK — don't fetch them before then. */
-function isElectricityDayFetchable(dayKey: string, now: Date): boolean {
-  return dayKey !== ukTomorrowYmd(now) || ukHourNow(now) >= 15;
+/** Eco7 day/night rates are not publish-gated like Agile half-hours. */
+function isElectricityDayFetchable(_dayKey: string, _now: Date): boolean {
+  return true;
 }
 
 /** Half-hour slots are only cached for today and tomorrow (~36h ahead). */
@@ -685,7 +1120,10 @@ function pruneElectricityPriceCache(
   const next: ElectricityPriceCache = {};
   let pruned = false;
   for (const [dayKey, rates] of Object.entries(cache)) {
-    if (isPublishSensitiveElectricityDay(dayKey, now) && rates.length > 0) {
+    if (
+      isPublishSensitiveElectricityDay(dayKey, now) &&
+      (rates.peak.length > 0 || rates.offPeak.length > 0)
+    ) {
       next[dayKey] = rates;
     } else {
       pruned = true;
@@ -697,31 +1135,48 @@ function pruneElectricityPriceCache(
   return { cache: next, pruned };
 }
 
-function electricityRatesToCache(rates: OctopusRate[]): CachedElectricityRate[] {
-  return rates
-    .filter((rate) => rate.valid_from && rate.valid_to && rate.value_inc_vat != null)
-    .map((rate) => ({
-      valid_from: rate.valid_from!,
-      valid_to: rate.valid_to!,
-      value_inc_vat: rate.value_inc_vat!,
-    }));
+function dualRatesForDay(
+  peakRates: OctopusRate[],
+  offPeakRates: OctopusRate[],
+  dayYmd: string,
+): ElectricityDualRates {
+  return {
+    peak: gasRatesForDay(peakRates, dayYmd),
+    offPeak: gasRatesForDay(offPeakRates, dayYmd),
+  };
 }
 
-function cachedElectricityToRates(cached: CachedElectricityRate[]): OctopusRate[] {
-  return cached.map((rate) => ({
-    valid_from: rate.valid_from,
-    valid_to: rate.valid_to,
-    value_inc_vat: rate.value_inc_vat,
-  }));
+export async function fetchElectricityDualRates(
+  from: Date,
+  to: Date,
+): Promise<ElectricityDualRates> {
+  const edf = resolveEdfCredentialConfig();
+  const edfToken = await resolveEdfAccessToken();
+  const account = await fetchKrakenJson<OctopusAccountResponse>(
+    `${EDF_BASE_URL}/accounts/${edf.accountNumber}/`,
+    edfToken,
+  );
+  const derived = deriveElectricityTariffs(account, {
+    baseUrl: EDF_BASE_URL,
+    token: edfToken,
+    offPeakStartHour: edf.offPeakStartHour,
+    offPeakEndHour: edf.offPeakEndHour,
+  });
+  const dayUrl = ratesUrlWithWindow(derived.etariffDayPrices, from, to);
+  const primary = await fetchAllOctopusResults<OctopusRate>(dayUrl, edfToken);
+  if (derived.rateMode === "windowed" || !derived.etariffNightPrices) {
+    // GoElectric / similar: peak + off-peak are timed windows in standard-unit-rates.
+    return splitPeakOffPeakFromRates(primary);
+  }
+  const nightUrl = ratesUrlWithWindow(derived.etariffNightPrices, from, to);
+  const offPeak = await fetchAllOctopusResults<OctopusRate>(nightUrl, edfToken);
+  return { peak: primary, offPeak };
 }
 
+/** Flatten dual rates for callers that still expect a single list (peak first). */
 export async function fetchElectricityRates(from: Date, to: Date): Promise<OctopusRate[]> {
-  const { token, accountNumber } = resolveOctoCredentials();
-  const accountUrl = `${OCTOPUS_BASE_URL}/accounts/${accountNumber}/`;
-  const account = await fetchOctopusJson<OctopusAccountResponse>(accountUrl, token);
-  const derived = deriveTariffs(account);
-  const url = ratesUrlWithWindow(derived.etariffPrices, from, to);
-  return fetchAllOctopusResults<OctopusRate>(url, token);
+  const dual = await fetchElectricityDualRates(from, to);
+  return [...dual.peak, ...dual.offPeak];
 }
 
 async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Promise<ElectricityPriceCache> {
@@ -739,12 +1194,14 @@ async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Prom
   }
 
   const { from, to } = fetchWindowForDayKeys(toFetch, now);
-  const fetched = await fetchElectricityRates(from, to);
+  const fetched = await fetchElectricityDualRates(from, to);
   let updated = false;
   for (const dayKey of toFetch) {
-    const cached = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
-    if (cached.length > 0) {
-      cache[dayKey] = cached;
+    const dual = coerceElectricityDualRates(
+      dualRatesForDay(fetched.peak, fetched.offPeak, dayKey),
+    );
+    if (dual.peak.length > 0 || dual.offPeak.length > 0) {
+      cache[dayKey] = dual;
       updated = true;
     }
   }
@@ -754,52 +1211,76 @@ async function ensureElectricityPricesCached(dayKeys: string[], now: Date): Prom
   return cache;
 }
 
-export async function loadElectricityRatesForDays(
+export async function loadElectricityDualRatesForDays(
   dayKeys: string[],
   now: Date = new Date(),
-): Promise<OctopusRate[]> {
+): Promise<ElectricityDualRates> {
   const cacheKeys = dayKeys.filter((dayKey) => isPublishSensitiveElectricityDay(dayKey, now));
   const ephemeralKeys = dayKeys.filter((dayKey) => !isPublishSensitiveElectricityDay(dayKey, now));
-  const rates: OctopusRate[] = [];
+  const peak: OctopusRate[] = [];
+  const offPeak: OctopusRate[] = [];
 
   if (cacheKeys.length > 0) {
     const cache = await ensureElectricityPricesCached(cacheKeys, now);
     for (const dayKey of cacheKeys) {
-      const cached = cache[dayKey];
-      if (cached?.length) {
-        rates.push(...cachedElectricityToRates(cached));
-      }
+      const cached = coerceElectricityDualRates(cache[dayKey]);
+      peak.push(...cached.peak);
+      offPeak.push(...cached.offPeak);
     }
   }
 
   if (ephemeralKeys.length > 0) {
     const { from, to } = fetchWindowForDayKeys(ephemeralKeys, now);
-    const fetched = await fetchElectricityRates(from, to);
+    const fetched = await fetchElectricityDualRates(from, to);
+    // fetchElectricityDualRates already returns peak/off-peak split for windowed tariffs.
     for (const dayKey of ephemeralKeys) {
-      const cached = electricityRatesToCache(gasRatesForDay(fetched, dayKey));
-      if (cached.length > 0) {
-        rates.push(...cachedElectricityToRates(cached));
-      }
+      const dual = coerceElectricityDualRates(dualRatesForDay(fetched.peak, fetched.offPeak, dayKey));
+      peak.push(...dual.peak);
+      offPeak.push(...dual.offPeak);
     }
   }
 
-  return rates;
+  return { peak, offPeak };
 }
 
-export async function loadTodayElectricityRates(now: Date = new Date()): Promise<OctopusRate[]> {
-  return loadElectricityRatesForDays([dayKeyUK(now)], now);
+export async function loadElectricityRatesForDays(
+  dayKeys: string[],
+  now: Date = new Date(),
+): Promise<OctopusRate[]> {
+  const dual = await loadElectricityDualRatesForDays(dayKeys, now);
+  return [...dual.peak, ...dual.offPeak];
+}
+
+function coerceElectricityDualRates(dual: ElectricityDualRates | undefined): ElectricityDualRates {
+  if (!dual) return { peak: [], offPeak: [] };
+  // Older cache entries stored all windows under `peak` only — split for display.
+  if (dual.offPeak.length === 0 && dual.peak.length > 0) {
+    return splitPeakOffPeakFromRates(dual.peak);
+  }
+  return dual;
+}
+
+export async function loadTodayTomorrowElectricityDualRates(now: Date = new Date()): Promise<{
+  today: ElectricityDualRates;
+  tomorrow: ElectricityDualRates;
+}> {
+  const todayYmd = dayKeyUK(now);
+  const tomorrowYmd = ukTomorrowYmd(now);
+  const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
+  return {
+    today: coerceElectricityDualRates(cache[todayYmd]),
+    tomorrow: coerceElectricityDualRates(cache[tomorrowYmd]),
+  };
 }
 
 export async function loadTodayTomorrowElectricityRates(now: Date = new Date()): Promise<{
   today: OctopusRate[];
   tomorrow: OctopusRate[];
 }> {
-  const todayYmd = dayKeyUK(now);
-  const tomorrowYmd = ukTomorrowYmd(now);
-  const cache = await ensureElectricityPricesCached([todayYmd, tomorrowYmd], now);
+  const dual = await loadTodayTomorrowElectricityDualRates(now);
   return {
-    today: cachedElectricityToRates(cache[todayYmd] ?? []),
-    tomorrow: cachedElectricityToRates(cache[tomorrowYmd] ?? []),
+    today: [...dual.today.peak, ...dual.today.offPeak],
+    tomorrow: [...dual.tomorrow.peak, ...dual.tomorrow.offPeak],
   };
 }
 
@@ -927,7 +1408,7 @@ export function dailyTotalsMapsFromCache(cache: DailyTotalsCache): {
   return { eCost, gCost, eKwh, gKwh };
 }
 
-function ukHourFromIso(iso: string): number | null {
+export function ukHourFromIso(iso: string): number | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
   const hour = Number(date.toLocaleTimeString("en-GB", {
@@ -938,34 +1419,13 @@ function ukHourFromIso(iso: string): number | null {
   return Number.isFinite(hour) ? hour : null;
 }
 
-export function averageElectricityByPeriod(
-  rates: OctopusRate[],
-): Record<(typeof ELECTRICITY_PERIOD_LABELS)[number], number | null> {
-  const buckets = Object.fromEntries(
-    ELECTRICITY_PERIODS.map((period) => [period.label, [] as number[]]),
-  ) as Record<(typeof ELECTRICITY_PERIOD_LABELS)[number], number[]>;
-
+function pickRepresentativeRate(rates: OctopusRate[]): number | null {
   for (const rate of rates) {
-    if (rate.value_inc_vat == null || !rate.valid_from) continue;
-    const hour = ukHourFromIso(rate.valid_from);
-    if (hour == null) continue;
-    const period = ELECTRICITY_PERIODS.find(
-      (entry) => hour >= entry.minHour && hour < entry.maxHour,
-    );
-    if (period) {
-      buckets[period.label].push(rate.value_inc_vat);
+    if (rate.value_inc_vat != null && Number.isFinite(rate.value_inc_vat)) {
+      return rate.value_inc_vat;
     }
   }
-
-  return Object.fromEntries(
-    ELECTRICITY_PERIODS.map((period) => {
-      const values = buckets[period.label];
-      const average = values.length > 0
-        ? values.reduce((sum, value) => sum + value, 0) / values.length
-        : null;
-      return [period.label, average];
-    }),
-  ) as Record<(typeof ELECTRICITY_PERIOD_LABELS)[number], number | null>;
+  return null;
 }
 
 function formatElectricityPrice(pence: number, narrow = false): string {
@@ -973,10 +1433,91 @@ function formatElectricityPrice(pence: number, narrow = false): string {
   return colorize(text, colorForRate(pence, "electricity"));
 }
 
-function formatElectricityPeriodLabel(
-  label: (typeof ELECTRICITY_PERIOD_LABELS)[number],
+function formatDualRateSummary(dual: ElectricityDualRates, narrow = false): string {
+  const peak = pickRepresentativeRate(dual.peak);
+  const offPeak = pickRepresentativeRate(dual.offPeak);
+  if (peak == null && offPeak == null) return "-";
+  if (offPeak == null) {
+    return peak == null ? "-" : formatElectricityPrice(peak, narrow);
+  }
+  if (peak == null) {
+    return `off-peak ${formatElectricityPrice(offPeak, narrow)}`;
+  }
+  return `peak ${formatElectricityPrice(peak, narrow)} / off-peak ${formatElectricityPrice(offPeak, narrow)}`;
+}
+
+export function formatDayElectricityLine(
+  label: string,
+  dual: ElectricityDualRates,
+  options?: { narrow?: boolean },
 ): string {
-  return label.replace(/\s+/g, "");
+  return `${label} elec unit: ${formatDualRateSummary(dual, options?.narrow ?? false)}`;
+}
+
+export function formatTodayTomorrowElectricityLine(
+  today: ElectricityDualRates,
+  tomorrow: ElectricityDualRates,
+  options?: { narrow?: boolean },
+): string {
+  const narrow = options?.narrow ?? false;
+  return `today elec unit: ${formatDualRateSummary(today, narrow)}, tomorrow elec unit: ${formatDualRateSummary(tomorrow, narrow)}`;
+}
+
+export function formatElectricityTariffDetailLines(options: {
+  tariffCode: string;
+  rateMode: ElectricityRateMode;
+  today: ElectricityDualRates;
+  tomorrow: ElectricityDualRates;
+  standingPence: number | null;
+  contractEnd: string | null | undefined;
+  narrow?: boolean;
+}): string[] {
+  const modeNote =
+    options.rateMode === "eco7"
+      ? "Eco7"
+      : options.rateMode === "windowed"
+        ? "peak/off-peak"
+        : "standard";
+  return [
+    `Elec tariff: ${options.tariffCode} (${modeNote})`,
+    `Elec unit today: ${formatDualRateSummary(options.today, options.narrow)}`,
+    `Elec unit tomorrow: ${formatDualRateSummary(options.tomorrow, options.narrow)}`,
+    `Elec standing: ${formatStandingChargePence(options.standingPence)}`,
+    `Elec contract ends: ${formatContractEndLabel(options.contractEnd)}`,
+  ];
+}
+
+export function formatGasTariffDetailLines(options: {
+  tariffCode: string;
+  today: OctopusRate[];
+  tomorrow: OctopusRate[];
+  standingPence: number | null;
+  contractEnd: string | null | undefined;
+}): string[] {
+  return [
+    `Gas tariff: ${options.tariffCode}`,
+    `Gas unit today: ${formatGasPrices(options.today)}`,
+    `Gas unit tomorrow: ${formatGasPrices(options.tomorrow)}`,
+    `Gas standing: ${formatStandingChargePence(options.standingPence)}`,
+    `Gas contract ends: ${formatContractEndLabel(options.contractEnd)}`,
+  ];
+}
+
+/** @deprecated Use formatTodayTomorrowElectricityLine — half-hourly Agile table removed for Eco7. */
+export function formatElectricityPeriodAvgTable(
+  today: OctopusRate[] | ElectricityDualRates,
+  tomorrow: OctopusRate[] | ElectricityDualRates,
+  options?: { narrow?: boolean },
+): string[] {
+  const toDual = (value: OctopusRate[] | ElectricityDualRates): ElectricityDualRates => {
+    if (Array.isArray(value)) return { peak: value, offPeak: [] };
+    return value;
+  };
+  const line = formatTodayTomorrowElectricityLine(toDual(today), toDual(tomorrow), options);
+  if (line.includes(": -") && line.endsWith(": -")) return [];
+  // Keep returning lines so existing callers that join arrays still work.
+  if (line.includes("today elec: -") && line.includes("tomorrow elec: -")) return [];
+  return [line];
 }
 
 function padAsciiCell(value: string, width: number): string {
@@ -998,37 +1539,6 @@ function makeAsciiTable(headers: string[], rows: string[][]): string[] {
       `| ${row.map((v, i) => padAsciiCell(v || "", widths[i])).join(" | ")} |`,
   );
   return [border, headerLine, border, ...body, border];
-}
-
-const ELECTRICITY_TABLE_HEADERS = [
-  "day",
-  ...ELECTRICITY_PERIOD_LABELS.map(formatElectricityPeriodLabel),
-];
-
-function electricityTableRow(dayName: string, rates: OctopusRate[], narrow: boolean): string[] {
-  const averages = averageElectricityByPeriod(rates);
-  return [
-    dayName,
-    ...ELECTRICITY_PERIOD_LABELS.map((label) => {
-      const pence = averages[label];
-      return pence == null ? "-" : formatElectricityPrice(pence, narrow);
-    }),
-  ];
-}
-
-export function formatElectricityPeriodAvgTable(
-  today: OctopusRate[],
-  tomorrow: OctopusRate[],
-  options?: { narrow?: boolean },
-): string[] {
-  const narrow = options?.narrow ?? false;
-  const rows = [
-    electricityTableRow("today", today, narrow),
-    electricityTableRow(narrow ? "tomo" : "tomorrow", tomorrow, narrow),
-  ];
-  const hasValue = rows.some((row) => row.slice(1).some((cell) => cell !== "-"));
-  if (!hasValue) return [];
-  return makeAsciiTable(ELECTRICITY_TABLE_HEADERS, rows);
 }
 
 type MonthlyAverageRecord = {

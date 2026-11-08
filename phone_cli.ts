@@ -3,7 +3,29 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-const COMMANDS = new Set(["i", "ball", "cal", "w", "cric", "octo", "bday", "money", "cmd", "fuel", "r", "temp", "solar", "status"]);
+const COMMANDS = new Set([
+  "i",
+  "ball",
+  "cal",
+  "w",
+  "cric",
+  "octo",
+  "bday",
+  "money",
+  "cmd",
+  "fuel",
+  "r",
+  "temp",
+  "solar",
+  "power",
+  "status",
+]);
+
+/** Commands that share a bundled entrypoint. */
+const COMMAND_ENTRYPOINTS: Record<string, string> = {
+  octo: "solar",
+  power: "solar",
+};
 
 function printUsage(): void {
   console.log("phone_cli commands:");
@@ -11,7 +33,9 @@ function printUsage(): void {
   console.log("  cal    Calendar");
   console.log("  w      Weather");
   console.log("  cric   Cricket fixtures");
-  console.log("  octo   Octopus energy");
+  console.log("  power  Solar + energy (tariffs, daily/monthly/yearly)");
+  console.log("  octo   Alias for power");
+  console.log("  solar  Alias for power");
   console.log("  bday   Birthday age table");
   console.log("  money  Monthly countdown value");
   console.log("  cmd    Home automation shortcuts");
@@ -19,7 +43,6 @@ function printUsage(): void {
   console.log("  fuel   UK fuel prices (near, station, list)");
   console.log("  r      UK rail boards (departures, arrivals, search)");
   console.log("  temp   House temperature history (last 24h)");
-  console.log("  solar  Solar yield and power history");
   console.log("  status Clock, date, sunrise/sunset");
   console.log("");
   console.log("Or run the interactive picker:");
@@ -38,11 +61,12 @@ function printUsage(): void {
   console.log('  npx @emgeebee/phone_cli fuel near "SE1 9SG" --fuel E10');
   console.log('  npx @emgeebee/phone_cli r departures KGX');
   console.log("  npx @emgeebee/phone_cli temp");
-  console.log("  npx @emgeebee/phone_cli solar");
+  console.log("  npx @emgeebee/phone_cli power");
 }
 
 function runSubcommand(command: string, args: string[]): never {
-  const scriptPath = join(__dirname, `${command}.js`);
+  const entry = COMMAND_ENTRYPOINTS[command] ?? command;
+  const scriptPath = join(__dirname, `${entry}.js`);
   const result = spawnSync(process.execPath, [scriptPath, ...args], { stdio: "inherit" });
   process.exit(result.status ?? 1);
 }

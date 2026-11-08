@@ -2,16 +2,27 @@
 
 import { z } from "zod";
 
-import { fetchSolarData } from "./lib/solarApi";
 import { flushServiceCache } from "./lib/cache";
+import { applyEnergyMonthlyBackfill } from "./lib/energyMonthlyBackfill";
+import { loadEnergyDashboardData } from "./lib/energyDashboard";
+import { yearlySummaryRowsFromMonthly } from "./lib/energyYearly";
+import { fetchSolarData } from "./lib/solarApi";
 import { solarMonthlyYieldRowsFromData } from "./lib/solarMonthlyYield";
 import { buildSolarCliLines } from "./lib/solarView";
 
 function usage(): void {
   console.log("Usage:");
+  console.log("  power");
   console.log("  solar");
+  console.log("  octo");
+  console.log("  power --backfill-energy-monthly");
   console.log("");
-  console.log("Shows solar daily yield, rolling averages, and a power graph.");
+  console.log("Shows solar yield/power plus (when configured) EDF electricity");
+  console.log("and Octopus gas tariffs, daily/monthly/yearly totals.");
+  console.log("`octo` is an alias for `power`.");
+  console.log("");
+  console.log("  --backfill-energy-monthly");
+  console.log("      Merge spreadsheet history into the monthly energy cache.");
 }
 
 async function main(): Promise<void> {
@@ -21,16 +32,38 @@ async function main(): Promise<void> {
       usage();
       return;
     }
+    if (args[0] === "--backfill-energy-monthly") {
+      if (args.length > 1) {
+        throw new Error("--backfill-energy-monthly takes no extra arguments.");
+      }
+      const result = await applyEnergyMonthlyBackfill();
+      console.log(
+        `Backfilled ${result.written.length} months into energy cache (${result.written[0]} -> ${result.written[result.written.length - 1]}).`,
+      );
+      console.log(`Monthly cache now has ${result.totalMonths} month(s).`);
+      return;
+    }
     if (args.length > 0) {
-      throw new Error("solar does not take arguments.");
+      throw new Error("power/solar/octo does not take arguments.");
     }
 
     const data = await fetchSolarData();
     const monthlyYields = await solarMonthlyYieldRowsFromData(data);
-    for (const line of buildSolarCliLines(data, monthlyYields)) {
+    let energy = null;
+    try {
+      energy = await loadEnergyDashboardData();
+    } catch {
+      // Energy credentials are optional for solar-only use.
+      energy = null;
+    }
+    const yearlySummaries = await yearlySummaryRowsFromMonthly(
+      energy?.monthlyForDisplay ?? {},
+      monthlyYields,
+    );
+    for (const line of buildSolarCliLines(data, monthlyYields, energy, yearlySummaries)) {
       console.log(line);
     }
-    await flushServiceCache("solar");
+    await Promise.all([flushServiceCache("solar"), flushServiceCache("octo")]);
   } catch (error: unknown) {
     const message =
       error instanceof z.ZodError
@@ -41,7 +74,7 @@ async function main(): Promise<void> {
     console.error(message);
     console.error("");
     usage();
-    await flushServiceCache("solar");
+    await Promise.all([flushServiceCache("solar"), flushServiceCache("octo")]);
     process.exit(1);
   }
 }

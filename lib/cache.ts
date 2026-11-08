@@ -20,6 +20,7 @@ export type OctoServiceCache = {
   electricityPrices?: Record<string, unknown>;
   monthlyAverages?: Record<string, unknown>;
   dailyTotals?: Record<string, unknown>;
+  yearlyAverages?: Record<string, unknown>;
 };
 
 export type SolarServiceCache = {
@@ -69,6 +70,7 @@ export const cachePaths = {
   octoElectricityPrices: () => join(getCacheDir(), "octo", "electricity-prices.json"),
   octoMonthlyAverages: () => join(getCacheDir(), "octo", "monthly-averages.json"),
   octoDailyTotals: () => join(getCacheDir(), "octo", "daily-totals.json"),
+  octoYearlyAverages: () => join(getCacheDir(), "octo", "yearly-averages.json"),
   solarMonthlyYield: () => join(getCacheDir(), "solar", "monthly-yield.json"),
 } as const;
 
@@ -103,7 +105,8 @@ function hasOctoLocalData(data: OctoServiceCache): boolean {
     (data.gasPrices && Object.keys(data.gasPrices).length > 0) ||
       (data.electricityPrices && Object.keys(data.electricityPrices).length > 0) ||
       (data.monthlyAverages && Object.keys(data.monthlyAverages).length > 0) ||
-      (data.dailyTotals && Object.keys(data.dailyTotals).length > 0),
+      (data.dailyTotals && Object.keys(data.dailyTotals).length > 0) ||
+      (data.yearlyAverages && Object.keys(data.yearlyAverages).length > 0),
   );
 }
 
@@ -135,6 +138,7 @@ function loadOctoFromLocalFiles(): OctoServiceCache {
         ? (legacy.monthlyAverageCache as Record<string, unknown>)
         : undefined),
     dailyTotals: readLocalJsonFile<Record<string, unknown>>(cachePaths.octoDailyTotals()),
+    yearlyAverages: readLocalJsonFile<Record<string, unknown>>(cachePaths.octoYearlyAverages()),
   };
 }
 
@@ -194,6 +198,10 @@ function mergeOctoServiceCache(
     dailyTotals: mergeRecordFields(
       local.dailyTotals as Record<string, unknown> | undefined,
       r.dailyTotals as Record<string, unknown> | undefined,
+    ),
+    yearlyAverages: mergeRecordFields(
+      local.yearlyAverages as Record<string, unknown> | undefined,
+      r.yearlyAverages as Record<string, unknown> | undefined,
     ),
   };
 }
@@ -343,6 +351,9 @@ function mirrorServiceCacheToLocalFiles<S extends ServiceName>(
   }
   if (octo.dailyTotals && Object.keys(octo.dailyTotals).length > 0) {
     writeLocalJsonFile(cachePaths.octoDailyTotals(), octo.dailyTotals);
+  }
+  if (octo.yearlyAverages && Object.keys(octo.yearlyAverages).length > 0) {
+    writeLocalJsonFile(cachePaths.octoYearlyAverages(), octo.yearlyAverages);
   }
 }
 

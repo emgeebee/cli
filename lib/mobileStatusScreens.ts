@@ -11,9 +11,9 @@ import {
   type MonthDef,
 } from "./calApi";
 import {
-  formatElectricityPeriodAvgTable,
   formatMonthlyTotalCostSummaryLines,
-  type OctopusRate,
+  formatTodayTomorrowElectricityLine,
+  type ElectricityDualRates,
 } from "./octoApi";
 import type { SolarResponse } from "./solarApi";
 import type { SolarMonthlyYieldRow } from "./solarMonthlyYield";
@@ -81,8 +81,12 @@ export type MobileScreenContext = {
   villaLines: string[];
   cricLines: string[];
   gasLine: string;
-  todayElectricity: OctopusRate[];
-  tomorrowElectricity: OctopusRate[];
+  todayElectricity: ElectricityDualRates;
+  tomorrowElectricity: ElectricityDualRates;
+  electricityStandingLine?: string;
+  gasStandingLine?: string;
+  electricityContractLine?: string;
+  gasContractLine?: string;
   solarData: SolarResponse | null;
   solarRotateSummary: SolarRotateSummary | null;
   weatherData: WeatherResponse | null;
@@ -116,18 +120,18 @@ export function withMobileScreenCountdown(
 
 function capitalizeGasLine(line: string): string {
   return line
+    .replace(/^today gas unit:/i, "Today Gas Unit:")
+    .replace(/, tomorrow gas unit:/i, ", Tomorrow Gas Unit:")
     .replace(/^today gas:/i, "Today Gas:")
     .replace(/, tomorrow gas:/i, ", Tomorrow Gas:");
 }
 
-function capitalizeElectricityLines(lines: string[]): string[] {
-  return lines.map((line) =>
-    line
-      .replace("| day ", "| Day ")
-      .replace("| today ", "| Today ")
-      .replace("| tomo ", "| Tomo ")
-      .replace("| tomorrow ", "| Tomorrow "),
-  );
+function capitalizeElectricityLine(line: string): string {
+  return line
+    .replace(/^today elec unit:/i, "Today Elec Unit:")
+    .replace(/, tomorrow elec unit:/i, ", Tomorrow Elec Unit:")
+    .replace(/^today elec:/i, "Today Elec:")
+    .replace(/, tomorrow elec:/i, ", Tomorrow Elec:");
 }
 
 function buildFootyScreenLines(ctx: MobileScreenContext): string[] {
@@ -142,15 +146,20 @@ function buildVillaScreenLines(ctx: MobileScreenContext): string[] {
 }
 
 function buildOctoScreenLines(ctx: MobileScreenContext): string[] {
-  const lines = ["=== Octo ===", "", capitalizeGasLine(ctx.gasLine)];
-  const electricity = capitalizeElectricityLines(
-    formatElectricityPeriodAvgTable(ctx.todayElectricity, ctx.tomorrowElectricity, {
-      narrow: ctx.narrowOcto,
-    }),
-  );
-  if (electricity.length > 0) {
-    lines.push("", ...electricity);
-  }
+  const lines = [
+    "=== Octo ===",
+    "",
+    capitalizeElectricityLine(
+      formatTodayTomorrowElectricityLine(ctx.todayElectricity, ctx.tomorrowElectricity, {
+        narrow: ctx.narrowOcto,
+      }),
+    ),
+  ];
+  if (ctx.electricityStandingLine) lines.push(ctx.electricityStandingLine);
+  if (ctx.electricityContractLine) lines.push(ctx.electricityContractLine);
+  lines.push("", capitalizeGasLine(ctx.gasLine));
+  if (ctx.gasStandingLine) lines.push(ctx.gasStandingLine);
+  if (ctx.gasContractLine) lines.push(ctx.gasContractLine);
   const monthly = formatMonthlyTotalCostSummaryLines(ctx.now);
   if (monthly.length > 0) {
     lines.push("", ...monthly);

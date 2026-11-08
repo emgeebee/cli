@@ -20,6 +20,29 @@ import {
   formatSolarMonthLabel,
   type SolarMonthlyYieldRow,
 } from "./solarMonthlyYield";
+import {
+  coloredPence,
+  currentEnergyMonthKey,
+  energyDaysInMonthKey,
+  formatKwh as formatEnergyKwh,
+  formatPence,
+  monthLabel as energyMonthLabel,
+  rankedColorByDay,
+  type EnergyDashboardData,
+  type MonthlyAverageCache,
+  type MonthlyAverages,
+} from "./energyDashboard";
+import {
+  formatYearlyMoneyCell,
+  formatYearlySolarCell,
+  type YearlySummaryRow,
+} from "./energyYearly";
+import {
+  ENERGY_MONTHLY_HISTORY_MONTHS,
+  formatElectricityTariffDetailLines,
+  formatGasTariffDetailLines,
+  gasRatesForDay,
+} from "./octoApi";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -380,20 +403,52 @@ function latestYieldDay(yields: DailyYield[]): Date {
   return latest ? parseDateKey(latest.date) ?? startOfUtcDay(new Date()) : startOfUtcDay(new Date());
 }
 
-function buildDailyYieldRows(yields: DailyYield[]): string[][] {
-  const byDate = new Map(yields.map((entry) => [entry.date, entry.value] as const));
+function dailyWindowKeys(yields: DailyYield[]): string[] {
   const end = latestYieldDay(yields);
   const start = new Date(end.getTime() - (DAILY_YIELD_DAYS - 1) * DAY_MS);
-  const rows: string[][] = [];
+  return Array.from({ length: DAILY_YIELD_DAYS }, (_, offset) =>
+    toYmd(new Date(start.getTime() + offset * DAY_MS)),
+  );
+}
 
-  for (let offset = 0; offset < DAILY_YIELD_DAYS; offset += 1) {
-    const date = new Date(start.getTime() + offset * DAY_MS);
-    const ymd = toYmd(date);
+function buildDailySolarRows(yields: DailyYield[]): string[][] {
+  const byDate = new Map(yields.map((entry) => [entry.date, entry.value] as const));
+  return dailyWindowKeys(yields).map((ymd) => {
     const value = byDate.get(ymd);
-    rows.push([formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)]);
-  }
+    return [formatDateLabel(ymd), value == null ? "-" : formatColoredKwh(value)];
+  });
+}
 
-  return rows;
+function buildDailyEnergyRows(
+  yields: DailyYield[],
+  energy: EnergyDashboardData,
+): string[][] {
+  const dayKeys = dailyWindowKeys(yields);
+  const eCost = energy.eDailyCost;
+  const gCost = energy.gDailyCost;
+  const eKwh = energy.eDailyKwh;
+  const gKwh = energy.gDailyKwh;
+  const eColorByDay = rankedColorByDay(dayKeys, eCost, "electricity");
+  const gColorByDay = rankedColorByDay(dayKeys, gCost, "gas");
+
+  return dayKeys.map((ymd) => {
+    const hasEnergy =
+      (eCost[ymd] || 0) > 0 ||
+      (gCost[ymd] || 0) > 0 ||
+      (eKwh[ymd] || 0) > 0 ||
+      (gKwh[ymd] || 0) > 0;
+    if (!hasEnergy) {
+      return [formatDateLabel(ymd), "-", "-", "-", "-", "-"];
+    }
+    return [
+      formatDateLabel(ymd),
+      coloredPence(eCost[ymd] || 0, eColorByDay[ymd]),
+      coloredPence(gCost[ymd] || 0, gColorByDay[ymd]),
+      formatPence((eCost[ymd] || 0) + (gCost[ymd] || 0)),
+      formatEnergyKwh(eKwh[ymd] || 0),
+      formatEnergyKwh(gKwh[ymd] || 0),
+    ];
+  });
 }
 
 function yieldAveragesFromYields(yields: DailyYield[], now: Date = new Date()): YieldAverage[] {
@@ -522,7 +577,13 @@ function buildSystemStatsRows(data: SolarResponse): string[][] {
   return rows;
 }
 
-function buildMonthlyYieldRows(
+/** Daily average pence with month total pounds, e.g. `112p (£42)`. */
+function formatDailyAvgAndMonthTotal(dailyAvgPence: number, days: number): string {
+  const monthTotalPounds = Math.round((dailyAvgPence * days) / 100);
+  return `${formatPence(dailyAvgPence)} (£${monthTotalPounds})`;
+}
+
+function buildMonthlySolarRows(
   monthlyYields: SolarMonthlyYieldRow[],
   solarYieldTotal: number | null = null,
 ): string[][] {
@@ -535,6 +596,106 @@ function buildMonthlyYieldRows(
   if (solarYieldTotal != null) {
     rows.push(["Total", "-", formatKwh(solarYieldTotal), "-"]);
   }
+  return rows;
+}
+
+function monthProjLabel(monthKey: string): string {
+  const shortMonth = energyMonthLabel(monthKey).split(/\s+/)[0] || monthKey;
+  return `${shortMonth} proj`;
+}
+
+/** Lower is better: best 6 green, next 6 yellow, next 6 orange, worst 6 red (for 24 rows). */
+function rankedColorByValue(values: number[]): Map<number, string> {
+  const indexed = values.map((value, index) => ({ value, index }));
+  indexed.sort((a, b) => a.value - b.value || a.index - b.index);
+
+  const n = indexed.length;
+  const greenCount = Math.min(6, n);
+  const redCount = Math.min(6, Math.max(0, n - greenCount));
+  const middleCount = Math.max(0, n - greenCount - redCount);
+  const yellowCount = Math.ceil(middleCount / 2);
+
+  const colors = new Map<number, string>();
+  for (let rank = 0; rank < n; rank += 1) {
+    let color = ANSI_RED;
+    if (rank < greenCount) color = ANSI_GREEN;
+    else if (rank < greenCount + yellowCount) color = ANSI_YELLOW;
+    else if (rank < greenCount + middleCount) color = ANSI_ORANGE;
+    colors.set(indexed[rank].index, color);
+  }
+  return colors;
+}
+
+function buildMonthlyEnergyRows(
+  energyMonthly: MonthlyAverageCache,
+  monthKeys?: string[],
+  now: Date = new Date(),
+): string[][] {
+  const keys = (monthKeys ?? Object.keys(energyMonthly))
+    .filter((month) => energyMonthly[month])
+    .sort((a, b) => a.localeCompare(b));
+
+  const currentMonth = currentEnergyMonthKey(now);
+  const current = energyMonthly[currentMonth];
+  const daysInMonth = current ? energyDaysInMonthKey(currentMonth) : 0;
+  const showCurrentProj =
+    Boolean(current) &&
+    keys.includes(currentMonth) &&
+    current!.days > 0 &&
+    current!.days < daysInMonth;
+
+  // Rank all months (proj reuses current daily averages); incomplete actual stays uncoloured.
+  const eCostColors = rankedColorByValue(keys.map((m) => energyMonthly[m].eCost));
+  const gCostColors = rankedColorByValue(keys.map((m) => energyMonthly[m].gCost));
+  const totalColors = rankedColorByValue(
+    keys.map((m) => energyMonthly[m].eCost + energyMonthly[m].gCost),
+  );
+  const eKwhColors = rankedColorByValue(keys.map((m) => energyMonthly[m].eKwh));
+  const gKwhColors = rankedColorByValue(keys.map((m) => energyMonthly[m].gKwh));
+
+  const rows = keys.map((month, index) => {
+    const energy: MonthlyAverages = energyMonthly[month];
+    const totalDaily = energy.eCost + energy.gCost;
+    const cost = formatDailyAvgAndMonthTotal(energy.eCost, energy.days);
+    const gas = formatDailyAvgAndMonthTotal(energy.gCost, energy.days);
+    const total = formatDailyAvgAndMonthTotal(totalDaily, energy.days);
+    const eKwh = formatEnergyKwh(energy.eKwh);
+    const gKwh = formatEnergyKwh(energy.gKwh);
+    const skipColor = showCurrentProj && month === currentMonth;
+    return [
+      energyMonthLabel(month),
+      skipColor ? cost : colorize(cost, eCostColors.get(index)!),
+      skipColor ? gas : colorize(gas, gCostColors.get(index)!),
+      skipColor ? total : colorize(total, totalColors.get(index)!),
+      skipColor ? eKwh : colorize(eKwh, eKwhColors.get(index)!),
+      skipColor ? gKwh : colorize(gKwh, gKwhColors.get(index)!),
+      `${energy.days}`,
+    ];
+  });
+
+  if (showCurrentProj && current) {
+    const totalDaily = current.eCost + current.gCost;
+    const colorIndex = keys.indexOf(currentMonth);
+    rows.push([
+      monthProjLabel(currentMonth),
+      colorize(
+        formatDailyAvgAndMonthTotal(current.eCost, daysInMonth),
+        eCostColors.get(colorIndex)!,
+      ),
+      colorize(
+        formatDailyAvgAndMonthTotal(current.gCost, daysInMonth),
+        gCostColors.get(colorIndex)!,
+      ),
+      colorize(
+        formatDailyAvgAndMonthTotal(totalDaily, daysInMonth),
+        totalColors.get(colorIndex)!,
+      ),
+      colorize(formatEnergyKwh(current.eKwh), eKwhColors.get(colorIndex)!),
+      colorize(formatEnergyKwh(current.gKwh), gKwhColors.get(colorIndex)!),
+      `${daysInMonth}`,
+    ]);
+  }
+
   return rows;
 }
 
@@ -624,86 +785,229 @@ function renderPowerGraph(readings: PowerReading[], maxLineWidth?: number): stri
   return lines;
 }
 
+function sectionHeading(title: string): string[] {
+  return ["", `=== ${title} ===`, ""];
+}
+
+function pushSection(lines: string[], title: string, body: string[]): void {
+  if (body.length === 0) return;
+  lines.push(...sectionHeading(title));
+  lines.push(...body);
+}
+
+function buildTariffSummaryLines(energy: EnergyDashboardData): string[] {
+  const todayElec = {
+    peak: gasRatesForDay(energy.electricityDual.peak, energy.todayYmd),
+    offPeak: gasRatesForDay(energy.electricityDual.offPeak, energy.todayYmd),
+  };
+  const tomorrowElec = {
+    peak: gasRatesForDay(energy.electricityDual.peak, energy.tomorrowYmd),
+    offPeak: gasRatesForDay(energy.electricityDual.offPeak, energy.tomorrowYmd),
+  };
+  const lines = [
+    ...formatElectricityTariffDetailLines({
+      tariffCode: energy.derived.etariff.tariff_code || "?",
+      rateMode: energy.derived.rateMode,
+      today: todayElec,
+      tomorrow: tomorrowElec,
+      standingPence: energy.electricityStandingPence,
+      contractEnd: energy.electricityContractEnd,
+    }).map((line) => `- ${line}`),
+  ];
+  if (energy.derived.rateMode === "eco7") {
+    lines.push(
+      `- Elec off-peak hours (UK): ${energy.derived.offPeakStartHour}:00 -> ${energy.derived.offPeakEndHour}:00`,
+    );
+  }
+  lines.push(
+    ...formatGasTariffDetailLines({
+      tariffCode: energy.derived.gtariff.tariff_code || "?",
+      today: gasRatesForDay(energy.gasRates, energy.todayYmd),
+      tomorrow: gasRatesForDay(energy.gasRates, energy.tomorrowYmd),
+      standingPence: energy.gasStandingPence,
+      contractEnd: energy.gasContractEnd,
+    }).map((line) => `- ${line}`),
+    `- Gas conversion: ${energy.gasKwhPerUnit} kWh/unit`,
+  );
+  return lines;
+}
+
+function buildTodaySectionLines(
+  data: SolarResponse,
+  powerNow: number | null,
+  powerAvgReadings: PowerReading[],
+  yields: DailyYield[],
+): string[] {
+  const lines: string[] = [
+    ...joinAsciiTables(
+      makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings)),
+      makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields)),
+    ),
+  ];
+
+  const energyStatsRows = buildEnergyStatsRows(data);
+  const batteryStatsRows = buildBatteryStatsRows(data);
+  const gridStatsRows = buildGridStatsRows(data);
+  const systemStatsRows = buildSystemStatsRows(data);
+  const paired: string[][] = [];
+
+  if (energyStatsRows.length > 0) {
+    paired.push(makeAsciiTable(["House", "kWh"], energyStatsRows));
+  }
+  if (batteryStatsRows.length > 0) {
+    paired.push(makeAsciiTable(["Battery", "kWh"], batteryStatsRows));
+  }
+  if (gridStatsRows.length > 0) {
+    paired.push(makeAsciiTable(["Grid", "kWh"], gridStatsRows));
+  }
+  if (systemStatsRows.length > 0) {
+    paired.push(makeAsciiTable(["System", ""], systemStatsRows));
+  }
+
+  if (paired.length > 0) {
+    lines.push("");
+    for (let i = 0; i < paired.length; i += 2) {
+      const left = paired[i];
+      const right = paired[i + 1];
+      if (right) {
+        lines.push(...joinAsciiTables(left, right));
+      } else {
+        lines.push(...left);
+      }
+      if (i + 2 < paired.length) lines.push("");
+    }
+  }
+
+  return lines;
+}
+
+function buildDailySectionLines(
+  yields: DailyYield[],
+  energy: EnergyDashboardData | null,
+): string[] {
+  const lines: string[] = [
+    `Solar (last ${DAILY_YIELD_DAYS} days)`,
+    ...makeAsciiTable(["Date", "Yield"], buildDailySolarRows(yields)),
+  ];
+  if (energy) {
+    lines.push(
+      "",
+      `Energy (last ${DAILY_YIELD_DAYS} days)`,
+      ...makeAsciiTable(
+        ["Date", "⚡", "Gas", "Total", "⚡ kWh", "Gas kWh"],
+        buildDailyEnergyRows(yields, energy),
+      ),
+    );
+  }
+  return lines;
+}
+
+function buildMonthlySectionLines(
+  data: SolarResponse,
+  monthlyYields: SolarMonthlyYieldRow[],
+  energy: EnergyDashboardData | null,
+): string[] {
+  const lines: string[] = [];
+  if (monthlyYields.length > 0) {
+    lines.push(
+      `Solar (last ${monthlyYields.length} months)`,
+      ...makeAsciiTable(
+        ["Month", "Avg Yield", "Total Yield", "Days"],
+        buildMonthlySolarRows(monthlyYields, solarYieldTotalKwh(data)),
+      ),
+    );
+  }
+
+  const energyMonthly = energy?.monthlyForDisplay ?? null;
+  if (energyMonthly && Object.keys(energyMonthly).length > 0) {
+    const energyMonthKeys = energy?.monthKeys?.length
+      ? energy.monthKeys
+      : Object.keys(energyMonthly);
+    const energyRows = buildMonthlyEnergyRows(energyMonthly, energyMonthKeys);
+    if (energyRows.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push(
+        `Energy (last ${ENERGY_MONTHLY_HISTORY_MONTHS} months)`,
+        ...makeAsciiTable(
+          ["Month", "⚡", "Gas", "Total", "⚡ kWh", "Gas kWh", "Days"],
+          energyRows,
+        ),
+      );
+    }
+  }
+  return lines;
+}
+
+function buildYearlySectionLines(yearlySummaries: YearlySummaryRow[]): string[] {
+  if (yearlySummaries.length === 0) return [];
+  return [
+    "Gas",
+    ...makeAsciiTable(["Period", "Avg (total)"], buildYearlyGasRows(yearlySummaries)),
+    "",
+    "Elec",
+    ...makeAsciiTable(["Period", "Avg (total)"], buildYearlyElecRows(yearlySummaries)),
+    "",
+    "Solar",
+    ...makeAsciiTable(["Period", "Avg (total)"], buildYearlySolarRows(yearlySummaries)),
+  ];
+}
+
+function buildYearlyGasRows(rows: YearlySummaryRow[]): string[][] {
+  return rows.map((row) => [
+    row.label,
+    formatYearlyMoneyCell(row.gAvgMonthlyPence, row.gTotalPence, row.gMonths),
+  ]);
+}
+
+function buildYearlyElecRows(rows: YearlySummaryRow[]): string[][] {
+  return rows.map((row) => [
+    row.label,
+    formatYearlyMoneyCell(row.eAvgMonthlyPence, row.eTotalPence, row.eMonths),
+  ]);
+}
+
+function buildYearlySolarRows(rows: YearlySummaryRow[]): string[][] {
+  return rows.map((row) => [
+    row.label,
+    formatYearlySolarCell(row.solarAvgMonthlyKwh, row.solarTotalKwh, row.solarMonths),
+  ]);
+}
+
 function buildSolarViewBody(
   data: SolarResponse,
   maxLineWidth?: number,
   monthlyYields: SolarMonthlyYieldRow[] = [],
+  energy: EnergyDashboardData | null = null,
+  yearlySummaries: YearlySummaryRow[] = [],
 ): string[] {
+  void maxLineWidth;
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
   const lines: string[] = [];
 
-  lines.push("Daily Yield (Last 4 Weeks)");
-  lines.push(...makeAsciiTable(["Date", "Yield"], buildDailyYieldRows(yields)));
-  lines.push("");
-  lines.push("Power");
-  lines.push(
-    ...joinAsciiTables(
-      makeAsciiTable(["", "W"], buildPowerRows(powerNow, powerAvgReadings)),
-      makeAsciiTable(["Window", "Average", "Days"], buildAverageRows(yields)),
-    ),
+  if (energy) {
+    pushSection(lines, "Tariffs", buildTariffSummaryLines(energy));
+  }
+
+  pushSection(
+    lines,
+    "Today",
+    buildTodaySectionLines(data, powerNow, powerAvgReadings, yields),
   );
-  lines.push("");
-  
-  const energyStatsRows = buildEnergyStatsRows(data);
-  const batteryStatsRows = buildBatteryStatsRows(data);
-  const gridStatsRows = buildGridStatsRows(data);
-  const systemStatsRows = buildSystemStatsRows(data);
-  
-  if (energyStatsRows.length > 0 || batteryStatsRows.length > 0) {
-    lines.push("Today's Energy");
-    const energyTables: string[][] = [];
-    
-    if (energyStatsRows.length > 0) {
-      energyTables.push(makeAsciiTable(["House", "kWh"], energyStatsRows));
-    }
-    
-    if (batteryStatsRows.length > 0) {
-      energyTables.push(makeAsciiTable(["Battery", "kWh"], batteryStatsRows));
-    }
-    
-    if (energyTables.length === 2) {
-      lines.push(...joinAsciiTables(energyTables[0], energyTables[1]));
-    } else if (energyTables.length === 1) {
-      lines.push(...energyTables[0]);
-    }
-    lines.push("");
-  }
-  
-  if (gridStatsRows.length > 0 || systemStatsRows.length > 0) {
-    const gridSystemTables: string[][] = [];
-    
-    if (gridStatsRows.length > 0) {
-      gridSystemTables.push(makeAsciiTable(["Grid", "kWh"], gridStatsRows));
-    }
-    
-    if (systemStatsRows.length > 0) {
-      gridSystemTables.push(makeAsciiTable(["System", ""], systemStatsRows));
-    }
-    
-    if (gridSystemTables.length === 2) {
-      lines.push(...joinAsciiTables(gridSystemTables[0], gridSystemTables[1]));
-    } else if (gridSystemTables.length === 1) {
-      lines.push(...gridSystemTables[0]);
-    }
-    lines.push("");
-  }
-  
-  if (monthlyYields.length > 0) {
-    lines.push(`Monthly Yield (Last ${monthlyYields.length} Months)`);
-    lines.push(
-      ...makeAsciiTable(
-        ["Month", "Avg Yield", "Total Yield", "Days"],
-        buildMonthlyYieldRows(monthlyYields, solarYieldTotalKwh(data)),
-      ),
-    );
-    lines.push("");
-  }
-  
+  pushSection(lines, "Daily", buildDailySectionLines(yields, energy));
+  pushSection(lines, "Monthly", buildMonthlySectionLines(data, monthlyYields, energy));
+  pushSection(lines, "Yearly", buildYearlySectionLines(yearlySummaries));
+
   const socByHour = normalizeSOCAvgReadings(data);
-  lines.push(`Hourly Data (Last ${POWER_HISTORY_HOURS} Hours)`);
-  lines.push(...renderHourlyTable(powerAvgReadings, socByHour));
+  pushSection(
+    lines,
+    `Hourly (last ${POWER_HISTORY_HOURS} hours)`,
+    renderHourlyTable(powerAvgReadings, socByHour),
+  );
+
+  // Drop the leading blank line from the first section heading.
+  while (lines.length > 0 && lines[0] === "") lines.shift();
   return lines;
 }
 
@@ -770,33 +1074,38 @@ export function buildSolarPanelLines(
   countdown?: { seconds: number; next: "weather"; paused?: boolean },
   maxLineWidth?: number,
   monthlyYields: SolarMonthlyYieldRow[] = [],
+  energy: EnergyDashboardData | null = null,
+  yearlySummaries: YearlySummaryRow[] = [],
 ): string[] {
   const title = countdown
     ? countdown.paused
       ? "=== Solar (Weather paused, n) ==="
       : `=== Solar (Weather in ${countdown.seconds}, n) ===`
     : "=== Solar ===";
-  return [title, "", ...buildSolarViewBody(data, maxLineWidth, monthlyYields)];
+  return [
+    title,
+    "",
+    ...buildSolarViewBody(data, maxLineWidth, monthlyYields, energy, yearlySummaries),
+  ];
 }
 
 export function buildSolarCliLines(
   data: SolarResponse,
   monthlyYields: SolarMonthlyYieldRow[] = [],
+  energy: EnergyDashboardData | null = null,
+  yearlySummaries: YearlySummaryRow[] = [],
 ): string[] {
   return [
-    "Solar",
+    "Power",
     `Source: ${SOLAR_API_URL}`,
     "",
-    ...buildSolarViewBody(data, process.stdout.columns, monthlyYields).map((line) => {
-      if (line === "Daily Yield (Last 4 Weeks)") return "Daily yield (last 4 weeks)";
-      if (line === `Monthly Yield (Last ${monthlyYields.length} Months)`) {
-        return `Monthly yield (last ${monthlyYields.length} months)`;
-      }
-      if (line.startsWith("Hourly Data")) {
-        return `Hourly data (last ${POWER_HISTORY_HOURS} hours)`;
-      }
-      return line;
-    }),
+    ...buildSolarViewBody(
+      data,
+      process.stdout.columns,
+      monthlyYields,
+      energy,
+      yearlySummaries,
+    ),
   ];
 }
 

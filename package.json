@@ -1,6 +1,6 @@
 {
   "name": "@emgeebee/phone_cli",
-  "version": "3.29.1",
+  "version": "3.30.0",
   "description": "mats useful cli scripts",
   "main": "dist/phone_cli.js",
   "bin": {
@@ -11,7 +11,7 @@
     "w": "./dist/w.js",
     "cric": "./dist/cric.js",
     "bday": "./dist/bday.js",
-    "octo": "./dist/octo.js",
+    "octo": "./dist/solar.js",
     "money": "./dist/money.js",
     "cmd": "./dist/cmd.js",
     "fuel": "./dist/fuel.js",
@@ -28,7 +28,7 @@
   "scripts": {
     "build": "pnpm run typecheck && pnpm run bundle",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts i.ts status.ts ball.ts cal.ts w.ts cric.ts bday.ts octo.ts money.ts cmd.ts fuel.ts r.ts temp.ts solar.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist",
+    "bundle": "rm -rf dist && mkdir -p dist && esbuild phone_cli.ts i.ts status.ts ball.ts cal.ts w.ts cric.ts bday.ts money.ts cmd.ts fuel.ts r.ts temp.ts solar.ts --bundle --platform=node --format=cjs --target=node20 --outdir=dist",
     "phone_cli": "pnpm build && node dist/phone_cli.js",
     "ball": "pnpm build && node dist/ball.js",
     "phone-cal": "pnpm build && node dist/cal.js",
@@ -36,7 +36,7 @@
     "w": "pnpm build && node dist/w.js",
     "cric": "pnpm build && node dist/cric.js",
     "bday": "pnpm build && node dist/bday.js",
-    "octo": "pnpm build && node dist/octo.js",
+    "octo": "pnpm build && node dist/solar.js",
     "money": "pnpm build && node dist/money.js",
     "cmd": "pnpm build && node dist/cmd.js",
     "fuel": "pnpm build && node dist/fuel.js",

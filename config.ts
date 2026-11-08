@@ -10,6 +10,8 @@ export type PhoneCliConfig = {
   /** Legacy local cache directory used only for one-time migration (see docs/remote-cache.md). */
   cacheDir?: string;
   octo?: CliConfig;
+  /** EDF Kraken credentials for electricity (Economy 7). Gas stays under `octo`. */
+  edf?: CliConfig;
   cric?: CliConfig;
   ball?: CliConfig;
   bday?: CliConfig;
