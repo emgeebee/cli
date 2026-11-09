@@ -902,10 +902,21 @@ function buildDailySectionLines(
   return lines;
 }
 
+/** Drop ⚡ kWh / Gas kWh columns (indices 4 and 5) for narrow terminals. */
+function withoutMonthlyEnergyKwhColumns(rows: string[][]): string[][] {
+  return rows.map((row) => [row[0], row[1], row[2], row[3], row[6]]);
+}
+
+function asciiTableFitsWidth(tableLines: string[], maxLineWidth?: number): boolean {
+  if (maxLineWidth == null) return true;
+  return tableLines.every((line) => visibleLength(line) <= maxLineWidth);
+}
+
 function buildMonthlySectionLines(
   data: SolarResponse,
   monthlyYields: SolarMonthlyYieldRow[],
   energy: EnergyDashboardData | null,
+  maxLineWidth?: number,
 ): string[] {
   const lines: string[] = [];
   if (monthlyYields.length > 0) {
@@ -925,14 +936,16 @@ function buildMonthlySectionLines(
       : Object.keys(energyMonthly);
     const energyRows = buildMonthlyEnergyRows(energyMonthly, energyMonthKeys);
     if (energyRows.length > 0) {
+      const fullHeaders = ["Month", "⚡", "Gas", "Total", "⚡ kWh", "Gas kWh", "Days"];
+      let table = makeAsciiTable(fullHeaders, energyRows);
+      if (!asciiTableFitsWidth(table, maxLineWidth)) {
+        table = makeAsciiTable(
+          ["Month", "⚡", "Gas", "Total", "Days"],
+          withoutMonthlyEnergyKwhColumns(energyRows),
+        );
+      }
       if (lines.length > 0) lines.push("");
-      lines.push(
-        `Energy (last ${ENERGY_MONTHLY_HISTORY_MONTHS} months)`,
-        ...makeAsciiTable(
-          ["Month", "⚡", "Gas", "Total", "⚡ kWh", "Gas kWh", "Days"],
-          energyRows,
-        ),
-      );
+      lines.push(`Energy (last ${ENERGY_MONTHLY_HISTORY_MONTHS} months)`, ...table);
     }
   }
   return lines;
@@ -980,7 +993,6 @@ function buildSolarViewBody(
   energy: EnergyDashboardData | null = null,
   yearlySummaries: YearlySummaryRow[] = [],
 ): string[] {
-  void maxLineWidth;
   const yields = normalizeDailyYield(data);
   const powerNow = normalizePowerNow(data);
   const powerAvgReadings = normalizePowerAvgReadings(data);
@@ -996,7 +1008,11 @@ function buildSolarViewBody(
     buildTodaySectionLines(data, powerNow, powerAvgReadings, yields),
   );
   pushSection(lines, "Daily", buildDailySectionLines(yields, energy));
-  pushSection(lines, "Monthly", buildMonthlySectionLines(data, monthlyYields, energy));
+  pushSection(
+    lines,
+    "Monthly",
+    buildMonthlySectionLines(data, monthlyYields, energy, maxLineWidth),
+  );
   pushSection(lines, "Yearly", buildYearlySectionLines(yearlySummaries));
 
   const socByHour = normalizeSOCAvgReadings(data);
