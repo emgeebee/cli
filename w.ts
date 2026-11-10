@@ -5,6 +5,7 @@ import {
   resolveDefaultLocation,
   sanitizeWeatherLocation,
 } from "./lib/bbcWeather";
+import { flushServiceCache } from "./lib/cache";
 import { buildFullWeatherLines, type WeatherResponse } from "./lib/wApi";
 
 function usage(): void {
@@ -50,11 +51,13 @@ async function main(): Promise<void> {
     for (const line of lines) {
       console.log(line);
     }
+    await flushServiceCache("weather");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);
     console.error("");
     usage();
+    await flushServiceCache("weather");
     process.exit(1);
   }
 }

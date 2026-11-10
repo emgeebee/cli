@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -11,6 +11,7 @@ const FLUSH_DEBOUNCE_MS = 500;
 export const SERVICE_DOC_IDS = {
   octo: "phone-cli-octo",
   solar: "phone-cli-solar",
+  weather: "phone-cli-weather",
 } as const;
 
 export type ServiceName = keyof typeof SERVICE_DOC_IDS;
@@ -27,14 +28,21 @@ export type SolarServiceCache = {
   monthlyYield?: Record<string, unknown>;
 };
 
+export type WeatherServiceCache = {
+  /** Longest/shortest daylight by location key (UK postcode/outcode). */
+  dayLengthExtremes?: Record<string, unknown>;
+};
+
 type ServiceCacheMap = {
   octo: OctoServiceCache;
   solar: SolarServiceCache;
+  weather: WeatherServiceCache;
 };
 
 const SERVICE_TITLES: Record<ServiceName, string> = {
   octo: "phone-cli octo cache",
   solar: "phone-cli solar cache",
+  weather: "phone-cli weather cache",
 };
 
 const memory: { [K in ServiceName]?: ServiceCacheMap[K] } = {};
@@ -72,6 +80,7 @@ export const cachePaths = {
   octoDailyTotals: () => join(getCacheDir(), "octo", "daily-totals.json"),
   octoYearlyAverages: () => join(getCacheDir(), "octo", "yearly-averages.json"),
   solarMonthlyYield: () => join(getCacheDir(), "solar", "monthly-yield.json"),
+  weatherDayLengthExtremes: () => join(getCacheDir(), "weather", "day-length-extremes.json"),
 } as const;
 
 function readLocalJsonFile<T>(path: string): T | undefined {
@@ -114,6 +123,10 @@ function hasSolarLocalData(data: SolarServiceCache): boolean {
   return Boolean(data.monthlyYield && Object.keys(data.monthlyYield).length > 0);
 }
 
+function hasWeatherLocalData(data: WeatherServiceCache): boolean {
+  return Boolean(data.dayLengthExtremes && Object.keys(data.dayLengthExtremes).length > 0);
+}
+
 function loadOctoFromLocalFiles(): OctoServiceCache {
   ensureOctoMonthlyAveragesMigrated();
   const legacy = migrateLegacyOctoCacheFromConfig(["gas", "electricity", "monthlyAverageCache"]);
@@ -153,18 +166,55 @@ function loadSolarFromLocalFiles(): SolarServiceCache {
   };
 }
 
+function migrateLegacyPerLocationDayLengthFiles(): Record<string, unknown> | undefined {
+  const weatherDir = join(getCacheDir(), "weather");
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(weatherDir);
+  } catch {
+    return undefined;
+  }
+
+  const migrated: Record<string, unknown> = {};
+  for (const name of entries) {
+    const match = /^day-length-(.+)\.json$/i.exec(name);
+    if (!match || name === "day-length-extremes.json") continue;
+    const locationKey = match[1].toUpperCase().replace(/-/g, "");
+    const raw = readLocalJsonFile<Record<string, unknown>>(join(weatherDir, name));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    migrated[locationKey] = raw;
+  }
+  return Object.keys(migrated).length > 0 ? migrated : undefined;
+}
+
+function loadWeatherFromLocalFiles(): WeatherServiceCache {
+  const existing = readLocalJsonFile<Record<string, unknown>>(
+    cachePaths.weatherDayLengthExtremes(),
+  );
+  const legacy = migrateLegacyPerLocationDayLengthFiles();
+  return {
+    dayLengthExtremes: mergeRecordFields(legacy, existing),
+  };
+}
+
 function loadServiceFromLocalFiles<S extends ServiceName>(service: S): ServiceCacheMap[S] {
   if (service === "octo") {
     return loadOctoFromLocalFiles() as ServiceCacheMap[S];
   }
-  return loadSolarFromLocalFiles() as ServiceCacheMap[S];
+  if (service === "solar") {
+    return loadSolarFromLocalFiles() as ServiceCacheMap[S];
+  }
+  return loadWeatherFromLocalFiles() as ServiceCacheMap[S];
 }
 
 function serviceHasData<S extends ServiceName>(service: S, data: ServiceCacheMap[S]): boolean {
   if (service === "octo") {
     return hasOctoLocalData(data as OctoServiceCache);
   }
-  return hasSolarLocalData(data as SolarServiceCache);
+  if (service === "solar") {
+    return hasSolarLocalData(data as SolarServiceCache);
+  }
+  return hasWeatherLocalData(data as WeatherServiceCache);
 }
 
 function mergeRecordFields(
@@ -219,6 +269,19 @@ function mergeSolarServiceCache(
   };
 }
 
+function mergeWeatherServiceCache(
+  remote: WeatherServiceCache | null | undefined,
+  local: WeatherServiceCache,
+): WeatherServiceCache {
+  const r = remote ?? {};
+  return {
+    dayLengthExtremes: mergeRecordFields(
+      local.dayLengthExtremes as Record<string, unknown> | undefined,
+      r.dayLengthExtremes as Record<string, unknown> | undefined,
+    ),
+  };
+}
+
 function mergeServiceCacheData<S extends ServiceName>(
   service: S,
   remote: ServiceCacheMap[S] | null | undefined,
@@ -230,9 +293,15 @@ function mergeServiceCacheData<S extends ServiceName>(
       local as OctoServiceCache,
     ) as ServiceCacheMap[S];
   }
-  return mergeSolarServiceCache(
-    remote as SolarServiceCache | null | undefined,
-    local as SolarServiceCache,
+  if (service === "solar") {
+    return mergeSolarServiceCache(
+      remote as SolarServiceCache | null | undefined,
+      local as SolarServiceCache,
+    ) as ServiceCacheMap[S];
+  }
+  return mergeWeatherServiceCache(
+    remote as WeatherServiceCache | null | undefined,
+    local as WeatherServiceCache,
   ) as ServiceCacheMap[S];
 }
 
@@ -278,6 +347,10 @@ export async function ensureOctoCacheLoaded(): Promise<void> {
 
 export async function ensureSolarCacheLoaded(): Promise<void> {
   await ensureServiceCacheLoaded("solar");
+}
+
+export async function ensureWeatherCacheLoaded(): Promise<void> {
+  await ensureServiceCacheLoaded("weather");
 }
 
 export function readServiceCache<S extends ServiceName>(service: S): ServiceCacheMap[S] {
@@ -335,6 +408,14 @@ function mirrorServiceCacheToLocalFiles<S extends ServiceName>(
     const solar = data as SolarServiceCache;
     if (solar.monthlyYield && Object.keys(solar.monthlyYield).length > 0) {
       writeLocalJsonFile(cachePaths.solarMonthlyYield(), solar.monthlyYield);
+    }
+    return;
+  }
+
+  if (service === "weather") {
+    const weather = data as WeatherServiceCache;
+    if (weather.dayLengthExtremes && Object.keys(weather.dayLengthExtremes).length > 0) {
+      writeLocalJsonFile(cachePaths.weatherDayLengthExtremes(), weather.dayLengthExtremes);
     }
     return;
   }

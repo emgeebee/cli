@@ -1,6 +1,20 @@
 import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
+import {
+  formatNextRainChanceDetailLines,
+  hourlyReportsFromWeather,
+  ukTodayYmd,
+  ukTomorrowYmd,
+} from "./bbcWeather";
+import {
+  formatDayLengthExtremeLines,
+  getDayLengthExtremesForLocation,
+} from "./dayLengthExtremes";
+import {
+  fetchSunshineDurationForecast,
+  formatSunshineOutlookLines,
+} from "./sunshineForecast";
 import { isNarrowStatusTerminal } from "./terminal";
 import { formatTemperatureText } from "./temperatureColours";
 
@@ -47,6 +61,11 @@ type CycleCalcsMoonResponse = {
       name?: string;
       emoji?: string;
     };
+    next_phases?: Array<{
+      name?: string;
+      instant?: string;
+      days_until?: number;
+    }>;
   };
 };
 
@@ -57,14 +76,22 @@ const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
 const ANSI_ORANGE = "\x1b[38;5;208m";
 const ANSI_RED = "\x1b[31m";
+const UK_TZ = "Europe/London";
 
 const HEAVY_RAIN_WORDING =
   /\b(heavy rain|heavy showers?|heavy downpour|torrential)\b/;
 const LIGHT_RAIN_WORDING = /\b(light rain showers?|light showers?|light rain|drizzle)\b/;
 
+type MoonNextPhase = {
+  name: string;
+  instant: string;
+  daysUntil: number;
+};
+
 type MoonPhaseInfo = {
   emoji: string;
   name: string;
+  nextPhases: MoonNextPhase[];
 };
 
 /** Shared cache so sync daily panels can reuse phases fetched by the full weather build. */
@@ -91,6 +118,47 @@ function formatMoonLabel(info: MoonPhaseInfo | null, style: "full" | "emoji" = "
   return info.emoji || info.name || "-";
 }
 
+function sentenceCaseLabel(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
+function formatUkDayMonth(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleDateString("en-GB", {
+    timeZone: UK_TZ,
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function parseMoonNextPhases(
+  raw: CycleCalcsMoonResponse["data"],
+): MoonNextPhase[] {
+  if (!Array.isArray(raw?.next_phases)) return [];
+  const phases: MoonNextPhase[] = [];
+  for (const entry of raw.next_phases) {
+    const name = entry?.name ? String(entry.name).trim() : "";
+    const instant = entry?.instant ? String(entry.instant).trim() : "";
+    const daysUntil = Number(entry?.days_until);
+    if (!name || !instant || !Number.isFinite(daysUntil) || daysUntil < 0) continue;
+    phases.push({ name, instant, daysUntil });
+  }
+  return phases;
+}
+
+function formatMoonNextPhaseLines(info: MoonPhaseInfo | null): string[] {
+  if (!info?.nextPhases.length) return [];
+  return info.nextPhases.map((phase) => {
+    const days = Math.round(phase.daysUntil);
+    const offset = days === 0 ? "today" : `in ${days}d`;
+    const label = sentenceCaseLabel(`Next ${phase.name}`);
+    return `${label} (${offset}): ${formatUkDayMonth(phase.instant)}`;
+  });
+}
+
 async function fetchMoonPhaseInfo(localDate?: string): Promise<MoonPhaseInfo | null> {
   if (!isYmdDate(localDate)) return null;
 
@@ -112,7 +180,11 @@ async function fetchMoonPhaseInfo(localDate?: string): Promise<MoonPhaseInfo | n
       const name = payload.data?.phase?.name ? String(payload.data.phase.name).trim() : "";
       const emoji = payload.data?.phase?.emoji ? String(payload.data.phase.emoji).trim() : "";
       if (!name && !emoji) return null;
-      const info = { emoji, name };
+      const info: MoonPhaseInfo = {
+        emoji,
+        name,
+        nextPhases: parseMoonNextPhases(payload.data),
+      };
       moonPhaseCache.set(localDate, info);
       return info;
     } catch {
@@ -260,14 +332,16 @@ function formatHourlyTemp(value?: number | null): string {
   return formatMaxTemp(value);
 }
 
-function formatHourlyCells(report: HourlyReport): string[] {
+function formatHourlyCells(report: HourlyReport, withDate = false): string[] {
   const time = report.timeslot || "??:??";
   const wx = formatWeatherDisplay(report.weatherTypeText, report.enhancedWeatherDescription);
   const temp = formatHourlyTemp(report.temperatureC);
   const rain = formatRain(report.precipitationProbabilityInPercent);
   const windSpeed = formatWindSpeed(report.windSpeedMph);
   const windDir = report.windDirectionAbbreviation || "?";
-  return [time, wx.icon, wx.description, temp, rain, `${windSpeed} ${windDir}`];
+  const cells = [time, wx.icon, wx.description, temp, rain, `${windSpeed} ${windDir}`];
+  if (!withDate) return cells;
+  return [formatDisplayDate(report.localDate), ...cells];
 }
 
 function parseClockMinutes(value?: string | null): number | null {
@@ -305,19 +379,27 @@ function formatPollen(report?: DailyReport): string {
 type ColWidthFns = Partial<Record<number, (value: string) => number>>;
 
 const FORECAST_WEATHER_DESCRIPTION_COL = 2;
+const COMBINED_HOURLY_WEATHER_DESCRIPTION_COL = 3;
 
-function withoutForecastWeatherColumn<T extends string | number>(values: T[]): T[] {
-  return values.filter((_, i) => i !== FORECAST_WEATHER_DESCRIPTION_COL);
+function withoutForecastWeatherColumn<T extends string | number>(
+  values: T[],
+  weatherCol = FORECAST_WEATHER_DESCRIPTION_COL,
+): T[] {
+  return values.filter((_, i) => i !== weatherCol);
 }
 
-function forecastColWidthFnsForTable(colWidthFns?: ColWidthFns, narrow?: boolean): ColWidthFns | undefined {
+function forecastColWidthFnsForTable(
+  colWidthFns: ColWidthFns | undefined,
+  weatherCol: number,
+  narrow?: boolean,
+): ColWidthFns | undefined {
   if (!narrow || !colWidthFns) return colWidthFns;
   const adjusted: ColWidthFns = {};
   for (const [key, fn] of Object.entries(colWidthFns)) {
     const idx = Number(key);
-    if (idx < FORECAST_WEATHER_DESCRIPTION_COL) {
+    if (idx < weatherCol) {
       adjusted[idx] = fn;
-    } else if (idx > FORECAST_WEATHER_DESCRIPTION_COL) {
+    } else if (idx > weatherCol) {
       adjusted[idx - 1] = fn;
     }
   }
@@ -330,12 +412,13 @@ function forecastTableForTerminal(
   widths: number[],
   colWidthFns?: ColWidthFns,
   narrow = isNarrowStatusTerminal(),
+  weatherCol = FORECAST_WEATHER_DESCRIPTION_COL,
 ): string[] {
   if (narrow) {
-    headers = withoutForecastWeatherColumn(headers);
-    rows = rows.map((row) => withoutForecastWeatherColumn(row));
-    widths = withoutForecastWeatherColumn(widths);
-    colWidthFns = forecastColWidthFnsForTable(colWidthFns, true);
+    headers = withoutForecastWeatherColumn(headers, weatherCol);
+    rows = rows.map((row) => withoutForecastWeatherColumn(row, weatherCol));
+    widths = withoutForecastWeatherColumn(widths, weatherCol);
+    colWidthFns = forecastColWidthFnsForTable(colWidthFns, weatherCol, true);
   }
   return makeAsciiTable(headers, rows, widths, colWidthFns);
 }
@@ -440,16 +523,15 @@ export async function buildFullWeatherLines(
 
   const todayDate = reports[0]?.localDate || "";
   const tomorrowDate = reports[1]?.localDate || "";
-  const rowsForDate = (date: string): string[][] => {
-    if (!date) return [];
-    return hourlyReports
-      .filter((r) => r.localDate === date)
-      .sort((a, b) => (a.timeslot || "").localeCompare(b.timeslot || ""))
-      .map((report) => formatHourlyCells(report));
-  };
-  const todayHourlyRows = rowsForDate(todayDate);
-  const tomorrowHourlyRows = rowsForDate(tomorrowDate);
-  const allHourlyRows = [...tomorrowHourlyRows, ...todayHourlyRows];
+  const nearTermDates = [todayDate, tomorrowDate].filter(Boolean);
+  const combinedHourlyRows = hourlyReports
+    .filter((r) => r.localDate && nearTermDates.includes(r.localDate))
+    .sort((a, b) => {
+      const dateCmp = (a.localDate || "").localeCompare(b.localDate || "");
+      if (dateCmp !== 0) return dateCmp;
+      return (a.timeslot || "").localeCompare(b.timeslot || "");
+    })
+    .map((report) => formatHourlyCells(report, true));
 
   const minTempColWidth = Math.max(
     visibleLength("Min"),
@@ -463,34 +545,37 @@ export async function buildFullWeatherLines(
     visibleLength("Temp"),
     minTempColWidth,
     maxTempColWidth,
-    ...allHourlyRows.map((r) => visibleLength(r[3] || "")),
+    ...combinedHourlyRows.map((r) => visibleLength(r[4] || "")),
   );
   const sharedWidths = {
-    dateOrTime: Math.max(
+    date: Math.max(
       visibleLength("Date"),
-      visibleLength("Time"),
       ...dayRows.map((r) => visibleLength(r[0] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[0] || "")),
+      ...combinedHourlyRows.map((r) => visibleLength(r[0] || "")),
+    ),
+    time: Math.max(
+      visibleLength("Time"),
+      ...combinedHourlyRows.map((r) => visibleLength(r[1] || "")),
     ),
     icon: Math.max(
       emojiTerminalDisplayWidth("Ic"),
       ...dayRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
-      ...allHourlyRows.map((r) => emojiTerminalDisplayWidth(r[1] || "")),
+      ...combinedHourlyRows.map((r) => emojiTerminalDisplayWidth(r[2] || "")),
     ),
     weather: Math.max(
       visibleLength("Weather"),
       ...dayRows.map((r) => visibleLength(r[2] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[2] || "")),
+      ...combinedHourlyRows.map((r) => visibleLength(r[3] || "")),
     ),
     rain: Math.max(
       visibleLength("Rain"),
       ...dayRows.map((r) => visibleLength(r[5] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[4] || "")),
+      ...combinedHourlyRows.map((r) => visibleLength(r[5] || "")),
     ),
     wind: Math.max(
       visibleLength("Wind"),
       ...dayRows.map((r) => visibleLength(r[6] || "")),
-      ...allHourlyRows.map((r) => visibleLength(r[5] || "")),
+      ...combinedHourlyRows.map((r) => visibleLength(r[6] || "")),
     ),
     moon: Math.max(
       emojiTerminalDisplayWidth("Moon"),
@@ -498,25 +583,35 @@ export async function buildFullWeatherLines(
     ),
   };
 
-  const hourlyHeaders = ["Time", "Ic", "Weather", "Temp", "Rain", "Wind"];
-  const hourlyWidths = [
-    sharedWidths.dateOrTime,
-    sharedWidths.icon,
-    sharedWidths.weather,
-    tempWidth,
-    sharedWidths.rain,
-    sharedWidths.wind,
-  ];
-
-  const appendHourlySection = (date: string, rows: string[][]): void => {
-    if (!date || rows.length === 0) return;
-    lines.push(`Hourly forecast for ${formatDisplayDate(date)}`);
-    lines.push(...forecastTableForTerminal(hourlyHeaders, rows, hourlyWidths, forecastColWidthFns));
-    lines.push("");
+  // Combined hourly table uses Date as col 0; weather-icon width helper stays on icon col.
+  const hourlyColWidthFns: ColWidthFns = {
+    2: emojiTerminalDisplayWidth,
   };
 
-  appendHourlySection(tomorrowDate, tomorrowHourlyRows);
-  appendHourlySection(todayDate, todayHourlyRows);
+  if (combinedHourlyRows.length > 0) {
+    const todayLabel = todayDate ? formatDisplayDate(todayDate) : "today";
+    const tomorrowLabel = tomorrowDate ? formatDisplayDate(tomorrowDate) : "tomorrow";
+    lines.push(`Hourly forecast (${todayLabel} + ${tomorrowLabel})`);
+    lines.push(
+      ...forecastTableForTerminal(
+        ["Date", "Time", "Ic", "Weather", "Temp", "Rain", "Wind"],
+        combinedHourlyRows,
+        [
+          sharedWidths.date,
+          sharedWidths.time,
+          sharedWidths.icon,
+          sharedWidths.weather,
+          tempWidth,
+          sharedWidths.rain,
+          sharedWidths.wind,
+        ],
+        hourlyColWidthFns,
+        isNarrowStatusTerminal(),
+        COMBINED_HOURLY_WEATHER_DESCRIPTION_COL,
+      ),
+    );
+    lines.push("");
+  }
 
   if (todayDate) {
     const todayReport = reports.find((r) => r.localDate === todayDate) || reports[0];
@@ -537,11 +632,27 @@ export async function buildFullWeatherLines(
       ),
     );
     lines.push("");
+
+    const dayLengthExtremes = await getDayLengthExtremesForLocation(
+      requestedPostcode,
+      todayDate,
+    );
+    const seasonLines = dayLengthExtremes
+      ? formatDayLengthExtremeLines(dayLengthExtremes, todayDate)
+      : [];
+    if (seasonLines.length > 0) {
+      lines.push("Solstices and equinoxes", "", ...seasonLines, "");
+    }
+
+    const moonLines = formatMoonNextPhaseLines(moonByDate.get(todayDate) ?? null);
+    if (moonLines.length > 0) {
+      lines.push("Moon phases", "", ...moonLines, "");
+    }
   }
 
   lines.push("Daily forecast");
   const dayWidths = [
-    sharedWidths.dateOrTime,
+    sharedWidths.date,
     sharedWidths.icon,
     sharedWidths.weather,
     tempWidth,
@@ -551,6 +662,27 @@ export async function buildFullWeatherLines(
     sharedWidths.moon,
   ];
   lines.push(...forecastTableForTerminal(dayHeaders, dayRows, dayWidths, forecastColWidthFns));
+
+  const outlookToday = todayDate || ukTodayYmd();
+  const outlookTomorrow = tomorrowDate || ukTomorrowYmd();
+  const rainChanceLines = formatNextRainChanceDetailLines(
+    hourlyReportsFromWeather(data),
+    new Date(),
+    outlookToday,
+    outlookTomorrow,
+  );
+  const sunshineDays = await fetchSunshineDurationForecast(requestedPostcode, 2);
+  const sunshineLines = formatSunshineOutlookLines(
+    sunshineDays,
+    outlookToday,
+    outlookTomorrow,
+  );
+  if (rainChanceLines.length > 0 || sunshineLines.length > 0) {
+    lines.push("", "Near-term outlook", "");
+    if (rainChanceLines.length > 0) lines.push(...rainChanceLines);
+    if (sunshineLines.length > 0) lines.push(...sunshineLines);
+  }
+
   return lines;
 }
 

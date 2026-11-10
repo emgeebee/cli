@@ -130,7 +130,7 @@ export function nextRainChance(
 
   for (const report of reports) {
     const percent = report.precipitationProbabilityInPercent;
-    if (percent == null || percent <= thresholdPercent) continue;
+    if (percent == null || percent < thresholdPercent) continue;
     const localDate = report.localDate;
     const timeslot = report.timeslot;
     if (!localDate || !timeslot) continue;
@@ -148,11 +148,18 @@ export function nextRainChance(
 }
 
 function formatRainChanceDayLabel(localDate: string, todayYmd: string, tomorrowYmd: string): string {
-  if (localDate === todayYmd) return "today";
-  if (localDate === tomorrowYmd) return "tomorrow";
   const date = new Date(`${localDate}T12:00:00Z`);
-  if (Number.isNaN(date.getTime())) return localDate;
-  return date.toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ });
+  const short = Number.isNaN(date.getTime())
+    ? localDate
+    : date.toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+        timeZone: UK_TZ,
+      });
+  if (localDate === todayYmd) return `today ${short}`;
+  if (localDate === tomorrowYmd) return `tomorrow ${short}`;
+  return short;
 }
 
 function formatRainChanceTime(timeslot: string): string {
@@ -172,11 +179,11 @@ function formatRainChancePart(
   todayYmd: string,
   tomorrowYmd: string,
 ): string {
-  if (!chance) return `>${thresholdPercent}% -`;
+  if (!chance) return `${thresholdPercent}%+ -`;
   const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
   const time = formatRainChanceTime(chance.timeslot);
   const rain = formatRainPercent(chance.percent);
-  return `>${thresholdPercent}% ${dayLabel} ${time} (${rain})`;
+  return `${thresholdPercent}%+ ${dayLabel} ${time} (${rain})`;
 }
 
 export function formatNextRainChancesLine(
@@ -198,9 +205,26 @@ export function formatNextRainChancesLine(
     tomorrowYmd,
   );
   if (part40.endsWith("-") && part70.endsWith("-")) {
-    return "next rain: -";
+    return "Next rain: -";
   }
-  return `next rain: ${part40} // ${part70}`;
+  return `Next rain: ${part40} // ${part70}`;
+}
+
+/** Sentence-case lines for the weather CLI footer. */
+export function formatNextRainChanceDetailLines(
+  reports: BbcWeatherHourlyReport[],
+  now: Date,
+  todayYmd: string,
+  tomorrowYmd: string,
+): string[] {
+  return [40, 70].map((threshold) => {
+    const chance = nextRainChance(reports, threshold, now);
+    if (!chance) return `Next ${threshold}%+ chance of rain: -`;
+    const dayLabel = formatRainChanceDayLabel(chance.localDate, todayYmd, tomorrowYmd);
+    const time = formatRainChanceTime(chance.timeslot);
+    const rain = formatRainPercent(chance.percent);
+    return `Next ${threshold}%+ chance of rain (${dayLabel} ${time}): ${rain}`;
+  });
 }
 
 export function dailyReportsFromWeather(data: BbcWeatherResponse): BbcWeatherDailyReport[] {
